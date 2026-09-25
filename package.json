@@ -1,0 +1,20 @@
+{
+  "name": "rabbit-pets",
+  "private": true,
+  "description": "Rabbit Pets: a cozy real-time virtual pet for OddsRabbit.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:watch": "node build.mjs --watch",
+    "test": "node test.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

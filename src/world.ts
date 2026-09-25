@@ -1,0 +1,116 @@
+// Things that come from who she is and what day it is, not from what the
+// player did: her personality, the season, the day's weather, limited-time
+// events. All pure and deterministic, so everyone sees the same weather on
+// the same day and a rabbit's personality never changes.
+
+import { localParts } from './localtime';
+import { roll } from './rng';
+
+// ---------------------------------------------------------------- personality
+
+export type Trait = 'shy' | 'greedy' | 'playful';
+export const TRAITS: Trait[] = ['shy', 'greedy', 'playful'];
+
+/** Fixed for life by her id. */
+export function traitOf(petId: string): Trait {
+  return TRAITS[Math.floor(roll(petId, 0, 'trait') * TRAITS.length)] ?? 'playful';
+}
+
+export const TRAIT_INFO: Record<Trait, { name: string; blurb: string }> = {
+  shy: { name: 'Shy', blurb: 'Takes a while to warm up. Petting means more to her as your bond grows.' },
+  greedy: { name: 'Greedy', blurb: 'Always a little hungry, and loves her food more often.' },
+  playful: { name: 'Playful', blurb: 'Gets bored quickly, and adores being petted and played with.' },
+};
+
+/** How her personality bends the numbers. 1 = no change. */
+export const TRAIT_MODS: Record<Trait, { hungerDecay: number; happyDecay: number; petBonus: number; lovesBonus: number }> = {
+  shy: { hungerDecay: 1, happyDecay: 1, petBonus: -3, lovesBonus: 0 },
+  greedy: { hungerDecay: 1.25, happyDecay: 1, petBonus: 0, lovesBonus: 0.1 },
+  playful: { hungerDecay: 1, happyDecay: 1.25, petBonus: 4, lovesBonus: 0 },
+};
+/** A shy rabbit's petting penalty goes away at this bond level. */
+export const SHY_WARM_BOND = 3;
+
+// ---------------------------------------------------------------- seasons
+
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+
+/** Meteorological seasons, northern hemisphere. */
+export function seasonOf(ms: number, tz: string): Season {
+  const m = localParts(ms, tz).month;
+  if (m >= 3 && m <= 5) return 'spring';
+  if (m >= 6 && m <= 8) return 'summer';
+  if (m >= 9 && m <= 11) return 'autumn';
+  return 'winter';
+}
+
+// ---------------------------------------------------------------- weather
+
+export type Weather = 'sunny' | 'cloudy' | 'rain' | 'snow' | 'leaves';
+
+/**
+ * The day's weather, the same for everyone: rolled from the date alone.
+ * Snow only in winter, falling leaves only in autumn.
+ */
+export function weatherOf(dayKey: string, season: Season): Weather {
+  const r = roll('weather', dayNumber(dayKey));
+  const table: [Weather, number][] =
+    season === 'winter' ? [['snow', 0.35], ['cloudy', 0.3], ['sunny', 0.35]]
+      : season === 'autumn' ? [['leaves', 0.3], ['rain', 0.25], ['cloudy', 0.2], ['sunny', 0.25]]
+        : season === 'spring' ? [['rain', 0.3], ['cloudy', 0.2], ['sunny', 0.5]]
+          : [['sunny', 0.65], ['cloudy', 0.2], ['rain', 0.15]];
+  let acc = 0;
+  for (const [w, p] of table) { acc += p; if (r < acc) return w; }
+  return 'sunny';
+}
+
+export const WEATHER_NAME: Record<Weather, string> = {
+  sunny: 'Sunny', cloudy: 'Cloudy', rain: 'Rainy', snow: 'Snowy', leaves: 'Blustery',
+};
+
+function dayNumber(isoDate: string): number {
+  return Math.floor(Date.parse(isoDate + 'T00:00:00Z') / 86_400_000);
+}
+
+// ---------------------------------------------------------------- events
+
+export interface SeasonalEvent {
+  id: string;
+  name: string;
+  /** Inclusive month/day window, local time; may wrap the new year. */
+  from: [number, number];
+  to: [number, number];
+  blurb: string;
+  /** Limited decor sold during the event. */
+  decor: string[];
+  /** Limited outfits sold during the event. */
+  outfits: string[];
+  /** A free outfit handed out once per event, if any. */
+  gift?: string;
+}
+
+export const EVENTS: SeasonalEvent[] = [
+  { id: 'harvest', name: 'Harvest moon', from: [9, 15], to: [10, 15], blurb: 'Pumpkins are in! A harvest pumpkin is in the shop for a limited time.', decor: ['pumpkin'], outfits: [] },
+  { id: 'spooky', name: 'Spooky week', from: [10, 24], to: [10, 31], blurb: 'A friendly jack-o-lantern, and a little witch hat.', decor: ['jackolantern'], outfits: ['witchhat'] },
+  { id: 'winterfest', name: 'Winterfest', from: [12, 10], to: [1, 5], blurb: 'A snow globe for the burrow, and a cozy scarf, on the house.', decor: ['snowglobe'], outfits: [], gift: 'redscarf' },
+  { id: 'bloom', name: 'Spring bloom', from: [4, 1], to: [4, 30], blurb: 'Flower crowns are in season.', decor: [], outfits: ['flowercrown'] },
+];
+
+function inWindow(month: number, day: number, from: [number, number], to: [number, number]): boolean {
+  const v = month * 100 + day;
+  const a = from[0] * 100 + from[1];
+  const b = to[0] * 100 + to[1];
+  return a <= b ? v >= a && v <= b : v >= a || v <= b;
+}
+
+export function activeEvents(ms: number, tz: string): SeasonalEvent[] {
+  const p = localParts(ms, tz);
+  return EVENTS.filter((e) => inWindow(p.month, p.day, e.from, e.to));
+}
+
+/** A limited item is for sale only while one of its events is running. */
+export function limitedAvailable(itemId: string, ms: number, tz: string): boolean {
+  const owner = EVENTS.filter((e) => e.decor.includes(itemId) || e.outfits.includes(itemId));
+  if (!owner.length) return true;
+  return activeEvents(ms, tz).some((e) => owner.includes(e));
+}

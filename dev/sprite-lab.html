@@ -1,0 +1,513 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rabbit Sprite Lab</title>
+<style>
+:root{--bg:#1d1a22;--panel:#2a2631;--ink:#eee8f2;--dim:#9a92a6;--line:#3b3645;--accent:#f3a6b3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,sans-serif;display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+aside{background:var(--panel);padding:14px;overflow:auto;max-height:100vh;border-right:1px solid var(--line)}
+main{padding:20px;display:flex;flex-direction:column;gap:20px;align-items:flex-start}
+h1{font-size:15px;margin:0 0 10px}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:16px 0 6px}
+label{display:grid;grid-template-columns:110px 1fr 44px;gap:6px;align-items:center;margin:3px 0}
+label span:last-child{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+select,button{background:#3a3543;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sw{display:grid;grid-template-columns:60px repeat(5,1fr);gap:4px;align-items:center;margin:3px 0}
+.sw input{width:100%;height:22px;padding:0;border:1px solid var(--line);background:none}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges}
+.stage{background:repeating-conic-gradient(#2b2732 0 25%,#241f2a 0 50%) 0 0/16px 16px;border:1px solid var(--line);border-radius:8px;padding:12px;position:relative}
+.grid-on .stage{background-image:none}
+.faces{display:flex;gap:10px;flex-wrap:wrap}
+.faces figure{margin:0;text-align:center;color:var(--dim);font-size:11px}
+.faces .stage{padding:6px}
+pre{background:#15131a;border:1px solid var(--line);border-radius:8px;padding:10px;max-width:760px;overflow:auto;font-size:12px}
+#hover{color:var(--dim);font-variant-numeric:tabular-nums;min-height:1.4em}
+</style></head><body>
+<aside>
+  <h1>Rabbit sprite lab</h1>
+  <div style="color:var(--dim)">A copy of <code>src/art/rabbit.ts</code> with its constants on sliders. Tweak, then “Copy as TS” and paste back.</div>
+
+  <h2>Pose</h2>
+  <div class="row">
+    <select id="coat"></select>
+    <select id="face"><option>content</option><option>happy</option><option>eating</option><option>grumpy</option><option>asleep</option></select>
+    <select id="frame"><option value="0">rest</option><option value="1">breathe</option><option value="2">blink</option></select>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <select id="head"><option value="">no hat</option></select>
+    <select id="neck"><option value="">no neck</option></select>
+    <select id="marking"><option value="">no marking</option><option>freckles</option><option>heart</option><option>tuft</option></select>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label style="display:flex;gap:4px;margin:0"><input type="checkbox" id="animate"> animate</label>
+    <label style="display:flex;gap:4px;margin:0"><input type="checkbox" id="grid"> pixel grid</label>
+    <label style="display:flex;gap:4px;margin:0"><input type="checkbox" id="outline" checked> outline</label>
+  </div>
+
+  <h2>Look (adoption choices)</h2>
+  <div class="row">
+    <select id="ears"></select>
+  </div>
+  <div id="lookhint" style="color:var(--dim);margin-top:4px"></div>
+
+  <h2>Shape</h2>
+  <div id="knobs"></div>
+
+  <h2>Coat palette</h2>
+  <div class="sw" style="color:var(--dim);font-size:11px"><span></span><span>base</span><span>shade</span><span>light</span><span>line</span><span>ring</span></div>
+  <div class="sw" id="pal"></div>
+  <h2>Shared colours</h2>
+  <div id="shared"></div>
+
+  <h2>Output</h2>
+  <div class="row">
+    <button id="copy">Copy as TS</button>
+    <button id="png">PNG 1×</button>
+    <button id="png8">PNG 8×</button>
+    <button id="reset">Reset</button>
+  </div>
+</aside>
+<main>
+  <div class="row" style="align-items:flex-end;gap:16px">
+    <div class="stage"><canvas id="big" width="40" height="40" style="width:400px;height:400px"></canvas></div>
+    <div class="stage"><canvas id="x4" width="40" height="40" style="width:160px;height:160px"></canvas></div>
+    <div class="stage"><canvas id="x1" width="40" height="40"></canvas></div>
+  </div>
+  <div id="hover"></div>
+  <div class="faces" id="faces"></div>
+  <div class="faces" id="coats"></div>
+  <div class="faces" id="looks"></div>
+  <pre id="ts"></pre>
+</main>
+<script>
+// ------------------------------------------------------------ defaults (from rabbit.ts)
+const DEFAULTS = {
+  K: 1.35, headW: 7.2, headH: 6.4, bodyW: 6.2, bodyH: 5.0, earLen: 5.3, earW: 1.9,
+  EYE_W: 3, EYE_H: 4, eyeGap: 3.3, eyeY: -0.2,
+  splay: 0.3, splayGrumpy: 0.55, splayAsleep: 1.25,
+  earBase: 0.42, earInner: 0.45, neck: 0.85, headLift: 0.55,
+  footW: 0.32, footH: 1.9, footSpread: 0.45,
+  bellyW: 0.55, bellyH: 0.62, muzzleW: 0.42, muzzleH: 0.32,
+  lop: 0, lopSpread: 0.7, lopOut: 0.35, lopDrop: 0.95,
+};
+// Adoption looks: each option overrides a few of the values above. With an
+// option other than the first selected, the sliders in its group edit it.
+const DEF_LOOKS = {
+  ears: {
+    short: {},
+    long: { earLen: 7.0 },
+    lop: { lop: 1, earLen: 5.2, earW: 2.0, lopSpread: 0.86, lopOut: 0.3, lopDrop: 0.9 },
+  },
+};
+const GROUP_KEYS = {
+  ears: ['earLen', 'earW', 'earBase', 'earInner', 'splay', 'splayGrumpy', 'splayAsleep', 'lopSpread', 'lopOut', 'lopDrop'],
+};
+const KNOBS = [
+  ['K', 'scale K', 0.8, 1.6, 0.01],
+  ['headW', 'head w', 4, 10, 0.1], ['headH', 'head h', 4, 10, 0.1],
+  ['bodyW', 'body w', 3, 9, 0.1], ['bodyH', 'body h', 3, 8, 0.1],
+  ['earLen', 'ear length', 3, 11, 0.1], ['earW', 'ear width', 1, 3.5, 0.05],
+  ['earBase', 'ear spacing', 0.1, 0.8, 0.01], ['earInner', 'inner ear', 0.2, 0.8, 0.01],
+  ['splay', 'ear splay', -0.3, 1.2, 0.01], ['splayGrumpy', 'splay grumpy', -0.3, 1.5, 0.01], ['splayAsleep', 'splay asleep', 0.5, 2, 0.01],
+  ['neck', 'neck overlap', 0, 1, 0.01], ['headLift', 'head lift', 0, 1, 0.01],
+  ['EYE_W', 'eye w', 1, 5, 1], ['EYE_H', 'eye h', 1, 6, 1], ['eyeGap', 'eye gap', 1.5, 5, 0.05], ['eyeY', 'eye y', -3, 3, 0.1],
+  ['footW', 'foot w', 0.15, 0.5, 0.01], ['footH', 'foot h', 1, 3, 0.05], ['footSpread', 'foot spread', 0.2, 0.7, 0.01],
+  ['bellyW', 'belly w', 0, 1, 0.01], ['bellyH', 'belly h', 0, 1, 0.01],
+  ['muzzleW', 'muzzle w', 0, 1, 0.01], ['muzzleH', 'muzzle h', 0, 1, 0.01],
+  ['lopSpread', 'lop spacing', 0.3, 1, 0.01], ['lopOut', 'lop outward', -0.2, 0.8, 0.01], ['lopDrop', 'lop drop', 0.4, 1.3, 0.01],
+];
+const DEF_PALETTES = {
+  snow: { base: 'F3EFE8', shade: 'D6CDC1', light: 'FFFFFF', line: '5A4746' },
+  cream: { base: 'F0D6AE', shade: 'D6B485', light: 'FAEAD0', line: '6A4834' },
+  cocoa: { base: '9C6C4E', shade: '7B5038', light: 'D1AE8E', line: '3D281E', ring: 'C49A7A' },
+  silver: { base: 'A9ABB6', shade: '868997', light: 'DADBE1', line: '3B3D48' },
+  midnight: { base: '48444F', shade: '36333D', light: '8D8898', line: '1C1A21', ring: '8D8898' },
+  ginger: { base: 'E2945C', shade: 'C17341', light: 'F6CDA5', line: '69381D' },
+};
+const DEF_SHARED = { pink: 'F3A6B3', pinkd: 'DE8697', eye: '2A2130', glint: 'FFFFFF', nose: 'E4768D', blush: 'F8B4BF' };
+
+let P, PALETTES, SHARED, LOOKS;
+// Saved tweaks survive edits to the defaults above: sliders are stored as
+// changes from DEFAULTS, and looks and colours are kept only while their
+// defaults are the same as when they were saved.
+const STAMP = { looks: JSON.stringify(DEF_LOOKS), palettes: JSON.stringify([DEF_PALETTES, DEF_SHARED]) };
+function reset() {
+  P = { ...DEFAULTS }; PALETTES = structuredClone(DEF_PALETTES); SHARED = { ...DEF_SHARED }; LOOKS = structuredClone(DEF_LOOKS);
+  try {
+    const s = JSON.parse(localStorage.getItem('rabbit-lab') || 'null');
+    if (s?.v !== 2) return;
+    Object.assign(P, s.changed);
+    if (s.stamp?.looks === STAMP.looks) LOOKS = s.LOOKS;
+    if (s.stamp?.palettes === STAMP.palettes) { PALETTES = s.PALETTES; SHARED = s.SHARED; }
+  } catch {}
+}
+function save() {
+  const changed = Object.fromEntries(Object.entries(P).filter(([k, v]) => DEFAULTS[k] !== v));
+  try { localStorage.setItem('rabbit-lab', JSON.stringify({ v: 2, stamp: STAMP, changed, LOOKS, PALETTES, SHARED })); } catch {}
+}
+/** Base values with the chosen look's overrides on top. */
+const effective = (look) => ({ ...P, ...LOOKS.ears[look?.ears ?? 'short'] });
+reset();
+
+// ------------------------------------------------------------ pixels
+const hex = (s) => { const h = s.replace('#', ''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16), 255]; };
+const blank = (w, h) => ({ w, h, px: Array.from({ length: h }, () => Array.from({ length: w }, () => [0, 0, 0, 0])) });
+const inEllipse = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+function inCapsule(x, y, ax, ay, bx, by, r) {
+  const dx = bx - ax, dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+  const px = ax + t * dx, py = ay + t * dy;
+  return (x - px) ** 2 + (y - py) ** 2 <= r * r;
+}
+
+// ------------------------------------------------------------ drawRabbit (port)
+const W = 40, H = 40, GROUND = 38;
+function drawRabbit(coat, face, frame = 0, dress, opts = {}) {
+  const P = effective(opts.look);
+  const lop = !!P.lop && face !== 'asleep';
+  const K = P.K, EYE_W = P.EYE_W, EYE_H = P.EYE_H;
+  const c = PALETTES[coat];
+  const pal = {
+    base: hex(c.base), shade: hex(c.shade), light: hex(c.light), line: hex(c.line), ring: c.ring ? hex(c.ring) : null,
+    pink: hex(SHARED.pink), pinkd: hex(SHARED.pinkd), eye: hex(SHARED.eye), glint: hex(SHARED.glint), nose: hex(SHARED.nose), blush: hex(SHARED.blush),
+  };
+  const asleep = face === 'asleep';
+  const cx = 19.5;
+  let bw = P.bodyW * K, bh = P.bodyH * K;
+  if (asleep) { bw *= 1.2; bh *= 0.72; }
+  const bodyCy = GROUND - bh;
+  const hw = P.headW * K, hh = P.headH * K;
+  const bob = frame === 1 ? 1 : 0;
+  const headCy = asleep ? bodyCy - bh * 0.35 + bob * 0.5 : bodyCy - bh * P.neck - hh * P.headLift + bob;
+
+  const L = P.earLen * K, ew = P.earW * K;
+  const splay = asleep ? P.splayAsleep : face === 'grumpy' ? P.splayGrumpy : P.splay;
+  const ears = [];
+  for (const side of [-1, 1]) {
+    let ax = cx + side * hw * P.earBase, ay = headCy - hh * 0.55, bx, by;
+    if (asleep) { ax = cx + side * hw * 0.45; ay = headCy - hh * 0.75; bx = ax + side * L * 0.72; by = ay + L * 0.5; }
+    else if (lop) {
+      // hanging down the sides of her face, drawn over the head
+      ax = cx + side * hw * P.lopSpread; ay = headCy - hh * 0.7;
+      bx = ax + side * L * P.lopOut; by = ay + L * P.lopDrop;
+    }
+    else { const ang = side * splay; bx = ax + Math.sin(ang) * L; by = ay - Math.cos(ang) * L; }
+    ears.push([ax, ay, bx, by]);
+  }
+
+  const region = Array.from({ length: H }, () => Array(W).fill(null));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const X = x + 0.5, Y = y + 0.5;
+    let r = null;
+    if (inEllipse(X, Y, cx, bodyCy + bob * 0.5, bw, bh - bob * 0.5)) r = 'body';
+    for (const [ax, ay, bx, by] of ears) if (inCapsule(X, Y, ax, ay, bx, by, ew)) r = 'ear';
+    if (inEllipse(X, Y, cx, headCy, hw, hh)) r = 'head';
+    for (const side of [-1, 1]) if (inEllipse(X, Y, cx + side * bw * P.footSpread, GROUND - 1.2, bw * P.footW, P.footH)) r = 'foot';
+    if (lop) for (const [ax, ay, bx, by] of ears) if (inCapsule(X, Y, ax, ay, bx, by, ew)) r = 'ear';
+    region[y][x] = r;
+  }
+  // a lop's ears hang with the pink side against her head, so none shows
+  if (!lop) for (const [ax, ay, bx, by] of ears) {
+    const mx = ax + (bx - ax) * 0.15, my = ay + (by - ay) * 0.15;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+      if (region[y][x] === 'ear' && inCapsule(x + 0.5, y + 0.5, mx, my, bx, by, ew * P.earInner)) region[y][x] = 'inner';
+  }
+
+  const g = blank(W, H);
+  const filled = (x, y) => x >= 0 && y >= 0 && x < W && y < H && region[y][x] !== null;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const r = region[y][x];
+    if (!r) continue;
+    let col = r === 'inner' ? pal.pink : pal.base;
+    if (r === 'body' && inEllipse(x + 0.5, y + 0.5, cx, bodyCy + bh * 0.25, bw * P.bellyW, bh * P.bellyH)) col = pal.light;
+    if (r === 'head' && inEllipse(x + 0.5, y + 0.5, cx, headCy + hh * 0.45, hw * P.muzzleW, hh * P.muzzleH)) col = pal.light;
+    if (r !== 'inner' && (!filled(x + 1, y) || !filled(x, y + 1)) && x > cx) col = pal.shade;
+    if (r === 'body' && y > 0 && region[y - 1][x] === 'head') col = pal.shade;
+    if (r === 'foot' && !filled(x, y + 1)) col = pal.shade;
+    if (r === 'inner' && (!filled(x + 1, y) || region[y][x + 1] !== 'inner') && x > cx) col = pal.pinkd;
+    g.px[y][x] = col;
+  }
+  if (opts.outline !== false) {
+    const out = g.px.map((row) => row.slice());
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (region[y][x] === null && (filled(x + 1, y) || filled(x - 1, y) || filled(x, y + 1) || filled(x, y - 1))) out[y][x] = pal.line;
+      if (region[y][x] === 'body' || (lop && region[y][x] === 'head')) {
+        const nearEar = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+          const r = filled(x + dx, y + dy) ? region[y + dy][x + dx] : null;
+          return r === 'ear' || r === 'inner';
+        });
+        if (nearEar) out[y][x] = pal.line;
+      }
+      if (region[y][x] === 'foot' && y > 0 && region[y - 1][x] === 'body') out[y - 1][x] = pal.line;
+    }
+    g.px = out;
+  }
+
+  const put = (x, y, col) => { if (x >= 0 && y >= 0 && x < W && y < H) g.px[y][x] = col; };
+  const ey = Math.round(headCy + P.eyeY);
+  const gap = P.eyeGap * (hw / 8.6) * 1.05;
+  const exs = [Math.round(cx - gap - 0.5) - (EYE_W - 2), Math.round(cx + gap - 0.5)];
+  const blink = frame === 2;
+  exs.forEach((ex, i) => {
+    if (asleep || blink) {
+      for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey + 1, pal.eye);
+    } else if (face === 'happy') {
+      put(ex - 1, ey + 1, pal.eye); put(ex, ey, pal.eye); put(ex + 1, ey, pal.eye); put(ex + 2, ey + 1, pal.eye);
+    } else if (face === 'grumpy') {
+      for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey, pal.line);
+      for (let d = 0; d < EYE_W; d++) put(ex + d, ey + 1, pal.eye);
+    } else {
+      if (pal.ring) {
+        for (let dy = -2; dy < EYE_H; dy++) { put(ex - 1, ey + dy, pal.ring); put(ex + EYE_W, ey + dy, pal.ring); }
+        for (let dx = 0; dx < EYE_W; dx++) put(ex + dx, ey - 2, pal.ring);
+      }
+      for (let dy = 0; dy < EYE_H; dy++) for (let dx = 0; dx < EYE_W; dx++) put(ex + dx, ey - 1 + dy, pal.eye);
+      put(ex, ey - 1, pal.glint);
+      put(ex + 1, ey, pal.glint);
+      put(ex + EYE_W - 1, ey + EYE_H - 3, pal.glint);
+    }
+    const cheek = ex + (i === 0 ? -1 : EYE_W);
+    if (face === 'happy' || face === 'content' || face === 'eating') {
+      put(cheek, ey + 2, pal.blush);
+      if (face === 'happy') put(cheek, ey + 3, pal.blush);
+    }
+  });
+  const nx = Math.floor(cx - 0.5), ny = ey + 2;
+  put(nx, ny, pal.nose); put(nx + 1, ny, pal.nose);
+  if (face === 'eating') {
+    put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line); put(nx, ny + 2, pal.pinkd); put(nx + 1, ny + 2, pal.pinkd);
+  } else if (face === 'grumpy') {
+    put(nx - 1, ny + 2, pal.line); put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line); put(nx + 2, ny + 2, pal.line);
+  } else if (!asleep) {
+    put(nx - 1, ny + 1, pal.line); put(nx + 2, ny + 1, pal.line);
+  }
+  if (dress) {
+    const top = Math.round(headCy - hh), chin = Math.round(headCy + hh);
+    drawMarking(g, dress.marking, { cx, ey, exs, top, chin, asleep, pal });
+    drawOutfit(g, dress.neck, { cx, top, chin, hw, asleep });
+    drawOutfit(g, dress.head, { cx, top, chin, hw, asleep });
+  }
+  return g;
+}
+
+// ------------------------------------------------------------ dress-up (port)
+const DRESS_C = { k: '3B2922', r: 'E4566F', R: 'B03550', y: 'F6D24A', Y: 'D5A12A', w: 'FFFFFF', p: 'F3A6B3', g: '86C95E', G: '4E8C3A', b: '8FC3E8', B: '4677AC', v: '6E55A8', V: '4A3878', o: 'F08A3C', n: 'A0785A' };
+function stamp(g, rows, x, y, extra = {}) {
+  const w = Math.max(...rows.map((r) => r.length));
+  const x0 = Math.round(x - w / 2), y0 = y - rows.length + 1;
+  rows.forEach((row, yy) => { for (let xx = 0; xx < row.length; xx++) {
+    const ch = row[xx]; if (ch === '.') continue;
+    const col = extra[ch] ?? (DRESS_C[ch] ? hex(DRESS_C[ch]) : null);
+    const X = x0 + xx, Y = y0 + yy;
+    if (col && X >= 0 && Y >= 0 && X < g.w && Y < g.h) g.px[Y][X] = col;
+  } });
+}
+const OUTFIT_ART = {
+  bow: { at: 'ear', slot: 'head', rows: ['kk.kk', 'krkrk', 'krRrk', 'krkrk', 'kk.kk'] },
+  beanie: { at: 'top', slot: 'head', rows: ['......kkk......', '.....kwwwk.....', '...kkkkkkkkk...', '..kbbbbbbbbbk..', '.kbbbbbbbbbbbk.', 'kbBbBbBbBbBbBbk', 'kBBBBBBBBBBBBBk', 'kkkkkkkkkkkkkkk'] },
+  flowercrown: { at: 'top', slot: 'head', rows: ['.kpk...kyk...kpk.', 'kpypkGkyrykGkpypk', 'gkpkgGgkykgGgkpkg', '.GgGgGgGgGgGgGgG.'] },
+  witchhat: { at: 'top', slot: 'head', rows: ['.....kk......', '....kvVk.....', '....kvVk.....', '...kvvVVk....', '...kyyyyk....', '..kvvvvVVk...', 'kkkkkkkkkkkkk', 'kvvvvvvvvvVVk', '.kkkkkkkkkkk.'] },
+  bandana: { at: 'chin', slot: 'neck', rows: ['kkkkkkkkkkkk', 'krrwrrrrwrrk', '.krrrwrrrrk.', '..krrrrwrk..', '...krrrRk...', '....kRRk....', '.....kk.....'] },
+  bell: { at: 'chin', slot: 'neck', rows: ['krrrrrrrrrrk', 'kkkkkkkkkkkk', '.....kk.....', '....kyYk....', '....kyYk....', '.....kk.....'] },
+  redscarf: { at: 'chin', slot: 'neck', rows: ['kkkkkkkkkkkkk', 'krrwrrwrrwrrk', 'kRRRRRRRRRkRk', '.kkkkkkkkkkrk', '..........krk', '..........kRk', '..........kkk'] },
+};
+function drawOutfit(g, id, a) {
+  const art = id ? OUTFIT_ART[id] : undefined; if (!art) return;
+  const n = art.rows.length;
+  if (art.at === 'top') stamp(g, art.rows, a.cx, a.top + Math.min(3, n - 2));
+  else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5, a.top + 2);
+  else if (!a.asleep) stamp(g, art.rows, a.cx, a.chin + n - 2);
+}
+function drawMarking(g, id, a) {
+  const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < g.w && y < g.h) g.px[y][x] = c; };
+  if (id === 'freckles') {
+    const b = a.pal.base; const dot = b[0] + b[1] + b[2] > 480 ? hex('B0735A') : hex('E6C2A2');
+    for (const [i, ex] of a.exs.entries()) {
+      const x = i === 0 ? ex - 1 : ex + 2;
+      set(x, a.ey + 4, dot); set(x + (i === 0 ? 2 : -2), a.ey + 4, dot); set(x + (i === 0 ? 1 : -1), a.ey + 5, dot);
+    }
+  } else if (id === 'heart' && !a.asleep) stamp(g, ['.p.p.', 'ppppp', '.ppp.', '..p..'], a.cx, a.chin + 5, { p: hex('F08AA0') });
+  else if (id === 'tuft') stamp(g, ['.L.L.', 'LbLbL', 'LbbbL'], a.cx, a.top, { L: a.pal.line, b: a.pal.base });
+}
+
+// ------------------------------------------------------------ UI
+const $ = (id) => document.getElementById(id);
+const toHex = (s) => '#' + s;
+function paint(canvas, g) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(g.w, g.h);
+  for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) { const p = g.px[y][x], i = (y * g.w + x) * 4; img.data.set(p, i); }
+  ctx.putImageData(img, 0, 0);
+}
+function gridOverlay(canvas) {
+  // redraw the big canvas at 10x with lines so the grid is visible
+  const src = document.createElement('canvas'); src.width = 40; src.height = 40;
+  src.getContext('2d').drawImage(canvas, 0, 0);
+  canvas.width = 400; canvas.height = 400;
+  const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(src, 0, 0, 400, 400);
+  ctx.strokeStyle = 'rgba(255,255,255,.08)';
+  for (let i = 0; i <= 40; i++) { ctx.beginPath(); ctx.moveTo(i * 10 + .5, 0); ctx.lineTo(i * 10 + .5, 400); ctx.moveTo(0, i * 10 + .5); ctx.lineTo(400, i * 10 + .5); ctx.stroke(); }
+  ctx.strokeStyle = 'rgba(243,166,179,.5)';
+  ctx.beginPath(); ctx.moveTo(0, GROUND * 10 + .5); ctx.lineTo(400, GROUND * 10 + .5); ctx.stroke();
+}
+
+for (const c of Object.keys(DEF_PALETTES)) $('coat').add(new Option(c));
+for (const [id, a] of Object.entries(OUTFIT_ART)) $(a.slot).add(new Option(id));
+for (const k of Object.keys(DEF_LOOKS.ears)) $('ears').add(new Option(k + ' ears', k));
+const look = () => ({ ears: $('ears').value });
+/** Which override map a slider writes into, or null for the base values. */
+function target(key) {
+  for (const g of ['ears']) {
+    const opt = $(g).value, first = Object.keys(LOOKS[g])[0];
+    if (opt !== first && GROUP_KEYS[g].includes(key)) return LOOKS[g][opt];
+  }
+  return null;
+}
+
+function buildKnobs() {
+  $('knobs').innerHTML = '';
+  for (const [key, name, min, max, step] of KNOBS) {
+    const l = document.createElement('label');
+    l.innerHTML = `<span>${name}</span><input type="range" min="${min}" max="${max}" step="${step}"><span></span>`;
+    const inp = l.querySelector('input'), out = l.lastElementChild;
+    const E = effective(look()), t = target(key);
+    inp.value = E[key]; out.textContent = +E[key].toFixed(3);
+    if (t) { l.firstElementChild.style.color = key in t ? 'var(--accent)' : ''; l.firstElementChild.textContent += ' •'; }
+    inp.oninput = () => { (target(key) ?? P)[key] = Number(inp.value); out.textContent = inp.value; if (t) l.firstElementChild.style.color = 'var(--accent)'; render(); };
+    l.ondblclick = () => {
+      const t = target(key);
+      if (t) delete t[key]; else P[key] = DEFAULTS[key];
+      buildKnobs(); render();
+    };
+    l.title = t ? `edits the “${key in t ? 'overridden' : 'inherited'}” value for this look; double-click to drop the override` : 'double-click to reset';
+    $('knobs').append(l);
+  }
+  const ov = ['ears'].filter((g) => target(GROUP_KEYS[g][0]));
+  $('lookhint').textContent = ov.length ? `Sliders marked • edit the ${ov.map((g) => $(g).value).join(' / ')} look (pink = overridden).` : '';
+  $('pal').innerHTML = '';
+  for (const [coat, c] of Object.entries(PALETTES)) {
+    $('pal').append(Object.assign(document.createElement('span'), { textContent: coat }));
+    for (const k of ['base', 'shade', 'light', 'line', 'ring']) {
+      const inp = document.createElement('input'); inp.type = 'color';
+      inp.value = toHex(c[k] ?? '000000');
+      if (!c[k]) inp.style.opacity = .3;
+      inp.title = k === 'ring' ? 'eye ring (optional; shift-click to clear)' : k;
+      inp.oninput = () => { c[k] = inp.value.slice(1).toUpperCase(); inp.style.opacity = 1; render(); };
+      if (k === 'ring') inp.onclick = (e) => { if (e.shiftKey) { e.preventDefault(); delete c.ring; inp.style.opacity = .3; render(); } };
+      $('pal').append(inp);
+    }
+  }
+  $('shared').innerHTML = '';
+  for (const k of Object.keys(SHARED)) {
+    const l = document.createElement('label');
+    l.innerHTML = `<span>${k}</span><input type="color"><span></span>`;
+    const inp = l.querySelector('input'); inp.value = toHex(SHARED[k]);
+    inp.oninput = () => { SHARED[k] = inp.value.slice(1).toUpperCase(); render(); };
+    $('shared').append(l);
+  }
+}
+
+let animFrame = 0;
+function current(frame) {
+  const dress = { head: $('head').value || null, neck: $('neck').value || null, marking: $('marking').value || null };
+  return drawRabbit($('coat').value, $('face').value, frame ?? Number($('frame').value), dress, { outline: $('outline').checked, look: look() });
+}
+function render() {
+  const f = $('animate').checked ? animFrame : Number($('frame').value);
+  const g = current(f);
+  const big = $('big'); big.width = 40; big.height = 40; paint(big, g);
+  if ($('grid').checked) gridOverlay(big);
+  paint($('x4'), g); paint($('x1'), g);
+
+  $('faces').innerHTML = '';
+  for (const face of ['content', 'happy', 'eating', 'grumpy', 'asleep']) {
+    const fig = document.createElement('figure');
+    const cv = document.createElement('canvas'); cv.width = 40; cv.height = 40; cv.style.width = cv.style.height = '120px';
+    paint(cv, drawRabbit($('coat').value, face, 0, undefined, { outline: $('outline').checked, look: look() }));
+    cv.onclick = () => { $('face').value = face; render(); };
+    const st = document.createElement('div'); st.className = 'stage'; st.append(cv);
+    fig.append(st, face); $('faces').append(fig);
+  }
+  $('coats').innerHTML = '';
+  for (const coat of Object.keys(PALETTES)) {
+    const fig = document.createElement('figure');
+    const cv = document.createElement('canvas'); cv.width = 40; cv.height = 40; cv.style.width = cv.style.height = '80px';
+    paint(cv, drawRabbit(coat, $('face').value, 0, undefined, { outline: $('outline').checked, look: look() }));
+    cv.onclick = () => { $('coat').value = coat; render(); };
+    const st = document.createElement('div'); st.className = 'stage'; st.append(cv);
+    fig.append(st, coat); $('coats').append(fig);
+  }
+  $('looks').innerHTML = '';
+  for (const ears of Object.keys(LOOKS.ears)) {
+    const fig = document.createElement('figure');
+    const cv = document.createElement('canvas'); cv.width = 40; cv.height = 40; cv.style.width = cv.style.height = '80px';
+    paint(cv, drawRabbit($('coat').value, $('face').value, 0, undefined, { outline: $('outline').checked, look: { ears } }));
+    cv.onclick = () => { $('ears').value = ears; buildKnobs(); render(); };
+    const st = document.createElement('div'); st.className = 'stage'; st.append(cv);
+    fig.append(st, `${ears} ears`); $('looks').append(fig);
+  }
+  $('ts').textContent = asTS();
+  save();
+}
+
+function asTS() {
+  const r = (n) => +n.toFixed(3);
+  const pal = Object.entries(PALETTES).map(([k, c]) =>
+    `  ${k}: { ${Object.entries(c).map(([a, b]) => `${a}: '${b}'`).join(', ')} },`).join('\n');
+  const changed = Object.keys(DEFAULTS).filter((k) => P[k] !== DEFAULTS[k]);
+  return `// --- paste over the constants in src/art/rabbit.ts ---
+const PALETTES: Record<Coat, { base: string; shade: string; light: string; line: string; ring?: string }> = {
+${pal}
+};
+const SHARED = { ${Object.entries(SHARED).map(([a, b]) => `${a}: '${b}'`).join(', ')} };
+
+const K = ${r(P.K)};
+const SHAPE = { head: [${r(P.headW)} * K, ${r(P.headH)} * K], body: [${r(P.bodyW)} * K, ${r(P.bodyH)} * K], earLen: ${r(P.earLen)} * K, earW: ${r(P.earW)} * K } as const;
+const EYE_W = ${P.EYE_W};
+const EYE_H = ${P.EYE_H};
+${changed.length ? `
+// Knobs that are inline literals in drawRabbit() and differ from the original:
+${changed.filter((k) => !['K', 'headW', 'headH', 'bodyW', 'bodyH', 'earLen', 'earW', 'EYE_W', 'EYE_H'].includes(k))
+    .map((k) => `//   ${k}: ${DEFAULTS[k]} -> ${r(P[k])}`).join('\n') || '//   (none)'}` : ''}
+
+// Adoption looks (overrides on top of the values above):
+const LOOKS = {
+${['ears'].map((g) => `  ${g}: {\n${Object.entries(LOOKS[g]).map(([k, o]) => `    ${k}: { ${Object.entries(o).map(([a, b]) => `${a}: ${r(b)}`).join(', ')} },`).join('\n')}\n  },`).join('\n')}
+};`;
+}
+
+function download(scale) {
+  const g = current();
+  const cv = document.createElement('canvas'); cv.width = 40 * scale; cv.height = 40 * scale;
+  const src = document.createElement('canvas'); src.width = 40; src.height = 40; paint(src, g);
+  const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled = false; ctx.drawImage(src, 0, 0, cv.width, cv.height);
+  const a = document.createElement('a');
+  a.download = `rabbit-${$('coat').value}-${$('face').value}${scale > 1 ? '@' + scale + 'x' : ''}.png`;
+  a.href = cv.toDataURL('image/png'); a.click();
+}
+
+$('big').onmousemove = (e) => {
+  const b = e.target.getBoundingClientRect();
+  const x = Math.floor((e.clientX - b.left) / b.width * 40), y = Math.floor((e.clientY - b.top) / b.height * 40);
+  const p = current().px[y]?.[x];
+  $('hover').textContent = p ? `x ${x}, y ${y}  ${p[3] ? '#' + p.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase() : 'clear'}` : '';
+};
+for (const id of ['coat', 'face', 'frame', 'head', 'neck', 'marking', 'grid', 'outline', 'animate']) $(id).onchange = render;
+for (const id of ['ears']) $(id).onchange = () => { buildKnobs(); render(); };
+$('copy').onclick = () => navigator.clipboard.writeText(asTS()).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy as TS', 1200); });
+$('png').onclick = () => download(1);
+$('png8').onclick = () => download(8);
+$('reset').onclick = () => { try { localStorage.removeItem('rabbit-lab'); } catch {} reset(); buildKnobs(); render(); };
+
+// idle loop like the game: mostly rest, a breath, an occasional blink
+const SEQ = [0, 0, 1, 1, 0, 0, 1, 1, 0, 2, 0, 0, 1, 1];
+let seqI = 0;
+setInterval(() => { if (!$('animate').checked) return; animFrame = SEQ[seqI++ % SEQ.length]; render(); }, 350);
+
+buildKnobs();
+render();
+</script>
+</body></html>

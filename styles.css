@@ -1,0 +1,418 @@
+/* Press Start 2P (OFL 1.1, see fonts/OFL.txt), shared with snake, flappy
+   and solitaire. Used for names and numbers only; body copy is a rounded
+   system face. */
+@font-face {
+  font-family: "Press Start 2P";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/press-start-2p-latin.woff2") format("woff2");
+}
+
+/* One warm, burrow-coloured look in both host themes, by choice: the scene is
+   a lit room, and a light/dark flip would fight the pixel art. */
+:root {
+  color-scheme: dark;
+  --soil: #2a1c15;
+  --soil-2: #1e140f;
+  --bar: #3a271d;
+  --edge: #5e3b26;
+  --paper: #fff6e6;
+  --paper-2: #f3e6d2;
+  --ink: #3b2922;
+  --ink-2: #6b4a35;
+  --cream: #fff3df;
+  --cream-2: #e8cda8;
+  --carrot: #f08a3c;
+  --joy: #e4566f;
+  --sun: #f6d24a;
+  --sky: #8fc3e8;
+  --clover: #4e8c3a;
+  --pixel: "Press Start 2P", ui-monospace, "Menlo", monospace;
+  --body: ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--soil);
+  color: var(--cream);
+  font: 15px/1.4 var(--body);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+/* The game runs edge to edge (docs/game-header-guidelines.md): the HUD bar
+   runs up under the status bar and the paper panel down under the home
+   indicator by themselves. <body> still follows the screen (main.ts sets
+   data-screen) because the host reads it for the colour the status bar sits
+   on, to pick a legible status-bar tone: the HUD's bar in the burrow, paper
+   on the adopt and sign-in screens. */
+body[data-screen="burrow"] { background: var(--bar); }
+body[data-screen="paper"] { background: var(--paper); }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
+.px { image-rendering: pixelated; image-rendering: crisp-edges; }
+.pixfont { font-family: var(--pixel); letter-spacing: 0.02em; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Phone-shaped everywhere: on a wide screen the game sits in a centred column. */
+#app { height: 100%; max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; }
+.boot { margin: auto; color: var(--cream-2); }
+
+/* ---------- burrow screen ---------- */
+/* The HUD's first row is the header row (docs/game-header-guidelines.md): the
+   status bar's height, then as tall as the host's back-button row, with the
+   button's lane kept empty. The needs bars sit below it, inside the same bar,
+   which runs up under the status bar. */
+.hud {
+  flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 0 0 12px;
+  background: var(--bar);
+  border-bottom: 3px solid #120c09;
+}
+.hud-top {
+  display: flex; align-items: center; gap: 8px;
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 16px) + var(--oddsrabbit-safe-left, 0px));
+}
+.who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.who .name { font-family: var(--pixel); font-size: 16px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .sub { font-size: 13px; color: var(--cream-2); }
+.chip {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 6px 10px; background: var(--soil-2); border: 2px solid var(--edge); border-radius: 8px;
+  font-family: var(--pixel); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+/* 32px to match the host's back button; the tap area stays 44px. */
+.icon-btn {
+  position: relative;
+  width: 32px; height: 32px; flex-shrink: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--soil-2); color: var(--cream); border: 2px solid var(--edge); border-radius: 8px;
+}
+.icon-btn::after { content: ""; position: absolute; inset: -6px; }
+.icon-btn[aria-pressed="false"] { color: var(--cream-2); opacity: .8; }
+.needs {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+  padding: 0 calc(16px + var(--oddsrabbit-safe-right, 0px)) 0 calc(16px + var(--oddsrabbit-safe-left, 0px));
+}
+.need { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.need-label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--cream-2); white-space: nowrap; }
+.bar { height: 10px; background: var(--soil-2); border: 2px solid var(--edge); border-radius: 3px; overflow: hidden; }
+.bar > span { display: block; height: 100%; transition: width .4s steps(8); }
+.need.low .bar { border-color: #b8563f; }
+
+.stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #140d0a; touch-action: manipulation; }
+.stage canvas { position: absolute; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
+.float-chips { position: absolute; left: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; max-width: 60%; }
+.tchip {
+  display: flex; align-items: center; gap: 7px; padding: 5px 10px 5px 7px;
+  background: rgba(255, 246, 230, .95); color: var(--ink);
+  border: 2px solid var(--ink); border-radius: 8px; font-size: 13px;
+}
+.tchip .time { font-family: var(--pixel); font-size: 10px; }
+.tchip.ready { background: #eaf5e2; }
+.gift-btn {
+  position: absolute; right: 10px; top: 10px;
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 12px 6px 8px;
+  background: var(--sun); color: var(--ink); border: 2px solid var(--ink); border-radius: 8px;
+  font-weight: 700; font-size: 14px;
+}
+.gift-btn img { animation: bob 2.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-3px); } }
+.panel {
+  flex: 0 0 auto;
+  background: var(--paper); color: var(--ink);
+  border-top: 3px solid #120c09;
+  /* The paper runs down under the home indicator; the buttons stay above it. */
+  padding: 12px calc(16px + var(--oddsrabbit-safe-right, 0px))
+           calc(14px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(16px + var(--oddsrabbit-safe-left, 0px));
+  display: flex; flex-direction: column; gap: 10px;
+}
+.moodline { margin: 0; font-size: 15px; font-weight: 600; min-height: 1.4em; }
+.actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.act {
+  height: 78px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 4px 0 var(--ink);
+  font-size: 14px; font-weight: 700; position: relative;
+}
+.act:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+.act:disabled { opacity: .45; cursor: default; box-shadow: 0 4px 0 rgba(59, 41, 34, .45); }
+.act .badge {
+  position: absolute; top: -8px; right: -6px; min-width: 22px; height: 22px; padding: 0 5px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--carrot); border: 2px solid var(--ink); border-radius: 11px; font-size: 11px;
+}
+.row2 { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  min-height: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; font-weight: 700; font-size: 14px;
+}
+.btn.primary { background: var(--carrot); box-shadow: 0 4px 0 var(--ink); }
+.btn.green { background: var(--clover); color: #fff; }
+.btn.grow { flex: 1 1 auto; }
+.btn:disabled { opacity: .45; cursor: default; }
+
+/* decorate tray */
+.tray { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.titem {
+  flex: 0 0 116px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px;
+  padding: 8px 6px; background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 var(--ink);
+}
+.titem[aria-pressed="true"] { background: #fbe0c0; border-color: var(--carrot); }
+.titem:disabled { opacity: .45; cursor: default; }
+.titem .art { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
+.titem .nm { font-weight: 700; font-size: 13px; line-height: 1.1; text-align: center; }
+.titem .pr { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+
+/* sheets */
+/* The scrim covers the whole screen, status bar included. Its top padding
+   keeps a tall sheet below the host's back button; the sheet's own bottom
+   padding runs its paper under the home indicator with the content above. */
+.scrim {
+  position: fixed; inset: 0; background: rgba(20, 13, 10, .55); display: flex; align-items: flex-end; justify-content: center; z-index: 10;
+  padding-top: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px));
+}
+.sheet {
+  width: min(520px, 100%); max-height: 92%; overflow: auto;
+  background: var(--paper); color: var(--ink); border: 3px solid var(--ink); border-bottom: 0;
+  border-radius: 20px 20px 0 0; padding: 20px 20px calc(22px + var(--oddsrabbit-safe-bottom, 0px));
+  display: flex; flex-direction: column; gap: 14px;
+}
+.sheet h2 { margin: 0; font-family: var(--pixel); font-size: 16px; line-height: 1.4; }
+.sheet .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.sheet p { margin: 0; font-size: 15px; line-height: 1.45; }
+.sheet ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.sheet li { display: flex; align-items: center; gap: 12px; font-size: 15px; line-height: 1.3; }
+.sheet li .ico { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #fbe9cf; border-radius: 10px; }
+.sheet .actions-col { display: flex; flex-direction: column; gap: 10px; }
+.note { padding: 10px 12px; background: var(--paper-2); border-radius: 10px; font-size: 13px; line-height: 1.4; color: #5a4238; }
+
+/* adopt + sign-in */
+.screen {
+  flex: 1 1 auto; overflow: auto;
+  background: var(--paper); color: var(--ink);
+  /* No header row here, so just keep the top clear of the status bar and the
+     host's back-button row when the content is tall enough to reach them. The
+     paper itself runs to every edge. */
+  padding: calc(var(--oddsrabbit-safe-top, 0px) + max(26px, calc(var(--oddsrabbit-chrome-height, 0px) + 8px)))
+           calc(22px + var(--oddsrabbit-safe-right, 0px))
+           calc(24px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(22px + var(--oddsrabbit-safe-left, 0px));
+  display: flex; flex-direction: column; gap: 18px;
+}
+.screen .inner { width: min(460px, 100%); margin: auto; display: flex; flex-direction: column; gap: 18px; }
+/* The welcome reads centred; form labels stay left-aligned for scanning. */
+.screen .intro { display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.screen h1 { margin: 0; font-family: var(--pixel); font-size: 20px; line-height: 1.4; text-wrap: balance; }
+.screen p { margin: 0; font-size: 15px; line-height: 1.45; color: #5a4238; }
+.screen .btn { min-height: 52px; font-size: 16px; }
+.pen {
+  height: 200px; flex-shrink: 0; position: relative; overflow: hidden;
+  background: #f3ddbc; border: 3px solid var(--ink); border-radius: 16px;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.pen::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: #c9a07a; border-top: 3px solid #8a5a3c; }
+.pen canvas, .pen img { position: relative; z-index: 1; margin-bottom: 8px; }
+.coats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.coat { height: 54px; padding: 0; display: flex; align-items: center; justify-content: center; background: #fff; border: 3px solid var(--ink); border-radius: 10px; }
+.coat[aria-pressed="true"] { background: #fbe0c0; border-color: var(--carrot); }
+.coats.ears { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field label { font-weight: 700; }
+.field input { height: 50px; padding: 0 14px; background: #fff; border: 3px solid var(--ink); border-radius: 12px; font-size: 18px; color: var(--ink); }
+.spacer { flex: 1 1 auto; }
+
+/* Centred over the scene, where the eye already is, and styled like the
+   game's cards so it reads against both the burrow and the panel. */
+#toast {
+  position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(.92);
+  width: max-content; max-width: min(320px, calc(100% - 48px)); padding: 12px 18px;
+  background: var(--paper); color: var(--ink);
+  border: 3px solid var(--ink); border-radius: 14px; box-shadow: 0 5px 0 var(--ink);
+  font-size: 16px; font-weight: 700; line-height: 1.35; text-align: center;
+  opacity: 0; transition: opacity .18s, transform .18s; pointer-events: none; z-index: 20;
+}
+#toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+@media (max-width: 360px) {
+  .needs { gap: 6px; }
+  .need-label { font-size: 11px; }
+  .act { height: 70px; font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gift-btn img { animation: none; }
+  .bar > span, #toast { transition: none; }
+}
+
+/* food tray: the action row's style, popping up above it */
+.actions { position: relative; }
+.food-tray {
+  position: absolute; left: -6px; right: -6px; bottom: calc(100% + 14px); z-index: 5;
+  padding: 10px 10px 8px; background: var(--paper);
+  border: 3px solid var(--ink); border-radius: 16px; box-shadow: 0 5px 0 var(--ink);
+  display: flex; flex-direction: column; gap: 6px;
+  animation: tray-up .14s ease-out;
+}
+/* the pointer down to Feed (the first column) */
+.food-tray::after {
+  content: ""; position: absolute; left: calc(12.5% - 4px); bottom: -11px; width: 16px; height: 16px;
+  background: var(--paper); border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink);
+  transform: rotate(45deg);
+}
+@keyframes tray-up { from { opacity: 0; transform: translateY(8px); } }
+.food-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.food-act { height: 84px; gap: 3px; font-size: 13px; }
+.food-act .nm { line-height: 1.1; }
+.food-act .cost { display: flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; color: var(--ink-2); }
+.food-hint { margin: 0; font-size: 12px; text-align: center; color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) { .food-tray { animation: none; } }
+
+/* ---------- Update 1 ---------- */
+/* the second row: five small tools, icon over label */
+.tools { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.tool {
+  position: relative; min-height: 60px; padding: 5px 2px 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px;
+  font-size: 12px; font-weight: 700; line-height: 1;
+}
+.tool.green { background: var(--clover); color: #fff; }
+.tool:disabled { opacity: .45; cursor: default; }
+.tool .badge {
+  position: absolute; top: -8px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--carrot); color: var(--ink); border: 2px solid var(--ink); border-radius: 10px; font-size: 11px;
+}
+.chips-timers, .chips-events { display: contents; }
+button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
+.tchip.event { background: #fbe0c0; }
+.titem, .wear { position: relative; }
+.tag {
+  position: absolute; top: 5px; left: 5px; padding: 1px 6px;
+  background: var(--sun); border: 2px solid var(--ink); border-radius: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: var(--ink);
+}
+.sheet-body { display: contents; }
+.pill { display: inline-flex; padding: 3px 9px; background: #fbe0c0; border: 2px solid var(--ink); border-radius: 999px; font-size: 12px; font-weight: 700; }
+.pill.soft { background: transparent; border-style: dashed; color: var(--ink-2); }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* garden */
+.plots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.plot {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px;
+  background: #fff; border: 3px solid var(--ink); border-radius: 12px; text-align: center;
+}
+.plot.picking { background: #fbe0c0; border-color: var(--carrot); }
+.plot-art { background: #cfe8f4; border-radius: 8px; width: 100%; display: flex; justify-content: center; padding-top: 4px; }
+.plot-status { font-size: 12px; line-height: 1.25; min-height: 2.5em; }
+.plot .btn { min-height: 38px; width: 100%; padding: 0 6px; }
+.seeds, .gift-kinds { display: flex; flex-direction: column; gap: 8px; }
+.seed {
+  display: grid; grid-template-columns: 36px 1fr auto; grid-template-rows: auto auto; align-items: center; column-gap: 10px;
+  padding: 8px 12px; background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; text-align: left;
+}
+.seed > img { grid-row: 1 / 3; justify-self: center; }
+.seed .nm { font-weight: 700; font-size: 14px; }
+.seed .meta { grid-column: 2; font-size: 12px; color: var(--ink-2); }
+.seed .pr { grid-column: 3; grid-row: 1 / 3; display: flex; align-items: center; gap: 4px; font-weight: 700; }
+.seed:disabled { opacity: .45; cursor: default; }
+
+/* more: profile and menu */
+.profile { display: flex; gap: 14px; align-items: center; }
+.profile-art { flex-shrink: 0; width: 132px; height: 132px; display: flex; align-items: flex-end; justify-content: center; background: #fbe9cf; border: 3px solid var(--ink); border-radius: 14px; }
+.profile-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.profile-text p { font-size: 13px; }
+.profile-text .meta, .sheet .meta { color: var(--ink-2); font-size: 12px; }
+.menu { display: flex; flex-direction: column; gap: 8px; }
+.menu-row {
+  display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 6px 12px;
+  background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px; text-align: left;
+}
+.menu-row .ico, .sheet li .ico { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #fbe9cf; border-radius: 10px; }
+.menu-row .txt, .sheet li .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.menu-row .nm, .friends .nm { font-weight: 700; font-size: 15px; }
+.menu-row .sub, .friends .sub { font-size: 12px; color: var(--ink-2); }
+
+/* wardrobe */
+.wear-preview, .event-art { display: flex; justify-content: center; padding: 8px 0 0; background: #fbe9cf; border: 3px solid var(--ink); border-radius: 14px; }
+.event-art { padding: 14px 0; }
+.wear-section { display: flex; flex-direction: column; gap: 8px; }
+.wear-row { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; }
+.wear {
+  flex: 0 0 96px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 4px;
+  background: #fff; color: var(--ink); border: 3px solid var(--ink); border-radius: 12px;
+}
+.wear[aria-pressed="true"] { background: #fbe0c0; border-color: var(--carrot); }
+.wear:disabled { opacity: .45; cursor: default; }
+.wear .nm { font-weight: 700; font-size: 12px; line-height: 1.1; text-align: center; min-height: 2.2em; display: flex; align-items: center; }
+.wear .pr { display: flex; align-items: center; gap: 3px; font-size: 12px; }
+
+/* collection shelf */
+.sheet ul.shelf { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.shelf li {
+  position: relative; flex-direction: column; gap: 4px; padding: 10px 4px 8px; justify-content: center;
+  background: #fff; border: 3px solid var(--ink); border-radius: 12px; font-size: 12px; text-align: center;
+}
+.shelf li .art { height: 40px; display: flex; align-items: center; }
+.shelf li .nm { font-weight: 700; line-height: 1.15; }
+.shelf li .ct { position: absolute; top: 4px; right: 6px; font-size: 11px; font-weight: 800; color: var(--ink-2); }
+.shelf li .tag { top: auto; bottom: auto; left: 4px; top: 4px; }
+.shelf li.missing { background: var(--paper-2); border-style: dashed; }
+.shelf li.missing img { filter: brightness(0); opacity: .18; }
+.shelf li.missing .nm { color: var(--ink-2); }
+
+/* journal */
+.journal .when { font-size: 11px; font-weight: 700; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+.choice-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.choice-row .btn { padding: 0 4px; }
+
+/* friends */
+.friends li { gap: 10px; }
+.friends .ico.big { width: 48px; height: 48px; overflow: hidden; align-items: flex-end; }
+.friends .txt { flex: 1 1 auto; }
+.friends .btns { display: flex; gap: 6px; flex-shrink: 0; }
+.friends .btns .btn { min-height: 38px; padding: 0 10px; }
+.visit { position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; background: var(--bar); color: var(--cream); }
+/* A header row like the HUD's: under the status bar, in the back button's row,
+   with the button's lane kept empty. */
+.visit-top {
+  display: flex; align-items: center; border-bottom: 3px solid #120c09;
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(16px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 16px) + var(--oddsrabbit-safe-left, 0px));
+}
+.visit .stage { flex: 1 1 auto; }
+.visit .row2 .btn { flex: 1 1 0; }
+
+/* carrot catch */
+/* The bar colour runs to every edge; the game keeps clear of the status bar and
+   the back button's row above and the home indicator below. catch.ts sizes
+   the canvas from the padded box. */
+.catch {
+  position: fixed; inset: 0; z-index: 15; display: flex; flex-direction: column; align-items: center; background: var(--bar); color: var(--cream);
+  padding: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px))
+           var(--oddsrabbit-safe-right, 0px)
+           var(--oddsrabbit-safe-bottom, 0px)
+           var(--oddsrabbit-safe-left, 0px);
+}
+.catch-top { width: min(520px, 100%); display: flex; align-items: center; gap: 12px; padding: 10px 16px; min-height: 64px; }
+.catch-count { flex: 1 1 auto; font-family: var(--pixel); font-size: 14px; }
+.catch-time { font-family: var(--pixel); font-size: 14px; font-variant-numeric: tabular-nums; }
+.catch .btn { min-height: 38px; }
+.catch-canvas { border: 3px solid #120c09; border-radius: 8px; touch-action: none; }
+.wear .art { height: 64px; overflow: hidden; display: flex; align-items: flex-start; }
+.wear .art img { margin-top: -8px; }
+.catch { justify-content: center; gap: 10px; }
+.catch-hint { margin: 0; padding: 0 16px; font-size: 14px; color: var(--cream-2); text-align: center; }
