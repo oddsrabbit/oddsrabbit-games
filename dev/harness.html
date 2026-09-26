@@ -17,10 +17,16 @@
 //   user=0                        signed out
 //   coat=cocoa                    coat for the seeded pet
 //   ask=1                         reminders never asked, no timers running
+//   bed=0                         seeded burrow has no bed (she sleeps on the floor)
+//   save=newer|broken             a save from a newer version, or one that can't be read
 //   date=2026-12-20               shift the clock to that date (seasons, weather, events)
-//   extras=1                      seeded pet also has a garden, finds, outfits, a marking, a journal
+//   extras=1                      seeded pet also has a garden, finds, outfits, a journal, a visitor
+//   critter=fox                   which visitor is in the burrow with extras=1 (default robin)
+//   rich=1                        seeded pet is well off: new decor, walls, the moon window, a yard
+//   rooms=1                       with rich=1: the nook and the loft dug out
 //   friends=0                     no social verbs (hides Friends and gifts)
 //   inbox=0                       no gift waiting from a friend
+//   visits=0                      no friends visited while you were away
 //   click=Feed,Pet                press buttons in order after load
 //   drag=x1,y1,x2,y2              then drag on the burrow, in scene pixels
 const q = new URLSearchParams(location.search);
@@ -47,39 +53,76 @@ if (seed) {
   ] });
   store['v1:settings'] = JSON.stringify({ v: 1, rev: 1, reminders: q.get('ask') ? null : 'on', scheduled: {} });
   if (q.get('ask')) { const p = JSON.parse(store['v1:pet']); p.timers = []; store['v1:pet'] = JSON.stringify(p); }
+  // save=newer: the pet was saved by a newer schema; save=broken: the burrow can't be read (store.ts, "versions")
+  if (q.get('save') === 'newer') store['v1:pet'] = JSON.stringify({ ...JSON.parse(store['v1:pet']), schema: 99 });
+  if (q.get('save') === 'broken') store['v1:burrow'] = '{oops';
+  if (q.get('bed') === '0') { const b = JSON.parse(store['v1:burrow']); b.items = b.items.filter((i) => i.id !== 'cushion'); store['v1:burrow'] = JSON.stringify(b); }
   if (q.get('extras')) {
     const p = JSON.parse(store['v1:pet']);
     Object.assign(p, {
-      daysVisited: 9, careCounts: { fed: 20, pet: 31, clean: 12 }, marking: 'heart', meals: 20,
+      daysVisited: 9, meals: 20,
       collection: { pebble: 3, feather: 1, acorn: 2, marble: 1 },
       garden: { plots: [{ crop: 'berry', plantedAtMs: t - 9 * 3600e3, readyAtMs: t - 3600e3 }, { crop: 'golden', plantedAtMs: t - 5 * 3600e3, readyAtMs: t + 7 * 3600e3 }, null] },
       pantry: { berries: 1, golden: 1 },
+      critters: { seen: { hedgehog: 2, robin: 1, fox: 1 }, here: { id: q.get('critter') || 'robin', untilMs: t + 3600e3 } },
       wardrobe: { owned: ['bow', 'bandana'], head: 'bow', neck: 'bandana' },
     });
     store['v1:pet'] = JSON.stringify(p);
-    store['v1:journal'] = JSON.stringify({ v: 1, rev: 1, firsts: ['adopted', 'find:marble', 'marking'], entries: [
-      { atMs: t - 2 * 864e5, text: 'Clover grew a heart, from all the cuddles.', art: 'sparkle' },
+    store['v1:journal'] = JSON.stringify({ v: 1, rev: 1, firsts: ['adopted', 'find:marble'], entries: [
       { atMs: t - 3 * 864e5, text: 'Found a marble for the shelf. A rare one!', art: 'marble' },
       { atMs: t - 9 * 864e5, text: 'Clover came home to the burrow.', art: 'heart' },
     ] });
+  }
+}
+if (seed && q.get('rich')) {
+  // a well-off rabbit: new decor, walls, the moon window, a yard
+  const t = now();
+  const p = JSON.parse(store['v1:pet']);
+  Object.assign(p, {
+    clover: 20000, bond: 400, upgrades: ['plot2', 'plot3', 'can'], soilLevel: 2, toys: ['yarn', 'box'],
+    yard: { counts: { patch: 5, hive: 2 }, sheds: 1, stored: 40.5, atMs: t - 3600e3 }, paid: ['bond:2', 'bond:3', 'bond:4', 'bond:5', 'bond:6', 'bond:7'],
+  });
+  store['v1:pet'] = JSON.stringify(p);
+  store['v1:burrow'] = JSON.stringify({ v: 2, rev: 4, items: [
+    { uid: 'a', id: 'hayloft', x: 72, y: 110, flip: false, placed: true }, { uid: 'b', id: 'fireplace', x: 22, y: 100, flip: false, placed: true },
+    { uid: 'c', id: 'bookshelf', x: 86, y: 99, flip: false, placed: true }, { uid: 'd', id: 'bunting', x: 56, y: 12, flip: false, placed: true },
+    { uid: 'e', id: 'lamp', x: 52, y: 100, flip: false, placed: true }, { uid: 'f', id: 'rug', x: 46, y: 108, flip: false, placed: true },
+    { uid: 'g', id: 'clock', x: 64, y: 99, flip: false, placed: true },
+  ], surfaces: { owned: ['starrywall', 'oakfloor', 'moonwindow'], wall: 'starrywall', floor: 'oakfloor', window: 'moonwindow' } });
+  if (q.get('rooms')) {
+    // the nook and the loft dug out, a few pieces in each
+    const b = JSON.parse(store['v1:burrow']);
+    b.rooms = {
+      nook: { items: [{ uid: 'n1', id: 'windowseat', x: 70, y: 104, flip: false, placed: true }, { uid: 'n2', id: 'plant', x: 20, y: 104, flip: false, placed: true }] },
+      loft: { items: [{ uid: 'l1', id: 'bookshelf', x: 20, y: 99, flip: false, placed: true }, { uid: 'l2', id: 'lamp', x: 76, y: 100, flip: false, placed: true }] },
+    };
+    store['v1:burrow'] = JSON.stringify(b);
   }
 }
 // two friends with rabbits, and a gift waiting
 const FRIENDS = [
   { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, updatedAt: new Date().toISOString(),
     data: { v: 1, name: 'Pip', coat: 'ginger', needs: { hunger: 70, happy: 80, energy: 60, clean: 75 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
-      daysVisited: 23, bondLevel: 4, trait: 'playful', head: 'flowercrown', neck: null, marking: 'freckles',
+      daysVisited: 23, bondLevel: 4, trait: 'playful', head: 'flowercrown', neck: null, missing: ['acorn', 'bat', 'marble'],
+      garden: { plots: [{ crop: 'berry', plantedAtMs: now() - 9 * 3600e3, readyAtMs: now() - 3600e3 }, { crop: 'sprout', plantedAtMs: now() - 3600e3, readyAtMs: now() + 3 * 3600e3 }], yard: { patch: 4, hive: 1 }, sheds: 1, meadow: null },
       items: [{ id: 'rug', x: 49, y: 106, flip: false }, { id: 'mushroom', x: 20, y: 104, flip: false }, { id: 'garland', x: 50, y: 12, flip: false }, { id: 'jar', x: 80, y: 110, flip: true }] } },
   { uuid: '33333333-3333-4333-8333-333333333333', username: 'mochi.mama', avatar: null, updatedAt: new Date().toISOString(),
     data: { v: 1, name: 'Mochi', coat: 'midnight', needs: { hunger: 50, happy: 60, energy: 40, clean: 80 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
-      daysVisited: 4, bondLevel: 1, trait: 'shy', head: 'beanie', neck: 'redscarf', marking: null,
+      daysVisited: 4, bondLevel: 1, trait: 'shy', head: 'beanie', neck: 'redscarf',
       items: [{ id: 'cushion', x: 70, y: 108, flip: false }, { id: 'lantern', x: 30, y: 14, flip: false }] } },
 ];
 const inbox = q.get('inbox') === '0' ? [] : [{ giftUuid: '44444444-4444-4444-8444-444444444444', from: { uuid: FRIENDS[0].uuid, username: 'pip_fan', avatar: null }, kind: 'berry', message: null, sentAt: new Date().toISOString() }];
 const sentToday = [];
+// both friends dropped by while you were away (visits=0 for none)
+const visits = q.get('visits') === '0' ? [] : FRIENDS.map((f, i) => ({
+  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt: null,
+  from: { uuid: f.uuid, username: f.username, avatar: null }, showcase: f.data, counts: true,
+}));
+const visitedToday = [];
 const frame = document.getElementById('g');
 const caps = ['storage.get','storage.set','storage.delete','content.daily','actions.share','actions.haptic','actions.requestSignIn','session.refresh','time.now','notifications.schedule','notifications.cancel','notifications.list','notifications.status'];
-if (q.get('friends') !== '0') caps.push('showcase.publish', 'showcase.friends', 'showcase.get', 'gifts.send', 'gifts.inbox', 'gifts.claim', 'gifts.sentToday');
+if (q.get('friends') !== '0') caps.push('showcase.publish', 'showcase.friends', 'showcase.get', 'gifts.send', 'gifts.inbox', 'gifts.claim', 'gifts.sentToday',
+  'visits.record', 'visits.inbox', 'visits.seen', 'visits.sentToday');
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
   send({ type: 'init', user: q.get('user') === '0' ? null : { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester', avatar: null, createdAt: null },
@@ -126,6 +169,10 @@ window.addEventListener('message', (e) => {
     case 'gifts.claim': { const i = inbox.findIndex((g) => g.giftUuid === p.giftUuid); if (i < 0) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'gifts/claimed', message: 'claimed' } }); const [g] = inbox.splice(i, 1); return ok({ giftUuid: g.giftUuid, kind: g.kind, claimedAt: new Date(now()).toISOString() }); }
     case 'gifts.send': if (sentToday.includes(p.toUserUuid)) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'gifts/already-sent-today', message: 'already' } }); sentToday.push(p.toUserUuid); return ok({ giftUuid: '55555555-5555-4555-8555-' + String(Date.now()).slice(-12).padStart(12, '0'), sentAt: new Date(now()).toISOString() });
     case 'gifts.sentToday': return ok(sentToday.slice());
+    case 'visits.inbox': return ok(visits.map((v) => ({ ...v })));
+    case 'visits.seen': { const at = new Date(now()).toISOString(); const seen = []; for (const v of visits) if (p.visitUuids.includes(v.visitUuid) && !v.seenAt) { v.seenAt = at; seen.push(v.visitUuid); } return ok({ seen, seenAt: at }); }
+    case 'visits.record': if (visitedToday.includes(p.toUserUuid)) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'visits/already-visited-today', message: 'already' } }); visitedToday.push(p.toUserUuid); return ok({ visitUuid: '77777777-7777-4777-8777-777777777777', visitedAt: new Date(now()).toISOString() });
+    case 'visits.sentToday': return ok(visitedToday.slice());
     default: return ok(undefined);
   }
 });

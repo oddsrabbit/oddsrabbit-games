@@ -41,6 +41,19 @@ const buildOpts = {
   logLevel: 'info',
 };
 
+// Dev pages that need the game's own modules (dev/garden-lab.html). Written
+// next to the local SDK copy in dist/, outside dist/rabbit-pets/, so they're
+// never uploaded.
+const devOpts = {
+  entryPoints: ['dev/garden-lab.ts'],
+  outdir: 'dist/dev',
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  target: ['es2020'],
+  logLevel: 'warning',
+};
+
 async function copyAssets() {
   const html = await readFile('index.html', 'utf8');
   await Promise.all([
@@ -60,10 +73,12 @@ async function copyAssets() {
 if (watch) {
   const ctx = await esbuild.context(buildOpts);
   await ctx.watch();
+  await (await esbuild.context(devOpts)).watch();
   await copyAssets();
   console.log('Watching for changes (Ctrl+C to stop)...');
 } else {
   await esbuild.build(buildOpts);
+  await esbuild.build(devOpts);
   await copyAssets();
   console.log('Build complete.');
 }

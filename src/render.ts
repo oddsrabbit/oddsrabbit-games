@@ -4,7 +4,7 @@
 // standing, which way she faces, floating hearts); the game state it draws
 // comes in each frame.
 
-import { drawBurrow, drawWindowView, SCENE_H, SCENE_W, WINDOW } from './art/burrow';
+import { drawBurrow, drawWindowView, PLAIN_ROOM, SCENE_H, SCENE_W, windowOf, type RoomStyle } from './art/burrow';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
 import { toSprite, type Sprite } from './art/pixels';
 import { drawRabbit, dressKey, RABBIT_GROUND, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
@@ -14,6 +14,7 @@ import type { Season, Weather } from './world';
 
 export interface SceneModel {
   coat: Coat;
+  /** Dark outside. Awake, the lamps are on; asleep, the room is dim. */
   night: boolean;
   mood: Mood;
   burrow: BurrowState;
@@ -21,7 +22,7 @@ export interface SceneModel {
   decorating: boolean;
   /** The piece being moved, outlined while decorating. */
   selected: string | null;
-  /** Her outfit and marking. */
+  /** Her outfit and ears. */
   dress?: Dress;
   /** What the window shows. */
   season?: Season;
@@ -30,7 +31,48 @@ export interface SceneModel {
   guest?: boolean;
   /** Away on holiday: the burrow is empty. */
   absent?: boolean;
+  /** Walls, floor and window (decor.ts surfacesOf). */
+  room?: RoomStyle;
+  /** Tonight's moon phase, for the moon window. */
+  moon?: number;
+  /** Friends' rabbits visiting, at most two (docs/rabbit-pets-visits.md §1). */
+  guests?: { coat: Coat; dress?: Dress }[];
+  /** Picks her favourite piece of decor, which changes day to day: her id and the date. */
+  seed?: string;
+  /** A wild visitor in the burrow (wildlife.ts CritterId; its art has the same name). */
+  critter?: string | null;
 }
+
+/**
+ * Where a wild visitor can sit, best first: the front corners and the middle,
+ * clear of her and of visiting friends. It takes the first one no decor is on.
+ */
+const CRITTER_SPOTS = [{ x: 88, y: 115 }, { x: 10, y: 115 }, { x: 70, y: 116 }, { x: 30, y: 116 }];
+
+/**
+ * What she's doing when nothing needs her, for the mood line. `piece` is the
+ * decor she's by (a favourite spot).
+ */
+export type Activity =
+  | { kind: 'fire' }
+  | { kind: 'seat' | 'window'; weather: Weather }
+  | { kind: 'favourite'; piece: string };
+
+/**
+ * An idle moment. A spot she walks to and stays at for a while (standing on
+ * a window seat, curled by the fire, beside a favourite piece), or a binky:
+ * a happy hop with a twist in the air.
+ */
+type Idle =
+  | { kind: 'spot'; activity: Activity; x: number; standY: number; depth: number; facing: 1 | -1; until: number }
+  | { kind: 'binky'; start: number; turned: boolean };
+
+const BINKY_MS = 700;
+/** How long she stays at a spot, give or take: long enough to notice, and to read about. */
+const SPOT_MS = [20_000, 40_000] as const;
+
+/** Where visiting rabbits stand, either side of her. */
+const GUEST_SPOTS = [{ x: 17, y: 110, facing: -1 as const }, { x: 80, y: 111, facing: 1 as const }];
 
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -40,18 +82,21 @@ function ceilingY(x: number): number {
   return Math.ceil(64 - 58 * Math.sqrt(Math.max(0, 1 - t * t))) + 1;
 }
 
-type Reaction = 'eating' | 'happy' | 'clean';
+type Reaction = 'eating' | 'happy' | 'clean' | 'play';
 interface Particle { art: ItemArt; x: number; y: number; vy: number; born: number; life: number }
 
 const WALK_MIN = 28;
 const WALK_MAX = 60;
 const STAND_Y = 106;
-const reduceMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Follows the setting live, not just as it was at load.
+const motionQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
+let reduceMotion = !!motionQuery?.matches;
+motionQuery?.addEventListener?.('change', (e) => { reduceMotion = e.matches; });
 
 export class Scene {
   readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly bg: { day: Sprite; night: Sprite };
+  private readonly bgs = new Map<string, Sprite>();
   private readonly items = new Map<string, Sprite>();
   private readonly glow: Sprite;
   private rabbitCache = new Map<string, Sprite>();
@@ -65,6 +110,7 @@ export class Scene {
   private particles: Particle[] = [];
   private blinkAt = 2000;
   private readonly soil: HTMLCanvasElement;
+  private soilPattern: CanvasPattern | null = null;
   private offsetX = 0;
   private offsetY = 0;
 
@@ -77,8 +123,19 @@ export class Scene {
     if (!ctx) throw new Error('2D canvas unavailable');
     this.ctx = ctx;
     ctx.imageSmoothingEnabled = false;
-    this.bg = { day: toSprite(drawBurrow(false)), night: toSprite(drawBurrow(true)) };
     this.glow = toSprite(drawGlow());
+  }
+
+  /** The room for a style, day or night, drawn once. */
+  private room(style: RoomStyle, night: boolean): Sprite {
+    const key = `${style.wall}:${style.floor}:${style.window}:${style.variant ?? ''}:${night}`;
+    let s = this.bgs.get(key);
+    if (!s) {
+      if (this.bgs.size > 8) this.bgs.clear();
+      s = toSprite(drawBurrow(night, style));
+      this.bgs.set(key, s);
+    }
+    return s;
   }
 
   item(art: ItemArt): Sprite {
@@ -102,9 +159,17 @@ export class Scene {
   /** The sky, weather and season through the window, plus falling rain, snow or leaves. */
   private drawWindow(m: SceneModel, now: number): void {
     const season = m.season ?? 'summer', weather = m.weather ?? 'sunny';
-    const key = `${season}:${weather}:${m.night}`;
+    // the moon phase changes slowly; a tenth of a phase is plenty of steps
+    const phase = m.room?.window === 'moonwindow' && m.moon !== undefined ? Math.round(m.moon * 30) / 30 : null;
+    const mirror = m.room?.variant === 'nook';
+    const WINDOW = windowOf(m.room);
+    const key = `${season}:${weather}:${m.night}:${phase}:${mirror}`;
     let v = this.views.get(key);
-    if (!v) { v = toSprite(drawWindowView(season, weather, m.night)); this.views.set(key, v); }
+    if (!v) {
+      if (this.views.size > 24) this.views.clear();
+      v = toSprite(drawWindowView(season, weather, m.night, phase, mirror));
+      this.views.set(key, v);
+    }
     const ctx = this.ctx;
     ctx.drawImage(v.canvas, 0, 0);
     if (weather !== 'rain' && weather !== 'snow' && weather !== 'leaves') return;
@@ -141,8 +206,8 @@ export class Scene {
   }
 
   react(kind: Reaction, now: number, art?: ItemArt): void {
-    this.reaction = { kind, until: now + (kind === 'eating' ? 1800 : 1400), art };
-    if (kind === 'happy') this.burst('heart', 3, now);
+    this.reaction = { kind, until: now + (kind === 'eating' ? 1800 : kind === 'play' ? 2200 : 1400), art };
+    if (kind === 'happy' || kind === 'play') this.burst('heart', 3, now);
     if (kind === 'clean') this.burst('sparkle', 4, now);
   }
 
@@ -201,11 +266,13 @@ export class Scene {
 
   draw(m: SceneModel, now: number): void {
     const ctx = this.ctx;
+    this.season = m.season ?? 'summer';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const soil = ctx.createPattern(this.soil, 'repeat');
+    const soil = (this.soilPattern ??= ctx.createPattern(this.soil, 'repeat'));
     if (soil) { ctx.fillStyle = soil; ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); }
     ctx.setTransform(1, 0, 0, 1, this.offsetX, this.offsetY);
-    ctx.drawImage((m.night ? this.bg.night : this.bg.day).canvas, 0, 0);
+    const style = m.room ?? PLAIN_ROOM;
+    ctx.drawImage(this.room(style, m.night).canvas, 0, 0);
     this.drawWindow(m, now);
 
     const placed = m.burrow.items
@@ -217,19 +284,26 @@ export class Scene {
     for (const p of placed.filter((p) => p.def.zone === 'rug')) this.drawPiece(p.item, p.def);
 
     const asleep = m.mood === 'asleep';
-    const cushion = placed.find((p) => p.def.id === 'cushion')?.item;
+    // she sleeps on the best bed in the room
+    const beds = ['hayloft', 'patchcushion', 'cushion'];
+    const cushion = placed.filter((p) => p.def.bed).sort((a, b) => beds.indexOf(a.def.id) - beds.indexOf(b.def.id))[0]?.item;
     const bed = asleep && cushion ? cushion : undefined;
-    this.updateRabbit(m, now, bed);
-    const standY = bed ? bed.y - 3 : STAND_Y;
+    this.updateRabbit(m, now, placed, bed);
+    // at a spot she stands where it puts her (up on the window seat, in front of the fire)
+    const perch = this.idle?.kind === 'spot' && this.arrived() ? this.idle : null;
+    const standY = bed ? bed.y - 3 : perch ? perch.standY : STAND_Y;
     // floor pieces and the rabbit, back to front; asleep, she lies on her bed
-    const depthOfRabbit = bed ? bed.y + 0.5 : standY;
+    const depthOfRabbit = bed ? bed.y + 0.5 : perch ? perch.depth : standY;
     const floor = placed.filter((p) => p.def.zone === 'floor').sort((a, b) => a.item.y - b.item.y);
     let drewRabbit = false;
     for (const p of floor) {
       if (!drewRabbit && p.item.y > depthOfRabbit) { if (!m.absent) this.drawRabbit(m, now, standY); drewRabbit = true; }
       this.drawPiece(p.item, p.def);
+      this.animatePiece(p.item, p.def, now);
     }
     if (!drewRabbit && !m.absent) this.drawRabbit(m, now, standY);
+    this.drawGuests(m, now);
+    this.drawCritter(m, now);
 
     // hanging decor, on a rope from the ceiling
     for (const p of placed.filter((p) => p.def.zone === 'hang')) {
@@ -237,30 +311,36 @@ export class Scene {
       ctx.fillStyle = '#5E3B26';
       if (p.item.y > top) ctx.fillRect(Math.round(p.item.x), top, 1, p.item.y - top);
       this.drawPiece(p.item, p.def);
+      this.animatePiece(p.item, p.def, now);
     }
 
     if (m.night) {
       // Darken the whole room at once (no canvas filters: Safari lacks them),
       // then put the starry window back and add warm lantern light on top.
+      // Awake, the lamps are on: a warm, lighter dim; asleep, lights out.
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = '#62608E';
+      ctx.fillStyle = asleep ? '#62608E' : '#C8AE92';
       ctx.fillRect(-this.offsetX, -this.offsetY, this.canvas.width, this.canvas.height);
       ctx.globalCompositeOperation = 'source-over';
       ctx.beginPath();
-      ctx.arc(WINDOW.x, WINDOW.y, WINDOW.r - 1.5, 0, Math.PI * 2);
+      const win = windowOf(m.room);
+      ctx.arc(win.x, win.y, win.r - 1.5, 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(this.bg.night.canvas, 0, 0);
+      ctx.drawImage(this.room(style, true).canvas, 0, 0);
       this.drawWindow(m, now);
       ctx.restore();
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      for (const p of placed.filter((p) => p.def.id === 'lantern' || p.def.id === 'jackolantern')) {
-        // the lantern hangs from its top; the jack-o-lantern sits on its base
-        const cy = p.def.zone === 'hang' ? p.item.y + 6 : p.item.y - 5;
+      for (const p of placed.filter((p) => p.def.glow)) {
+        // hanging lights glow below their top; floor ones around their upper part
+        const h = this.item(p.def.art).h;
+        const cy = p.def.zone === 'hang' ? p.item.y + 6 : p.item.y - Math.min(h - 3, 8);
         ctx.drawImage(this.glow.canvas, Math.round(p.item.x - this.glow.w / 2), Math.round(cy - this.glow.h / 2));
       }
       ctx.restore();
+      // flames stay bright at night
+      for (const p of placed.filter((p) => p.def.id === 'fireplace' || p.def.id === 'fireflies')) this.animatePiece(p.item, p.def, now);
     }
 
     if (!m.absent) this.drawSleepAndThoughts(m, now);
@@ -272,8 +352,14 @@ export class Scene {
     }
   }
 
+  /** The art a piece shows now: the four-seasons tree follows the season. */
+  private artOf(def: DecorDef): ItemArt {
+    return def.id === 'seasontree' ? (`tree_${this.season}` as ItemArt) : def.art;
+  }
+  private season: Season = 'summer';
+
   private drawPiece(item: PlacedItem, def: DecorDef): void {
-    const s = this.item(def.art);
+    const s = this.item(this.artOf(def));
     const b = this.itemBox(item);
     if (!b) return;
     const ctx = this.ctx;
@@ -285,6 +371,125 @@ export class Scene {
       ctx.restore();
     } else {
       ctx.drawImage(s.canvas, b.x, b.y);
+    }
+  }
+
+  /** Visiting rabbits: they stand either side of her, bob, blink, and doze while she sleeps. */
+  private drawGuests(m: SceneModel, now: number): void {
+    const ctx = this.ctx;
+    (m.guests ?? []).slice(0, GUEST_SPOTS.length).forEach((g, i) => {
+      const spot = GUEST_SPOTS[i]!;
+      const asleep = m.mood === 'asleep';
+      const face: Face = asleep ? 'asleep' : this.guestHappyUntil[i]! > now ? 'happy' : 'content';
+      const frame: Frame = asleep ? (!reduceMotion && Math.floor(now / 1500 + i) % 2 ? 1 : 0)
+        : !reduceMotion && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
+      const sp = this.rabbit(g.coat, face, frame, g.dress);
+      const left = Math.round(spot.x - RABBIT_W / 2), top = spot.y - RABBIT_GROUND;
+      ctx.save();
+      if (spot.facing === -1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(sp.canvas, left, top);
+      ctx.restore();
+    });
+  }
+
+  private guestHappyUntil = [0, 0];
+
+  /** A wild visitor: sits in its corner, bobs now and then, looks about, and hops when tapped. */
+  /** The first spot for the visitor that no floor piece or rug covers (or the first, if all are). */
+  private critterSpot(m: Pick<SceneModel, 'critter' | 'burrow'>): { x: number; y: number } {
+    const s = this.item(m.critter as ItemArt);
+    const boxes = m.burrow.items.filter((i) => i.placed && byId(i.id)?.zone !== 'hang').map((i) => this.itemBox(i)).filter((b): b is Box => !!b);
+    const free = CRITTER_SPOTS.find((p) => {
+      const x0 = p.x - s.w / 2, x1 = p.x + s.w / 2, y0 = p.y - s.h;
+      return boxes.every((b) => x1 < b.x || x0 > b.x + b.w || p.y < b.y || y0 > b.y + b.h);
+    });
+    return free ?? CRITTER_SPOTS[0]!;
+  }
+
+  private drawCritter(m: SceneModel, now: number): void {
+    if (!m.critter) return;
+    const s = this.item(m.critter as ItemArt);
+    const spot = this.critterSpot(m);
+    const hopT = (now - this.critterHopAt) / 500;
+    const hop = hopT >= 0 && hopT < 1 && !reduceMotion ? Math.round(Math.sin(hopT * Math.PI) * 5) : 0;
+    const bob = !reduceMotion && Math.floor(now / 1300) % 5 === 2 ? 1 : 0;
+    // it faces her most of the time, and glances the other way now and then
+    const away = !reduceMotion && Math.floor(now / 4100) % 4 === 3;
+    const left = Math.round(spot.x - s.w / 2), top = spot.y - s.h - hop - bob;
+    const ctx = this.ctx;
+    ctx.save();
+    // the art faces left: on the left of the room it turns to face her, and glancing away is the other way
+    const mirror = (spot.x < SCENE_W / 2) !== away;
+    if (mirror) { ctx.translate(left * 2 + s.w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(s.canvas, left, top);
+    ctx.restore();
+  }
+
+  private critterHopAt = -1e9;
+
+  /** Whether a point is on the visitor, for tapping. */
+  critterAt(m: Pick<SceneModel, 'critter' | 'burrow'>, px: number, py: number): boolean {
+    if (!m.critter) return false;
+    const s = this.item(m.critter as ItemArt);
+    const spot = this.critterSpot(m);
+    return Math.abs(px - spot.x) <= s.w / 2 + 3 && py >= spot.y - s.h - 4 && py <= spot.y + 1;
+  }
+
+  /** The visitor's happy hop when tapped. */
+  cheerCritter(m: Pick<SceneModel, 'critter' | 'burrow'>, now: number): void {
+    this.critterHopAt = now;
+    const spot = this.critterSpot(m);
+    this.burst('heart', 1, now, { x: spot.x, y: spot.y - 18 });
+  }
+
+  /** Which guest (0 or 1) is under a point, for tapping. */
+  guestAt(m: SceneModel, px: number, py: number): number | null {
+    const n = Math.min(m.guests?.length ?? 0, GUEST_SPOTS.length);
+    for (let i = 0; i < n; i++) {
+      const spot = GUEST_SPOTS[i]!;
+      if (Math.abs(px - spot.x) <= 13 && py >= spot.y - 32 && py <= spot.y) return i;
+    }
+    return null;
+  }
+
+  /** A guest's happy wiggle when tapped. */
+  cheerGuest(i: number, now: number): void {
+    this.guestHappyUntil[i] = now + 1400;
+    const spot = GUEST_SPOTS[i];
+    if (spot) this.burst('heart', 2, now, { x: spot.x, y: spot.y - 30 });
+  }
+
+  /** Moving parts drawn over a piece: the fireplace's flames, the clock's pendulum. */
+  private animatePiece(item: PlacedItem, def: DecorDef, now: number): void {
+    const b = this.itemBox(item);
+    if (!b) return;
+    const ctx = this.ctx;
+    if (def.id === 'fireplace') {
+      const f = this.item(!reduceMotion && Math.floor(now / 260) % 2 ? 'flame2' : 'flame1');
+      ctx.drawImage(f.canvas, Math.round(item.x - f.w / 2), b.y + b.h - f.h - 3);
+    } else if (def.id === 'clock') {
+      const swing = reduceMotion ? 0 : Math.round(Math.sin(now / 500) * 1.6);
+      const cx = Math.round(item.x), top = b.y + 10;
+      ctx.fillStyle = '#D5A12A';
+      ctx.fillRect(cx, top, 1, 4);
+      ctx.fillRect(cx + swing, top + 4, 1, 2);
+      ctx.fillStyle = '#F6D24A';
+      ctx.fillRect(cx + swing - 1, top + 6, 3, 2);
+    } else if (def.id === 'fireflies') {
+      // three fireflies drifting round the jar, blinking on and off
+      for (let i = 0; i < 3; i++) {
+        const t = reduceMotion ? i * 2 : now / 900 + i * 2.1;
+        if (!reduceMotion && Math.floor(now / 350 + i * 3) % 5 === 0) continue;
+        ctx.fillStyle = i === 1 ? '#FFF6C8' : '#F6D24A';
+        ctx.fillRect(Math.round(item.x + Math.cos(t) * (b.w / 2 + 3)), Math.round(b.y + b.h / 2 + Math.sin(t * 1.3) * (b.h / 2 + 2)), 1, 1);
+      }
+    } else if (def.id === 'wishingwell') {
+      // now and then a glint on the water
+      if (!reduceMotion && Math.floor(now / 700) % 4 === 0) {
+        const g = this.item('sparkle');
+        const x = b.x + 4 + (Math.floor(now / 2800) % 3) * 6;
+        ctx.drawImage(g.canvas, x, b.y + b.h - 8);
+      }
     }
   }
 
@@ -300,13 +505,22 @@ export class Scene {
     for (let y = y0; y <= y1; y++, i++) { if (on(i)) { ctx.fillRect(x1, y, 1, 1); ctx.fillRect(x0, y1 - (y - y0), 1, 1); } }
   }
 
-  private updateRabbit(m: SceneModel, now: number, bed?: { x: number }): void {
+  private updateRabbit(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[], bed?: { x: number }): void {
     // asleep: she is already curled up on her cushion, not walking to it
-    if (bed) { this.targetX = bed.x; this.x = bed.x; this.hopPhase = 0; return; }
-    else if (m.mood !== 'asleep' && !this.reaction && now > this.nextWander && !m.decorating) {
-      this.targetX = WALK_MIN + Math.random() * (WALK_MAX - WALK_MIN);
+    if (bed) { this.targetX = bed.x; this.x = bed.x; this.hopPhase = 0; this.idle = null; return; }
+    const free = m.mood !== 'asleep' && !this.reaction && !m.decorating && !m.absent;
+    // a tap, a meal or decorating calls her away from whatever she was doing
+    if (!free) this.idle = null;
+    if (this.idle?.kind === 'spot' && now > this.idle.until) { this.idle = null; this.nextWander = now + 1500; }
+    if (this.idle?.kind === 'binky' && now > this.idle.start + BINKY_MS) this.idle = null;
+    if (free && !this.idle && now > this.nextWander) {
+      this.idle = this.pickIdle(m, now, placed);
+      if (this.idle?.kind === 'spot') this.targetX = this.idle.x;
+      else if (!this.idle) this.targetX = WALK_MIN + Math.random() * (WALK_MAX - WALK_MIN);
       this.nextWander = now + 3500 + Math.random() * 4000;
     }
+    if (this.idle?.kind === 'spot' && this.arrived()) { this.facing = this.idle.facing; this.hopPhase = 0; return; }
+    if (this.idle?.kind === 'binky') { this.hopPhase = 0; return; }
     const dx = this.targetX - this.x;
     if (Math.abs(dx) > 0.5 && (!this.reaction || bed)) {
       if (reduceMotion) { this.x = this.targetX; this.hopPhase = 0; return; }
@@ -318,13 +532,84 @@ export class Scene {
     }
   }
 
+  private idle: Idle | null = null;
+
+  private arrived(): boolean {
+    return Math.abs(this.targetX - this.x) <= 0.5;
+  }
+
+  /** What she's doing now, once she's there, for the mood line. */
+  activity(): Activity | null {
+    return this.idle?.kind === 'spot' && this.arrived() ? this.idle.activity : null;
+  }
+
+  /**
+   * Something to do, or null to just wander. Cold (winter, snow, or night)
+   * draws her to the fire; rain or snow to the window, from the window seat if
+   * there is one; and each day she has a favourite piece of decor. She
+   * sometimes binkies. All only when she's content: wanting something, she
+   * potters about under her thought bubble.
+   */
+  private pickIdle(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[]): Idle | null {
+    if (m.mood !== 'content') return null;
+    // each its own chance, checked in this order
+    const roll = () => Math.random();
+    const stay = now + SPOT_MS[0] + Math.random() * (SPOT_MS[1] - SPOT_MS[0]);
+    const weather = m.weather ?? 'sunny';
+    // weather worth watching
+    const wet = weather === 'rain' || weather === 'snow' || weather === 'leaves';
+    const cold = m.season === 'winter' || weather === 'snow' || m.night;
+    const find = (id: string) => placed.find((p) => p.def.id === id && p.def.zone === 'floor');
+    const fire = find('fireplace');
+    if (fire && cold && roll() < 0.5) {
+      const side = fire.item.x < SCENE_W / 2 ? 1 : -1;
+      const x = clampX(fire.item.x + side * 13);
+      const standY = Math.min(SCENE_H - 4, Math.max(STAND_Y, fire.item.y + 4));
+      return { kind: 'spot', activity: { kind: 'fire' }, x, standY, depth: standY, facing: side === 1 ? 1 : -1, until: stay };
+    }
+    if (wet && roll() < 0.5) {
+      const win = windowOf(m.room);
+      const seat = find('windowseat');
+      const box = seat && this.itemBox(seat.item);
+      if (seat && box) {
+        return { kind: 'spot', activity: { kind: 'seat', weather }, x: clampX(seat.item.x), standY: box.y + 2, depth: seat.item.y + 0.5, facing: seat.item.x > win.x ? 1 : -1, until: stay };
+      }
+      // under the window, looking up at it
+      const left = win.x < SCENE_W / 2;
+      return { kind: 'spot', activity: { kind: 'window', weather }, x: win.x + (left ? 4 : -4), standY: STAND_Y, depth: STAND_Y, facing: left ? 1 : -1, until: stay };
+    }
+    if (!reduceMotion && roll() < 0.15) {
+      this.burst('sparkle', 2, now);
+      return { kind: 'binky', start: now, turned: false };
+    }
+    const fav = favourite(placed, m.seed);
+    if (fav && roll() < 0.35) {
+      const w = this.item(fav.def.art).w;
+      const side = fav.item.x < SCENE_W / 2 ? 1 : -1;
+      const x = clampX(fav.item.x + side * (w / 2 + 8));
+      return { kind: 'spot', activity: { kind: 'favourite', piece: fav.def.id }, x, standY: STAND_Y, depth: STAND_Y, facing: side === 1 ? 1 : -1, until: stay };
+    }
+    return null;
+  }
+
   private drawRabbit(m: SceneModel, now: number, standY: number): void {
     if (this.reaction && now > this.reaction.until) this.reaction = null;
     let face: Face = 'content';
     let frame: Frame = 0;
+    let lift = 0;
+    const idle = this.idle;
     if (m.mood === 'asleep') {
       face = 'asleep';
       frame = !reduceMotion && Math.floor(now / 1400) % 2 ? 1 : 0;
+    } else if (idle?.kind === 'binky') {
+      // up, a twist at the top, and down
+      const t = Math.min(1, (now - idle.start) / BINKY_MS);
+      lift = Math.round(Math.sin(t * Math.PI) * 9);
+      if (t > 0.5 && !idle.turned) { idle.turned = true; this.facing = this.facing === 1 ? -1 : 1; }
+      face = 'happy';
+    } else if (idle?.kind === 'spot' && idle.activity.kind === 'fire' && this.arrived()) {
+      // eyes closed, cosy
+      face = 'happy';
     } else if (this.reaction) {
       face = this.reaction.kind === 'eating' ? 'eating' : 'happy';
     } else if (m.mood === 'grumpy') {
@@ -334,7 +619,7 @@ export class Scene {
       else if (!reduceMotion && this.hopPhase === 0 && Math.floor(now / 900) % 3 === 1) frame = 1;
     }
     const s = this.rabbit(m.coat, face, frame, m.dress);
-    const hop = this.hopPhase ? Math.round(Math.sin(this.hopPhase * Math.PI) * 3) : 0;
+    const hop = (this.hopPhase ? Math.round(Math.sin(this.hopPhase * Math.PI) * 3) : 0) + lift;
     const left = Math.round(this.x - RABBIT_W / 2);
     const top = standY - RABBIT_GROUND - hop;
     const ctx = this.ctx;
@@ -350,6 +635,14 @@ export class Scene {
     if (this.reaction?.kind === 'eating' && this.reaction.art) {
       const f = this.item(this.reaction.art);
       ctx.drawImage(f.canvas, Math.round(this.x - f.w / 2 + 1), standY - 12);
+    }
+    // the toy she's playing with, bouncing beside her
+    if (this.reaction?.kind === 'play' && this.reaction.art) {
+      const toy = this.item(this.reaction.art);
+      const t = reduceMotion ? 0 : (this.reaction.until - now) / 180;
+      const bounce = Math.round(Math.abs(Math.sin(t)) * 5);
+      const side = this.facing === 1 ? -1 : 1;
+      ctx.drawImage(toy.canvas, Math.round(this.x + side * 14 - toy.w / 2), standY - toy.h - bounce);
     }
     this.lastStandY = standY;
   }
@@ -410,4 +703,22 @@ function makeSoilTile(): HTMLCanvasElement {
     g.fillRect(s % 32, (s >>> 8) % 32, 1, 1);
   }
   return c;
+}
+
+/** Where she can stand to be beside something: not half off the edge of the room. */
+function clampX(x: number): number {
+  return Math.max(16, Math.min(SCENE_W - 16, Math.round(x)));
+}
+
+/**
+ * Her favourite piece today: one of the floor decor (not a bed), picked from
+ * her id and the date, so it's the same all day and on every device.
+ */
+function favourite(placed: { item: PlacedItem; def: DecorDef }[], seed?: string): { item: PlacedItem; def: DecorDef } | null {
+  if (!seed) return null;
+  const pieces = placed.filter((p) => p.def.zone === 'floor' && !p.def.bed).sort((a, b) => (a.item.uid < b.item.uid ? -1 : 1));
+  if (!pieces.length) return null;
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  return pieces[(h >>> 0) % pieces.length]!;
 }

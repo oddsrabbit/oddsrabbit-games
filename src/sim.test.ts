@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { dayKey, localParts, nextLocalHour } from './localtime';
-import { act, advance, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isPetState, mood, newPet, visit, type FoodId, type PetState } from './sim';
-import { BOND_DAILY_CAP, DAY_MS, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, STEP_MS } from './tuning';
+import { act, advance, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, sleepMs, visit, type FoodId, type PetState } from './sim';
+import { BOND_DAILY_CAP, DAY_MS, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
 import { traitOf } from './world';
 
 const UTC = 'UTC';
@@ -33,15 +33,57 @@ test('an awake hour costs 3 hunger, 3 happiness, 4 energy and 2 cleanliness', ()
   assert.ok(Math.abs(state.needs.clean - 93) < 1e-9);
 });
 
-test('asleep at night: happiness and cleanliness hold, energy refills', () => {
-  const start = Date.UTC(2026, 8, 24, 23, 0);
-  const s0 = pet(start);
+test('asleep: happiness and cleanliness hold, energy refills', () => {
+  const s0 = pet();
   s0.needs.energy = 40;
-  const { state } = advance(s0, start + 2 * HOUR_MS, UTC);
+  const r = act(s0, 'nap', NOON, UTC);
+  assert.ok(r.ok);
+  const { state } = advance(r.state, NOON + 2 * HOUR_MS, UTC);
   assert.equal(state.needs.happy, 80);
   assert.equal(state.needs.clean, 95);
   assert.ok(state.needs.energy > 60);
-  assert.equal(mood(state, start + 2 * HOUR_MS, UTC), 'asleep');
+  assert.equal(mood(state, NOON + 2 * HOUR_MS, UTC), 'asleep');
+});
+
+test('night is only the sky: she is awake at midnight unless she is sleeping', () => {
+  const midnight = Date.UTC(2026, 8, 25, 0, 0);
+  const s = pet(midnight);
+  assert.equal(isNight(midnight, UTC), true);
+  assert.equal(isAsleep(s, midnight, UTC), false);
+  assert.equal(mood(s, midnight, UTC), 'content');
+  assert.ok(act(s, 'pet', midnight, UTC).ok);
+  s.needs.hunger = 50;
+  assert.ok(act(s, 'feed', midnight, UTC).ok);
+  assert.equal(isNight(NOON, UTC), false);
+});
+
+test('she sleeps until she is rested: longer when she is more tired', () => {
+  assert.equal(sleepMs(100), STEP_MS);
+  assert.equal(sleepMs(88), HOUR_MS);
+  assert.equal(sleepMs(28), 6 * HOUR_MS);
+  assert.ok(sleepMs(10) > sleepMs(70));
+  assert.equal(sleepMs(88) % STEP_MS, 0);
+});
+
+test('left alone she dozes off when worn out, then wakes up rested by herself', () => {
+  const s = pet();
+  s.needs.energy = SLEEP.dozeBelow + 1;
+  const { state, events } = advance(s, NOON + DAY_MS, UTC);
+  const fell = events.filter((e) => e.kind === 'fellAsleep');
+  assert.ok(fell.length >= 1);
+  assert.ok(events.some((e) => e.kind === 'napDone'));
+  // she dozed off at the first step under the threshold, about 15 minutes in
+  assert.ok(fell[0]!.atMs <= NOON + HOUR_MS);
+  assert.ok(state.needs.energy > SLEEP.dozeBelow);
+});
+
+test('on holiday she does not doze off (her needs are paused)', () => {
+  const s = pet();
+  s.needs.energy = 5;
+  s.vacationUntilMs = NOON + 2 * DAY_MS;
+  const { state, events } = advance(s, NOON + DAY_MS, UTC);
+  assert.equal(events.filter((e) => e.kind === 'fellAsleep').length, 0);
+  assert.equal(state.timers.length, 0);
 });
 
 test('advancing in pieces lands exactly where one long advance does', () => {
@@ -75,12 +117,13 @@ test('a month away is replayed as at most a week, and needs bottom out at zero',
   assert.equal(mood(state, NOON + 30 * DAY_MS, UTC) === 'grumpy' || mood(state, NOON + 30 * DAY_MS, UTC) === 'asleep', true);
 });
 
-test('a nap refills energy when it ends, and she is asleep until then', () => {
+test('put to bed, she sleeps until her energy is full, and is asleep until then', () => {
   let s = pet();
-  s.needs.energy = 50;
+  s.needs.energy = 76;
   const r = act(s, 'nap', NOON, UTC);
   assert.ok(r.ok);
   s = r.state;
+  assert.equal(s.timers[0]!.endsAtMs, NOON + 2 * HOUR_MS);
   assert.equal(isAsleep(s, NOON + HOUR_MS, UTC), true);
   const { state, events } = advance(s, NOON + 2 * HOUR_MS + STEP_MS, UTC);
   assert.equal(events.filter((e) => e.kind === 'napDone').length, 1);
@@ -108,17 +151,32 @@ test('a nap can be ended early: she keeps what she regained, and no refill later
   assert.ok(later.state.needs.energy < 100);
 });
 
-test('waking only works on a daytime nap', () => {
+test('waking only works while she sleeps, at any hour, and leaves her drowsy', () => {
   assert.deepEqual(act(pet(), 'wake', NOON, UTC), { ok: false, reason: 'notNapping' });
   const night = Date.UTC(2026, 8, 24, 23, 30);
-  assert.deepEqual(act(pet(night), 'wake', night, UTC), { ok: false, reason: 'night' });
+  const s = pet(night);
+  s.needs.energy = 10;
+  const bed = act(s, 'nap', night, UTC);
+  assert.ok(bed.ok);
+  const woke = act(bed.state, 'wake', night + STEP_MS, UTC);
+  assert.ok(woke.ok);
+  if (!woke.ok) return;
+  assert.equal(woke.state.needs.energy, SLEEP.wokenEnergy);
+  // drowsy, but she stays up a while before dozing off again
+  const later = advance(woke.state, night + STEP_MS + HOUR_MS, UTC);
+  assert.equal(isAsleep(later.state, night + STEP_MS + HOUR_MS, UTC), false);
 });
 
-test('no nap when she is not tired, and never at night', () => {
+test('no bedtime when she is not tired, but any hour when she is', () => {
   assert.deepEqual(act(pet(), 'nap', NOON, UTC), { ok: false, reason: 'notTired' });
-  const night = pet(Date.UTC(2026, 8, 24, 23, 30));
+  const at = Date.UTC(2026, 8, 24, 23, 30);
+  const night = pet(at);
   night.needs.energy = 10;
-  assert.deepEqual(act(night, 'nap', Date.UTC(2026, 8, 24, 23, 30), UTC), { ok: false, reason: 'night' });
+  assert.ok(act(night, 'nap', at, UTC).ok);
+  const morning = Date.UTC(2026, 8, 25, 9, 0);
+  const day = pet(morning);
+  day.needs.energy = 50;
+  assert.ok(act(day, 'nap', morning, UTC).ok);
 });
 
 test('a baked treat waits in the pantry until she is fed one', () => {
@@ -165,13 +223,13 @@ test('the gift is once a day, rolls over at 05:00 local, and a missed day only p
   const day1 = Date.parse('2026-09-24T09:00:00-04:00');
   let s = newPet('p', 'Clover', 'snow', day1, tz);
   let r = act(s, 'gift', day1, tz);
-  assert.ok(r.ok && r.clover === 10);
+  assert.ok(r.ok && r.clover === 15);
   s = r.ok ? r.state : s;
   assert.equal(giftReady(s, Date.parse('2026-09-25T04:59:00-04:00'), tz), false);
   assert.equal(giftReady(s, Date.parse('2026-09-25T05:00:00-04:00'), tz), true);
   // skip the 25th entirely; the streak continues on the 26th
   r = act(s, 'gift', Date.parse('2026-09-26T10:00:00-04:00'), tz);
-  assert.ok(r.ok && r.state.gift.streak === 2 && r.clover === 11);
+  assert.ok(r.ok && r.state.gift.streak === 2 && r.clover === 17);
 });
 
 test('two low needs make her grumpy; one low need names what she wants', () => {
@@ -195,7 +253,10 @@ test('a new day visited counts once, however many times she is opened', () => {
 test('bond levels report progress to the next level', () => {
   assert.deepEqual(bondLevel(0), { level: 1, into: 0, span: 12 });
   assert.equal(bondLevel(12).level, 2);
-  assert.equal(bondLevel(10_000).span, null);
+  assert.equal(bondLevel(280).level, 7);
+  // no top: past level 7 each gap grows by 20 (110, 130, …)
+  assert.deepEqual(bondLevel(390), { level: 8, into: 0, span: 130 });
+  assert.equal(bondLevel(10_000).level > 20, true);
 });
 
 test('local time: day keys and the next 05:00 survive a DST change', () => {
@@ -229,7 +290,7 @@ test('the paid foods need their cost', () => {
   const s = pet();
   s.needs.hunger = 20;
   const berry = act(s, 'feed', NOON, UTC, { food: 'strawberry' });
-  assert.ok(berry.ok && berry.state.clover === s.clover - 3 + 1, 'costs 3, care pays 1 back');
+  assert.ok(berry.ok && berry.state.clover === s.clover - 3 + 2, 'costs 3, care pays 2 back');
   s.clover = 2;
   assert.deepEqual(act(s, 'feed', NOON, UTC, { food: 'strawberry' }), { ok: false, reason: 'broke' });
   assert.deepEqual(act(s, 'feed', NOON, UTC, { food: 'treat' }), { ok: false, reason: 'noTreats' });
@@ -260,4 +321,50 @@ test('a meal\'s reaction is fixed: reopening the game cannot re-roll it', () => 
   const b = act(s, 'feed', NOON + 5 * 60_000, UTC, { food: 'carrot' });
   assert.ok(a.ok && b.ok);
   if (a.ok && b.ok) assert.equal(a.reaction, b.reaction);
+});
+
+test("the next 05:00 from inside the 05:00 hour is tomorrow's, not the one just gone", () => {
+  const tz = 'Europe/London';
+  const at = Date.parse('2026-09-24T05:20:00+01:00');
+  assert.equal(nextLocalHour(at, tz, 5), Date.parse('2026-09-25T05:00:00+01:00'));
+  // and exactly on the hour it's the next day's too: "after", not "at or after"
+  const on = Date.parse('2026-09-24T05:00:00+01:00');
+  assert.equal(nextLocalHour(on, tz, 5), Date.parse('2026-09-25T05:00:00+01:00'));
+});
+
+test("switching time zones can't open the same day twice", () => {
+  // Kiritimati is UTC+14, Pago Pago UTC-11: a whole day apart at the same instant.
+  const east = 'Pacific/Kiritimati', west = 'Pacific/Pago_Pago';
+  let s = pet();
+  let gifts = 0, newDays = 0;
+  for (let i = 0; i < 6; i++) {
+    const tz = i % 2 ? west : east;
+    const v = visit(s, NOON, tz);
+    s = v.state;
+    if (v.newDay) newDays++;
+    const g = act(s, 'gift', NOON, tz);
+    if (g.ok) { s = g.state; gifts++; }
+    assert.equal(giftReady(s, NOON, tz), false);
+  }
+  assert.equal(gifts, 1, 'one gift, however often the zone flips');
+  assert.ok(newDays <= 1, 'at most the one day the zone jumped ahead');
+  // the care cap holds too
+  let fed = s;
+  let bond = 0;
+  for (let i = 0; i < 40; i++) {
+    const r = act(fed, 'play', NOON, i % 2 ? west : east);
+    if (r.ok) { fed = r.state; bond += r.bond; fed.needs.happy = 0; }
+  }
+  assert.ok(bond <= BOND_DAILY_CAP * 2, 'no more than two days of care, the one it was and the one it jumped to');
+});
+
+test('a save missing something the game needs is unreadable, not a crash later', () => {
+  const s = pet() as Partial<PetState>;
+  assert.ok(isPetState(s));
+  for (const k of ['gift', 'clover', 'bond', 'name', 'lastVisitDay'] as const) {
+    const broken: Partial<PetState> = { ...s };
+    delete broken[k];
+    assert.equal(isPetState(broken), false, `without ${k}`);
+  }
+  assert.equal(isPetState({ ...s, needs: { hunger: 50 } }), false, 'only some of her needs');
 });

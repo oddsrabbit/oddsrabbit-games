@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  buyOutfit, CROPS, earnMarking, harvest, pickFind, plant, playsLeft, plots, recordPlay, startVacation, endVacation, wardrobe, wear,
-  PLAYS_PER_DAY, COLLECTIBLES,
+  buyOutfit, buyToy, giveOutfit, buyUpgrade, CROPS, cropYield, harvest, ownsToy, pickFind, plant, plotCount, plots, soilMaxed, soilPrice,
+  startVacation, endVacation, wardrobe, wear, COLLECTIBLES,
 } from './extras';
-import { act, advance, newPet, visit, type PetState } from './sim';
+import { act, advance, newPet, type PetState } from './sim';
 import { DAY_MS, HOUR_MS } from './tuning';
 import { activeEvents, limitedAvailable, seasonOf, TRAITS, traitOf, weatherOf } from './world';
 
@@ -80,7 +80,7 @@ test('garden: plant with clover, wait, harvest into the pantry', () => {
   // a home-grown berry is eaten before any clover is spent
   h.state.needs.hunger = 20;
   const fed = act(h.state, 'feed', NOON + CROPS.berry.growMs, UTC, { food: 'strawberry' });
-  assert.ok(fed.ok && fed.state.pantry?.berries === 1 && fed.state.clover === h.state.clover + 1);
+  assert.ok(fed.ok && fed.state.pantry?.berries === 1 && fed.state.clover === h.state.clover + 2);
 });
 
 test('a golden carrot is always loved', () => {
@@ -96,35 +96,66 @@ test('a golden carrot is always loved', () => {
   assert.deepEqual(act(s, 'feed', NOON, UTC, { food: 'golden' }), { ok: false, reason: 'noTreats' });
 });
 
-test('her marking comes on day 7 and follows how she was cared for', () => {
-  const s = pet();
-  s.careCounts = { fed: 2, pet: 9, clean: 3 };
-  s.daysVisited = 6;
-  assert.equal(earnMarking(s), null);
-  const v = visit(s, NOON + DAY_MS, UTC);
-  assert.equal(v.marking, 'heart');
-  assert.equal(v.state.marking, 'heart');
-  assert.equal(earnMarking(v.state), null, 'only once');
-  s.careCounts = { fed: 1, pet: 1, clean: 5 };
-  s.daysVisited = 7;
-  assert.equal(earnMarking(s), 'tuft');
-});
-
-test('three plays a day, with a capped clover reward', () => {
+test('toy play: she starts with a ball; other toys are bought; no limit on plays', () => {
   let s = pet();
-  for (let i = 0; i < PLAYS_PER_DAY; i++) {
-    const r = recordPlay(s, 40, NOON, UTC);
-    assert.ok(r.ok && r.clover === 10, 'capped at 10');
+  s.needs.happy = 20;
+  assert.ok(ownsToy(s, 'ball'));
+  assert.deepEqual(act(s, 'play', NOON, UTC, { toy: 'yarn' }), { ok: false, reason: 'noToy' });
+  for (let i = 0; i < 5; i++) {
+    const r = act(s, 'play', NOON + i * 60_000, UTC);
+    assert.ok(r.ok);
     s = r.ok ? r.state : s;
   }
-  assert.equal(playsLeft(s, NOON, UTC), 0);
-  assert.deepEqual(recordPlay(s, 5, NOON, UTC), { ok: false, reason: 'noPlays' });
-  assert.equal(playsLeft(s, NOON + DAY_MS, UTC), PLAYS_PER_DAY);
+  assert.equal(s.needs.happy, 70, '+10 joy a play');
+  s.clover = 40;
+  assert.deepEqual(buyToy(s, 'yarn'), { ok: false, reason: 'broke' });
+  s.clover = 60;
+  const b = buyToy(s, 'yarn');
+  assert.ok(b.ok && b.state.clover === 10 && ownsToy(b.state, 'yarn'));
+  const tired = pet();
+  tired.needs.energy = 40;
+  const bed = act(tired, 'nap', NOON, UTC);
+  assert.ok(bed.ok);
+  assert.deepEqual(act(bed.state, 'play', NOON + 60_000, UTC), { ok: false, reason: 'asleep' });
+});
+
+test('garden upgrades: one plot to start, plots in order, soil repeats and pays more per sprout', () => {
+  let s = pet();
+  assert.equal(plotCount(s), 1);
+  s.clover = 10_000;
+  assert.deepEqual(buyUpgrade(s, 'plot3'), { ok: false, reason: 'locked' });
+  for (const id of ['plot2', 'plot3'] as const) {
+    const r = buyUpgrade(s, id);
+    assert.ok(r.ok);
+    s = r.ok ? r.state : s;
+  }
+  assert.equal(plotCount(s), 3);
+  assert.equal(plots(s).length, 3);
+  assert.deepEqual(buyUpgrade(s, 'plot4'), { ok: false, reason: 'locked' }, 'needs soil 3');
+  assert.equal(soilPrice(s), 600);
+  const soil = buyUpgrade(s, 'soil');
+  assert.ok(soil.ok && soil.state.soilLevel === 1 && soilPrice(soil.state) === 1080);
+  s = soil.ok ? soil.state : s;
+  const p = plant(s, 0, 'sprout', NOON);
+  assert.ok(p.ok);
+  const h = p.ok ? harvest(p.state, 0, NOON + CROPS.sprout.growMs) : null;
+  assert.ok(h?.ok && h.clover === 8, '6 + 2 per soil level');
+});
+
+test('the watering can makes crops grow 25% faster', () => {
+  const s = pet();
+  s.clover = 2000;
+  const c = buyUpgrade(s, 'can');
+  assert.ok(c.ok);
+  const p = c.ok ? plant(c.state, 0, 'berry', NOON) : null;
+  assert.ok(p?.ok && plots(p.state)[0]?.readyAtMs === NOON + CROPS.berry.growMs / 1.25);
 });
 
 test('wardrobe: buy, wear, swap and take off', () => {
   let s = pet();
-  s.clover = 100;
+  s.clover = 249;
+  assert.deepEqual(buyOutfit(s, 'bow'), { ok: false, reason: 'broke' });
+  s.clover = 250;
   const b = buyOutfit(s, 'bow');
   assert.ok(b.ok);
   s = b.ok ? b.state : s;
@@ -133,6 +164,18 @@ test('wardrobe: buy, wear, swap and take off', () => {
   s = wear(s, 'head', null);
   assert.equal(wardrobe(s).head, null);
   assert.equal(wardrobe(wear(s, 'head', 'beanie')).head, null, "can't wear what she doesn't own");
+});
+
+test('the bandana is affordable from the starting clover, for the first-day goal', () => {
+  const b = buyOutfit(pet(), 'bandana');
+  assert.ok(b.ok);
+});
+
+test('a new rabbit owns no outfits, and a gifted one waits in the wardrobe unworn', () => {
+  const s = pet();
+  assert.deepEqual(wardrobe(s), { owned: [], head: null, neck: null });
+  const g = giveOutfit(s, 'acorncap');
+  assert.deepEqual(wardrobe(g), { owned: ['acorncap'], head: null, neck: null });
 });
 
 test('seasons, the weather and events come from the date', () => {
@@ -145,4 +188,21 @@ test('seasons, the weather and events come from the date', () => {
   assert.equal(limitedAvailable('pumpkin', NOON, UTC), true);
   assert.equal(limitedAvailable('jackolantern', NOON, UTC), false);
   assert.equal(limitedAvailable('cushion', NOON, UTC), true, 'regular items always');
+});
+
+test('soil stops at level 5, and on the way richer soil grows more strawberries and golden carrots', () => {
+  const s = newPet('soil', 'Mochi', 'snow', NOON, UTC);
+  s.clover = 1e6;
+  const yieldsAt = (lvl: number) => { const p = { ...s, soilLevel: lvl }; return [cropYield(p, 'berry'), cropYield(p, 'golden')]; };
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(yieldsAt), [[2, 1], [2, 1], [3, 1], [3, 1], [4, 1], [4, 2]]);
+  let t = s;
+  for (let i = 0; i < 5; i++) { const r = buyUpgrade(t, 'soil'); assert.ok(r.ok); t = r.state; }
+  assert.equal(t.soilLevel, 5);
+  assert.equal(soilMaxed(t), true);
+  assert.deepEqual(buyUpgrade(t, 'soil'), { ok: false, reason: 'owned' });
+  // a harvest at level 5
+  const planted = plant({ ...t, clover: 100 }, 0, 'berry', NOON);
+  assert.ok(planted.ok);
+  const picked = harvest(planted.state, 0, NOON + 9 * HOUR_MS);
+  assert.ok(picked.ok && (picked.state.pantry?.berries ?? 0) === 4);
 });

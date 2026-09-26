@@ -11,6 +11,11 @@ export function now(): number {
   return Date.now() + offsetMs;
 }
 
+/** Server time minus the device clock, as last measured (0 before then). */
+export function clockOffset(): number {
+  return offsetMs;
+}
+
 /** Whether "now" comes from the server rather than the device clock. */
 export function isServerTime(): boolean {
   return trusted;

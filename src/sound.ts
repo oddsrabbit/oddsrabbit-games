@@ -9,7 +9,7 @@
 export type SoundName =
   | 'feed' | 'pet' | 'clean' | 'nap' | 'wake'
   | 'gift' | 'clover' | 'place' | 'flip' | 'nope'
-  | 'catch' | 'harvest' | 'find';
+  | 'play' | 'harvest' | 'find' | 'bake' | 'ding';
 
 type Ctx = AudioContext;
 const AudioCtor: (new () => Ctx) | undefined =
@@ -146,7 +146,7 @@ export function play(name: SoundName): void {
       noise(c, { dur: 0.05, filter: 'highpass', from: 2500, vol: 0.2 });
       noise(c, { at: 0.06, dur: 0.05, filter: 'highpass', from: 3200, vol: 0.16 });
       break;
-    case 'catch': // a quick pop
+    case 'play': // a quick pop
       tone(c, { from: 600, to: 1200, dur: 0.07, vol: 0.22 });
       break;
     case 'harvest': // a leafy rustle, then a blip
@@ -155,6 +155,14 @@ export function play(name: SoundName): void {
       break;
     case 'find': // a small discovery chime
       [1319, 1568, 2093].forEach((f, i) => tone(c, { type: 'sine', from: f, at: i * 0.09, dur: 0.3, vol: 0.18 }));
+      break;
+    case 'bake': // the oven door, and a warm hum
+      tone(c, { type: 'triangle', from: 260, to: 200, dur: 0.12, vol: 0.3 });
+      noise(c, { at: 0.08, dur: 0.35, filter: 'lowpass', from: 600, vol: 0.12 });
+      break;
+    case 'ding': // the oven's little bell: it's ready
+      tone(c, { type: 'sine', from: 1568, dur: 0.5, vol: 0.2 });
+      tone(c, { type: 'sine', from: 2093, at: 0.12, dur: 0.45, vol: 0.12 });
       break;
     case 'nope': // a gentle low bump, never a buzzer
       tone(c, { type: 'triangle', from: 220, to: 180, dur: 0.14, vol: 0.25 });

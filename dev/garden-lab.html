@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Garden Lab</title>
+<!--
+  The garden strip from src/art/garden.ts and src/garden.ts, for checking the
+  art and the spots (docs/rabbit-pets-garden.md, stage 1). Not shipped.
+    npm run build          (writes dist/dev/garden-lab.js)
+    python3 -m http.server 8765   (at the repo's parent)
+    open http://localhost:8765/rabbit-pets/dev/garden-lab.html
+  Click the strip to see what hitTest finds there.
+-->
+<style>
+:root{--bg:#1d1a22;--panel:#2a2631;--ink:#eee8f2;--dim:#9a92a6;--line:#3b3645}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,sans-serif;padding:16px;display:flex;flex-direction:column;gap:12px}
+h1{font-size:15px;margin:0}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+select,input{font:inherit}
+select{background:#3a3543;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.wrap{overflow:auto;max-width:100%;border:1px solid var(--line);border-radius:8px}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:crosshair}
+#hit{color:var(--dim);font-family:ui-monospace,monospace;min-height:1.4em}
+</style></head><body>
+<h1>Garden lab</h1>
+<div class="row">
+  <label>Garden <select id="preset"><option value="new">New rabbit</option><option value="mid" selected>Mid-game (the mocks)</option><option value="full">Everything built</option></select></label>
+  <label>Season <select id="season"><option>spring</option><option>summer</option><option selected>autumn</option><option>winter</option></select></label>
+  <label>Weather <select id="weather"><option selected>sunny</option><option>cloudy</option><option>rain</option><option>snow</option><option>leaves</option></select></label>
+  <label><input type="checkbox" id="night"> Night</label>
+  <label><input type="checkbox" id="moon"> Real moon, phase <input type="range" id="phase" min="0" max="100" value="50"> <span id="phase-out"></span></label>
+  <label>Scale <select id="scale"><option>2</option><option>3</option><option selected>4</option></select></label>
+  <label><input type="checkbox" id="hits"> Tap targets</label>
+  <label><input type="checkbox" id="areas"> Areas and path</label>
+</div>
+<div class="wrap"><canvas id="strip"></canvas></div>
+<div id="hit">Click the strip.</div>
+<script type="module" src="../dist/dev/garden-lab.js"></script>
+</body></html>

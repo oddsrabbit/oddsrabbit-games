@@ -24,6 +24,6 @@
       "@oddsrabbit/apps-sdk": ["../apps-sdk/src/sdk/sdk.ts"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "dev/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

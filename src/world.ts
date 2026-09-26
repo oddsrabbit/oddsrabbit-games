@@ -85,15 +85,28 @@ export interface SeasonalEvent {
   decor: string[];
   /** Limited outfits sold during the event. */
   outfits: string[];
-  /** A free outfit handed out once per event, if any. */
-  gift?: string;
+  /** A free item handed out once per event, for opening the game while it runs. */
+  gift?: { kind: 'outfit' | 'decor'; id: string };
+  /** Collectibles she finds more often while it runs (collectibles.ts). */
+  finds: string[];
+  /** The festival raffle's prize, an outfit only ever won (raffle.ts). */
+  raffle?: string;
 }
 
+// docs/rabbit-pets-economy.md §3.3. Past items come back every year.
 export const EVENTS: SeasonalEvent[] = [
-  { id: 'harvest', name: 'Harvest moon', from: [9, 15], to: [10, 15], blurb: 'Pumpkins are in! A harvest pumpkin is in the shop for a limited time.', decor: ['pumpkin'], outfits: [] },
-  { id: 'spooky', name: 'Spooky week', from: [10, 24], to: [10, 31], blurb: 'A friendly jack-o-lantern, and a little witch hat.', decor: ['jackolantern'], outfits: ['witchhat'] },
-  { id: 'winterfest', name: 'Winterfest', from: [12, 10], to: [1, 5], blurb: 'A snow globe for the burrow, and a cozy scarf, on the house.', decor: ['snowglobe'], outfits: [], gift: 'redscarf' },
-  { id: 'bloom', name: 'Spring bloom', from: [4, 1], to: [4, 30], blurb: 'Flower crowns are in season.', decor: [], outfits: ['flowercrown'] },
+  { id: 'snowday', name: 'Snow day', from: [2, 1], to: [2, 28], blurb: 'Snow outside! Earmuffs on the house, and a sled and a snow rabbit in the shop.',
+    decor: ['sled', 'snowman', 'icicles'], outfits: [], gift: { kind: 'outfit', id: 'earmuffs' }, finds: ['snowflake', 'mitten', 'icicle', 'snowball'], raffle: 'flakeclip' },
+  { id: 'bloom', name: 'Spring bloom', from: [4, 1], to: [4, 30], blurb: 'Flowers everywhere. A daisy chain on the house.',
+    decor: ['tulips', 'birdhouse', 'blossom'], outfits: ['flowercrown'], gift: { kind: 'outfit', id: 'daisychain' }, finds: ['petal', 'bee', 'robinegg', 'ladybug'], raffle: 'beeclip' },
+  { id: 'summer', name: 'Summer fair', from: [7, 1], to: [7, 31], blurb: 'The fair is here. A paper fan on the house.',
+    decor: ['fairlights', 'lemonade', 'pool'], outfits: ['strawhat'], gift: { kind: 'decor', id: 'fan' }, finds: ['firefly', 'cherry', 'butterfly', 'daisy'], raffle: 'lei' },
+  { id: 'harvest', name: 'Harvest moon', from: [9, 15], to: [10, 15], blurb: 'Pumpkins are in! An acorn cap on the house.',
+    decor: ['pumpkin', 'applecrate', 'scarecrow'], outfits: [], gift: { kind: 'outfit', id: 'acorncap' }, finds: ['maple', 'conker', 'chestnut', 'wheat'], raffle: 'leafclip' },
+  { id: 'spooky', name: 'Spooky week', from: [10, 20], to: [11, 2], blurb: 'A friendly jack-o-lantern, a little witch hat, and a candy basket on the house.',
+    decor: ['jackolantern', 'ghost'], outfits: ['witchhat'], gift: { kind: 'decor', id: 'candybasket' }, finds: ['candy', 'bat', 'cobweb', 'owlfeather'], raffle: 'batclip' },
+  { id: 'winterfest', name: 'Winterfest', from: [12, 10], to: [1, 5], blurb: 'A snow globe and a tiny tree for the burrow, and a cozy scarf, on the house.',
+    decor: ['snowglobe', 'tinytree', 'stockings'], outfits: [], gift: { kind: 'outfit', id: 'redscarf' }, finds: ['jingle', 'candycane', 'gingerbread', 'holly'], raffle: 'startopper' },
 ];
 
 function inWindow(month: number, day: number, from: [number, number], to: [number, number]): boolean {

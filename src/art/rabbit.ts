@@ -54,11 +54,11 @@ function inCapsule(x: number, y: number, ax: number, ay: number, bx: number, by:
   return (x - px) ** 2 + (y - py) ** 2 <= r * r;
 }
 
-/** What she's wearing, the marking she earned, and her ears. Ids from extras.ts. Ears default to short. */
-export interface Dress { head?: string | null; neck?: string | null; marking?: string | null; ears?: Ears | null }
+/** What she's wearing, and her ears. Ids from extras.ts. Ears default to short. */
+export interface Dress { head?: string | null; neck?: string | null; ears?: Ears | null }
 
 export function dressKey(d: Dress | undefined): string {
-  return d ? `${d.head ?? ''}/${d.neck ?? ''}/${d.marking ?? ''}/${d.ears ?? ''}` : '///';
+  return d ? `${d.head ?? ''}/${d.neck ?? ''}/${d.ears ?? ''}` : '//';
 }
 
 export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dress): PixelGrid {
@@ -80,7 +80,9 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   const bodyCy = GROUND - bh;
   const [hw, hh] = SHAPE.head as unknown as [number, number];
   const bob = frame === 1 ? 1 : 0;
-  const headCy = asleep ? bodyCy - bh * 0.35 + bob * 0.5 : bodyCy - bh * 0.85 - hh * 0.55 + bob;
+  // The head bobs a whole pixel: a half-pixel bob moved the rasterised head
+  // but not the rounded hat anchor below, so a hat floated while she slept.
+  const headCy = asleep ? bodyCy - bh * 0.35 + bob : bodyCy - bh * 0.85 - hh * 0.55 + bob;
 
   const L = earShape.len, ew = earShape.w;
   const splay = asleep ? 1.25 : face === 'grumpy' ? 0.55 : 0.3;
@@ -196,7 +198,6 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   if (dress) {
     const top = Math.round(headCy - hh);
     const chin = Math.round(headCy + hh);
-    drawMarking(g, dress.marking, { cx, ey, exs, top, chin, asleep, pal });
     drawOutfit(g, dress.neck, { cx, top, chin, hw, asleep, pal });
     drawOutfit(g, dress.head, { cx, top, chin, hw, asleep, pal });
   }
@@ -235,6 +236,18 @@ const OUTFIT_ART: Record<string, { at: 'top' | 'ear' | 'chin'; rows: string[] }>
   bandana: { at: 'chin', rows: ['kkkkkkkkkkkk', 'krrwrrrrwrrk', '.krrrwrrrrk.', '..krrrrwrk..', '...krrrRk...', '....kRRk....', '.....kk.....'] },
   bell: { at: 'chin', rows: ['krrrrrrrrrrk', 'kkkkkkkkkkkk', '.....kk.....', '....kyYk....', '....kyYk....', '.....kk.....'] },
   redscarf: { at: 'chin', rows: ['kkkkkkkkkkkkk', 'krrwrrwrrwrrk', 'kRRRRRRRRRkRk', '.kkkkkkkkkkrk', '..........krk', '..........kRk', '..........kkk'] },
+  earmuffs: { at: 'top', rows: ['...kkkkkkkkk...', '..k.........k..', 'kkk.........kkk', 'kppk.......kppk', 'kpPk.......kpPk', '.kk.........kk.'] },
+  daisychain: { at: 'chin', rows: ['.kwk.kwk.kwk.', 'kwywkwywkwywk', 'gkwkgkwkgkwkg'] },
+  strawhat: { at: 'top', rows: ['.....kkkkk.....', '....kyyyyyk....', '....kyyyyyk....', '...kkrrrrrkk...', 'kkkyyyyyyyyykkk', 'kYYYYYYYYYYYYYk', '.kkkkkkkkkkkkk.'] },
+  acorncap: { at: 'top', rows: ['.....kk.....', '.....kn.....', '..kkkkkkkk..', '.knNnNnNnNk.', 'kNnNnNnNnNnk', 'kkkkkkkkkkkk'] },
+  crown: { at: 'top', rows: ['.k...k...k.', 'kyk.kyk.kyk', 'kyykyyykyyk', 'kyrkyykkryk', 'kYYYYYYYYYk', 'kkkkkkkkkkk'] },
+  // festival raffle prizes (raffle.ts), one per event
+  flakeclip: { at: 'ear', rows: ['k.k.k', '.kwk.', 'kwbwk', '.kwk.', 'k.k.k'] },
+  beeclip: { at: 'ear', rows: ['.kk..', 'kwwk.', 'kykyk', 'kykyk', '.kkk.'] },
+  lei: { at: 'chin', rows: ['kkkkkkkkkkkkk', 'kpkykrkpkykrk', '.kpkykrkpkyk.', '..kkkkkkkkk..'] },
+  leafclip: { at: 'ear', rows: ['...kk', '..kok', '.kOok', 'kOOk.', '.kk..'] },
+  batclip: { at: 'ear', rows: ['k...k', 'kk.kk', 'kykyk', 'kkkkk', '.k.k.'] },
+  startopper: { at: 'top', rows: ['...k...', '..kyk..', 'kkkykkk', 'kyyyyYk', '.kyyYk.', 'kyYkYYk', 'kk...kk'] },
 };
 
 function drawOutfit(g: PixelGrid, id: string | null | undefined, a: Anchor): void {
@@ -244,22 +257,4 @@ function drawOutfit(g: PixelGrid, id: string | null | undefined, a: Anchor): voi
   if (art.at === 'top') stamp(g, art.rows, a.cx, a.top + Math.min(3, n - 2));
   else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5, a.top + 2);
   else if (!a.asleep) stamp(g, art.rows, a.cx, a.chin + n - 2);
-}
-
-function drawMarking(g: PixelGrid, id: string | null | undefined, a: { cx: number; ey: number; exs: number[]; top: number; chin: number; asleep: boolean; pal: Record<string, RGBA | null> }): void {
-  const set = (x: number, y: number, c: RGBA) => { if (x >= 0 && y >= 0 && x < g.w && y < g.h) g.px[y]![x] = c; };
-  if (id === 'freckles') {
-    // darker than a light coat, lighter than a dark one
-    const b = a.pal.base!;
-    const dot = b[0] + b[1] + b[2] > 480 ? hex('B0735A') : hex('E6C2A2');
-    for (const [i, ex] of a.exs.entries()) {
-      const x = i === 0 ? ex - 1 : ex + 2;
-      set(x, a.ey + 4, dot); set(x + (i === 0 ? 2 : -2), a.ey + 4, dot); set(x + (i === 0 ? 1 : -1), a.ey + 5, dot);
-    }
-  } else if (id === 'heart' && !a.asleep) {
-    stamp(g, ['.p.p.', 'ppppp', '.ppp.', '..p..'], a.cx, a.chin + 5, { p: hex('F08AA0') });
-  } else if (id === 'tuft') {
-    const base = a.pal.base!, line = a.pal.line!;
-    stamp(g, ['.L.L.', 'LbLbL', 'LbbbL'], a.cx, a.top, { L: line, b: base });
-  }
 }

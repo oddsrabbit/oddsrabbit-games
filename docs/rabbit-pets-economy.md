@@ -1,6 +1,6 @@
 # Rabbit Pets: the clover economy
 
-Status: **proposed 2026‑09‑25**, not started. Rebalances clover in
+Status: **built 2026‑09‑25**, not yet deployed. In the game: `earn()` and the clover rate, the new numbers, lump sums, the starter week, toy play in place of carrot catch, garden upgrades, the yard, the friend limits, the whole launch shop and long-term goals with their art (walls, floors and the moon window as surfaces), the shop's layout and pinned goal, and all six seasonal events with their free items and finds. Not built: the burrow expansion (its own proposal) and invites (need a referrals verb). Visits, `counts` and Supporter status need the platform side in apps-sdk, the app and the backend. Rebalances clover in
 `rabbit-pets/`, adds long-term goals, and removes carrot catch. It goes with
 [`rabbit-pets-visits.md`](./rabbit-pets-visits.md), whose visit rewards
 are set here.
@@ -78,8 +78,8 @@ Rebalancing now costs nothing.
 |---|---|
 | 7 regular decor (cushion, plant, rug, lantern; toadstool, jar at bond 2; garland at bond 3) | 25–60, 270 in all |
 | 3 seasonal decor | 40–50, 135 in all |
-| 4 regular outfits | 25–45, 130 in all |
-| 3 seasonal outfits | 35–45 (the scarf is free once) |
+| 4 regular outfits | 25–45, 130 in all (since raised: bandana 40, bow 250, bell 300, beanie 450) |
+| 3 seasonal outfits | 35–45 (the scarf is free once; since raised to 800–900) |
 | Strawberry (food tray) | 3 each |
 | Seeds | 2 / 4 / 8 |
 
@@ -103,32 +103,37 @@ steady steps.
 | Finds | common +2, rare +15 | rare was +2 |
 | Carrot catch | **removed**; Play becomes toy play (§2.3) | was up to 30 a day |
 | Clover sprouts | 2 seed → 6, 4h | unchanged, but you start with **one** plot and buy the others (§2.5) |
-| **Starter week** | one set of goals a day for 7 days, §2.1 | new: 450, and a free clover patch |
+| **Getting started** | a 7-step checklist, a step per day visited, §2.1 | new: 450, and a free clover patch |
 | **Gift streak milestones** | once each: 7 days +50, 30 days +200, 100 days +750, 365 days +2,500 | new |
 | **Bond level-ups** | once each: level 2 +50, 3 +75, 4 +100, 5 +150, 6 +200, 7 +300 | new |
 
 The streak never resets (a missed day only pauses it), so every milestone
 is reachable by anyone who keeps coming back.
 
-### 2.1 Starter week
+### 2.1 Getting started
 
-Week one should feel like steady progress every day, not one burst. A
-short checklist sits under the clover chip. Each day's goals unlock on the
-player's next day of play, not the calendar, so a slow starter isn't
-punished. Every goal can be done alone.
+A short checklist of seven steps sits on the burrow ("Getting started ·
+1/4"). One more step opens for each day the player visits (days visited,
+not the calendar), so a slow starter loses nothing and the clover is spread
+out. **Changed 2026-09-25:** the steps were labelled Day 1–7 as a "starter
+week", which read as a schedule. They're now steps and never mention days;
+between steps the chip reads "more next time" and the sheet says the next
+step "opens next time you drop by (tomorrow or later)". Two goals were
+reworded (below). Every goal can be done alone, and goals done early pay
+when their step opens.
 
-| Day | Goals | Clover |
+| Step | Goals | Clover |
 |---|---|---|
-| 1 | Feed her, put her down for a nap, place your first decor, dress her | 100, plus **a free clover patch** so the yard starts on day one |
-| 2 | Play with her toy, harvest the garden, bake a treat | 70 |
-| 3 | Open the daily gift 3 days running, collect the yard | 70 |
+| 1 | Feed her, get her a bed (she starts with none and sleeps on the floor), play with her toy, dress her | 100, plus **a free clover patch** so the yard starts on day one |
+| 2 | Put her to bed when she's tired (a new rabbit isn't, for an hour or more), harvest the garden, bake a treat | 70 |
+| 3 | Open the daily gift 3 times, collect the yard | 70 |
 | 4 | Visit a friend with care, **or** share Rabbit Pets | 50 |
 | 5 | Place 3 pieces of decor | 30 |
-| 6 | Buy a garden upgrade | 30 |
-| 7 | A week together | 100 |
+| 6 | Open the meadow, past the yard | 30 |
+| 7 | Reach bond level 3 (was: a week together) | 100 |
 | | **Total** | **450 and a patch** |
 
-When the week is done, the checklist goes away for good.
+When every step is done, the checklist goes away for good.
 
 **What week one looks like** (clover earned by the end of each day):
 
@@ -146,7 +151,34 @@ reaches level 2 on day 2–3 and level 3 by day 7, each with a lump sum.
 
 ### 2.2 Friends
 
+**Revised (September 2026).** Friend clover is now a flat number, never
+boosted by the clover rate, so what it says is what arrives, and it grows
+through something bought rather than through the rate. The aim: about 10%
+faster per active friend, so five make a player 1.4 to 1.6 times faster,
+and friends help without being the game.
+
 | Source | Rule |
+|---|---|
+| Visiting, with care | +5, plus 3 per welcome piece you have |
+| Being visited | +5, plus 3 per welcome piece you have |
+| Receiving a golden carrot | +30 (it was grown, so it's the generous gift) |
+| Receiving a clover bundle | +5 (only from friends on older versions: bundles are no longer sent) |
+| Sending a gift | nothing: gifts are the giving |
+| **Welcome pieces** | Five meadow pieces, bought in order: welcome mat 1,000, guest chairs 3,000, tea corner 6,000, lantern path 12,000, friendship tree 25,000. Each adds 3 to every visit, made or received, for whoever bought it. A visit tops out at 20. |
+| **How many pay** | Your **first 5 of each a day**: 5 visits you make, 5 visits you receive, 5 clover gifts you receive. More still happen (guests, care, berries, hugs and finds), just without clover. |
+
+In the model (`dev/economy-model.py`, with the front-loaded yard of §2.6), against playing alone:
+
+| Friends | Casual: week 1, month 1, month 6, year | Engaged: week 1, month 1, month 6, year |
+|---|---|---|
+| 1 | 1.13, 1.08, 1.03, 1.05 | 1.08, 1.05, 1.02, 1.03 |
+| 3 | 1.39, 1.27, 1.25, 1.24 | 1.25, 1.20, 1.14, 1.15 |
+| 5 | 1.65, 1.57, 1.65, 1.44 | 1.41, 1.31, 1.32, 1.28 |
+
+The rest of this section is the original proposal, kept for its reasoning;
+where its numbers differ from the table above, the table is current.
+
+| Source | Rule (original) |
 |---|---|
 | Visiting, with care | +3 |
 | Sending a gift | +1 |
@@ -209,7 +241,7 @@ doesn't boost garden harvests, the yard (§2.6) or one-off lump sums.
 |---|---|---|---|
 | **Bond** | Care (10 bond a day) | Today's thresholds to level 7 (280). After that each level's gap grows by 20 (110, 130, 150…). | +10% a level to 7 (+60%), then **+2% a level with no end**. Every 5th level from 10 also gives a cosmetic: a title, a portrait frame. |
 | **Garden** | Harvests (crop timers) | Buying upgrades, including the repeatable soil (§2.5) | More clover per harvest. Flat, not boosted by the rate. |
-| **Collection** | Finds (about 0.5 a day) | Completing a set on the shelf: commons, rares, and one per seasonal event | **+5% a set.** Seasons and updates add sets. |
+| **Collection** | Finds (about 0.5 a day) | Completing a set on the shelf: commons and rares, plus one set per seasonal event (§3.3) | **+5% a permanent set, +2% an event set.** Updates add permanent sets. |
 | **Friendships** | Visits and gifts with one friend | A friend becomes a **best friend** after about 2 weeks of visiting each other | **+3% for each best friend**, up to 5, matching the daily limit. |
 
 A casual player reaches bond level 5 by day 30, 7 by day 60 and 15 in a
@@ -243,11 +275,23 @@ working.
 A new Yard section next to the garden: buildings that produce clover every
 hour, day and night, whether or not you open the game.
 
-| Building | First one | Produces | Each extra costs | How many | Appears |
-|---|---|---|---|---|---|
-| Clover patch | 250 (the first is free, §2.1) | 0.25 an hour (6 a day) | ×1.3 | up to 10 | day one |
-| Beehive | 2,000 | 1 an hour (24 a day) | ×1.35 | up to 5 | after the third patch |
-| Mushroom log | 8,000 | 2 an hour (48 a day) | ×1.4 | up to 5 | after the fifth beehive |
+**Revised (September 2026): front-loaded.** The first of each kind now pays
+for itself fast, so building feels rewarding straight away, and each further
+one costs more, so the last few are long-term goals. A full set of each costs
+about what it did (10.5k, 20k, 88k). The shop shows each building's income
+and payback ("Makes 6 clover a day · pays for itself in about 14 days"). In
+the model a casual player's first beehive comes on day 43 (was 101), and
+year-one income rises from about 110k to 128k (engaged: 180k to 195k), which
+the new sinks (rooms, showpieces, the raffle, the welcome line) take up.
+
+| Building | First one | Produces | Each extra costs | Payback, first to last | How many | Appears |
+|---|---|---|---|---|---|---|
+| Clover patch | 84 (the first is free, §2.1) | 0.25 an hour (6 a day) | ×1.52 | 14 to 606 days | up to 10 | day one |
+| Beehive | 720 | 1 an hour (24 a day) | ×1.93 | 30 to 416 days | up to 5 | after the third patch |
+| Mushroom log | 2,880 | 2 an hour (48 a day) | ×1.99 | 60 to 941 days | up to 5 | after the fifth beehive |
+
+(Before: 250 ×1.3, 2,000 ×1.35 and 8,000 ×1.4, paying back in 42 to 442,
+83 to 277 and 167 to 640 days.)
 | Yard shed | 1,000, then 3,000 | Storage holds 36 hours, then 48 | | once each | after the third patch |
 
 - **Collecting.** Clover piles up in the yard's storage. Opening the game
@@ -270,6 +314,56 @@ hour, day and night, whether or not you open the game.
 
 The yard is its own screen, not decor, so the burrow stays purely
 cosmetic. Friends could see your yard on a visit later; not at launch.
+
+#### The meadow: decor that helps the yard
+
+Added 2026‑09‑25 with the garden ([`rabbit-pets-garden.md`](./rabbit-pets-garden.md)).
+The meadow is the garden's third area, behind a gate that opens for
+**300 clover**. Six of its outdoor pieces help one kind of yard building;
+two are just for looks. The burrow stays purely cosmetic: this is the only
+decor that pays.
+
+| Piece | Price | Helps | Each building of that kind makes |
+|---|---|---|---|
+| Stepping stones | 400 | Clover patches | +10% (+0.6 a day) |
+| Birdbath | 500 | Clover patches | +10% (+0.6 a day) |
+| Sunflower patch | 1,200 | Beehives | +10% (+2.4 a day) |
+| Trellis arch | 1,500 | Beehives | +10% (+2.4 a day) |
+| Wheelbarrow | 4,000 | Mushroom logs | +10% (+4.8 a day) |
+| Garden gnome | 4,500 | Mushroom logs | +10% (+4.8 a day) |
+| Fence lights | 250 | (looks) | |
+| Bench | 350 | (looks) | |
+
+- **Placed, not positioned.** A piece helps while it's placed anywhere in
+  the meadow, and not while it's put away. Where it stands never matters,
+  so the meadow is arranged for looks.
+- **A per-building amount, not a multiplier.** The rate still boosts only
+  active clover, and the Supporter bonus is still the only multiplier. A
+  piece's help grows as you build more of its kind: stepping stones add
+  +0.6 a day with one patch and +6 with ten.
+- **Never a better deal than the first building of its kind.** With a full
+  yard the pieces pay back in 67 days (stones), 83 (birdbath), 100
+  (sunflowers), 125 (trellis), 167 (wheelbarrow) and 188 (gnome). The first
+  patch, hive and log pay back in 42, 83 and 167. Bought early, with one
+  or two buildings, a piece pays back in over 250 days. So buildings stay
+  the main way to grow the yard, and the pieces are the next step once a
+  kind is full.
+- **With everything built and placed** the yard makes 20% more: 420 a day
+  becomes 504.
+- **Seasonal outdoor pieces are only for looks.** Limited pieces that paid
+  would make missing an event cost clover.
+
+What the model shows (`dev/economy-model.py`, which buys whatever's
+cheapest once it has 1.5× the price):
+
+| Player | Gate | Patch pieces | Hive pieces | Log pieces | Year one without → with | Yard, day 365 |
+|---|---|---|---|---|---|---|
+| Casual, no friends | day 9 | days 14, 24 | days 105, 113 | days 269, 281 | 103,753 → 109,542 (+5.6%) | 324 → 331 |
+| Engaged, no friends | day 9 | days 11, 17 | days 77, 82 | days 193, 202 | 172,249 → 179,504 (+4.2%) | 372 → 446 |
+| Engaged, 10 friends | day 9 | days 11, 13 | days 46, 49 | days 127, 134 | 273,570 → 287,957 (+5.3%) | 420 → 504 |
+
+The casual player's yard barely moves in year one because they buy the
+log pieces late, with 3 logs. Week one doesn't change.
 
 ### 2.7 What that comes to
 
@@ -312,20 +406,49 @@ Clover a day, split as active / garden / yard:
 - **Supporters** (§6.2) get +25% on every part. Because they reinvest it,
   by the end of year one they have earned about 30–40% more.
 
+### 2.8 The model, September 2026
+
+After the review's changes (`dev/economy-model.py`; run it to reprint):
+
+- **New income:** wild visitors (about 1.3 a day, 3.9 clover each, boosted),
+  foraging (about 26 clover an 8-hour trip, boosted; casual players are
+  modelled at three trips a week, engaged at one a day), and finds at their
+  real rate (about 2.3 clover a day, not 1.2). Friend clover is flat (§2.2)
+  and the yard is front-loaded (§2.6).
+- **A year of it, solo:** a casual player earns about 148,821 and makes
+  630 a day by day 365; an engaged one earns 229,196 and makes 860 a day.
+- **Everything there is to buy** comes to 304,846 (351,846 with the
+  welcome line): everyday decor 13,420, seasonal decor 8,100, showpieces 52,000, walls, floors, windows 8,980, outfits 13,540, toys 2,630, meadow pieces 12,700, rooms 45,000, garden upgrades and soil 22,922, yard and sheds 122,308, raffle 3,246.
+  The showpieces (7,000, 15,000, 30,000), the rooms (15,000, 30,000) and the
+  welcome line (1,000 to 25,000) were trimmed about 40% so that a player can
+  own everything in a year to a year and a half: with updates planned, that
+  should stay a little ahead of new content, not years ahead of it.
+- **When a player could own it all:** casual solo day 594, casual with five
+  friends day 519, engaged solo day 453, engaged with five friends day 419.
+  Most players won't want everything, so what they care about comes sooner.
+- **Updates:** a veteran can bank 800 to 1,000 clover a day once they own
+  everything. Each update should bring at least one long-term goal priced
+  for them (20,000 to 50,000) as well as cheaper things, and a few goals
+  clover can't buy (§4), so a saved-up balance doesn't finish an update in
+  one visit.
+- **The launch ladder** (§3.1) comes a little sooner: tier 1 by day 3,
+  through tier 2 by day 49, the fireplace by 57 and the moon window by 70
+  for a casual player (was 61, 74 and 91).
+
 ## 3. Proposed costs
 
 ### 3.1 The launch ladder: about 13,000
 
 | Part | Price | What's in it |
 |---|---|---|
-| Tier 1 | 25–60 | Today's shop, unchanged: seven decor (bond gates as now) and four outfits. About 400 in all. |
+| Tier 1 | 25–60 | Today's shop, unchanged: seven decor (bond gates as now). About 270 in all. Outfits moved up (2026-09-25): bandana 40 (the first-day goal), bow 250, bell 300, beanie 450. |
 | Toys | 50–250 | Yarn ball, cardboard box, tunnel, rope swing (§2.3). 530 in all; the ball is free. |
 | Upgrades | 300–1,000 | Second and third plot, watering can (§2.5). 1,900 in all. Soil levels on top. |
 | Tier 2 | 150–700 | 14 items (below). 5,130 in all. |
 | Tier 3 | 2,000 | Fireplace. It flickers, and on cold days she curls up by it. |
 | Tier 4 | 3,000, bond 5, after the fireplace | Moon window: a round window with the real moon phase and stars at night. |
 | The yard | 250 and up | Patches, beehives and the shed (§2.6). They pay back, so they sit outside the 13,000. |
-| Seasonal | 300–800 | Only the current event's items, for a few weeks. |
+| Seasonal | 300–800 | Only the current event's items, while it runs (§3.3). |
 
 All of it is in the shop from day one.
 
@@ -397,8 +520,57 @@ the model's income for players who'd reach them. Every player sees them at
 once. Now and then an update adds a yard building, which is the main
 lever on late-game income.
 
-**Seasonal events** are the one thing tied to the calendar. They add
-limited items each season, 1,000–2,000 in all.
+### 3.3 Seasonal events
+
+Events are the one thing tied to the calendar, and the shared moment that
+brings lapsed players back. They run by the player's local date, as today
+(`EVENTS` in `src/world.ts`), with a banner on opening and the season
+already showing in the weather and the hill outside.
+
+**Six a year**, so there's one roughly every other month:
+
+| Event | Dates | Status |
+|---|---|---|
+| Snow day | 1–28 Feb | new |
+| Spring bloom | 1–30 Apr | built |
+| Summer fair | 1–31 Jul | new |
+| Harvest moon | 15 Sep – 15 Oct | built |
+| Spooky week | 20 Oct – 2 Nov | built, stretched from 24–31 Oct to two weeks |
+| Winterfest | 10 Dec – 5 Jan | built |
+
+**Each event, in its first year:** one free item for opening the game
+while it runs, and 3–4 items to buy at 300–800, about 1,500 in all. At
+year-one income a casual player can buy one or two per event; an engaged
+one, most of them.
+
+| Event | Free | For sale |
+|---|---|---|
+| Snow day | Earmuffs (outfit) | Icicle garland 350, sled 400, snow rabbit 500 |
+| Spring bloom | Daisy chain (outfit) | Flower crown 800, tulip pot 350, birdhouse 500, blossom branch 600 |
+| Summer fair | Paper fan (decor) | Straw hat 800, fair lanterns 400, lemonade stand 600, paddling pool 800 |
+| Harvest moon | Acorn cap (outfit) | Harvest pumpkin 300, apple crate 400, scarecrow 700 |
+| Spooky week | Candy basket (decor) | Jack-o-lantern 350, little witch hat 900, friendly ghost mobile 500 |
+| Winterfest | Cozy scarf (outfit) | Knitted stockings 350, snow globe 400, tiny tree 600 |
+
+Outfits sit on her head or neck, so Snow day's free item is earmuffs
+(not mittens) and its third item is an icicle garland (not ice skates).
+
+- **Every year each event adds 1–2 new items,** so a second-year player
+  has something new to save for, not a repeat.
+- **Past items come back every year,** at the same price. Nobody misses
+  something forever, and someone who joins in March can still get last
+  Winterfest's snow globe the next December. Limited means "only in
+  season", not "gone for good".
+- **Event finds.** While an event runs, most of her finds are that event's
+  (acorns, maple leaves and conkers in Harvest moon, for example), making a
+  set of 4 for the shelf. A set completed counts toward the collection
+  track at **+2%**, smaller than the permanent sets' +5%, so six a year
+  can't run away. The model shows event sets add under 2% to year-one
+  income. Missing pieces can be finished in the same event next year.
+- **Supporters** get one extra cosmetic per event (§6.2).
+- **The free item** needs the player to open the game at least once
+  during the event, with no other condition. Winterfest's scarf already
+  works this way (`gift` in `EVENTS`).
 
 **Recurring costs** stay as they are (strawberry 3, seeds 2 / 4 / 8,
 baking free). With income this high they're flavour, not a sink, and
@@ -452,6 +624,10 @@ along you are ("7 of 10 friends visited"), so they read as goals.
   - `PetState` gains `friendToday` (counts of each friend kind paid today),
     `upgrades`, `soilLevel`, `bestFriends`, `goal` (the pinned item) and
     `toys`.
+- **`world.ts`:** `EVENTS` gains Snow day and Summer fair, Spooky week's
+  longer window, a free `gift` for every event, and each event's items by
+  the year they were added. Event finds: which collectibles each event
+  weights while it runs.
 - **`extras.ts`:**
   - Plots start at 1, up to 5.
   - Crop yield and grow time read the owned upgrades and soil level.
@@ -467,7 +643,7 @@ along you are ("7 of 10 friends visited"), so they read as goals.
     goals.
   - Toys as their own kind, each with a play animation.
   - Wallpaper and floor as their own zones, not placed pieces.
-  - Seasonal prices.
+  - Seasonal items at their new prices, and the free item per event.
 - **`social.ts`:** `applyGift` (clover gift +10) and `applyVisits` pay only
   rows with `counts: true`, and only up to 5 of each kind a day.
 - **`main.ts`:**
@@ -489,6 +665,9 @@ along you are ("7 of 10 friends visited"), so they read as goals.
   - Launch: 14 small tier 2 pieces, 4 toys with play animations, the
     animated fireplace, the moon window with its phases, the yard
     buildings, and small icons for 3 upgrades.
+  - Events: 11 new items for the four built events, and 9 for Snow day
+    and Summer fair, plus 24 event finds (4 per event). Events can ship one
+    at a time, each ready before its date.
   - Every item in the shop needs its art at launch, since everything shows
     from day one. Long-term goals that aren't drawn yet can wait for an
     update rather than show as "coming soon".
@@ -531,8 +710,8 @@ badge, charity). Rabbit Pets honours it:
 - **+25% clover**, multiplying the final clover rate, so "+25%" means
   exactly that at every stage. It's the only multiplier in the game;
   everything else adds.
-- **One Supporter-only cosmetic each season**, such as a scarf or a burrow
-  ornament. Friends see it when they visit.
+- **One Supporter-only cosmetic each event** (§3.3), such as a scarf or a
+  burrow ornament. Friends see it when they visit.
 - **Nothing else is closed off.** Every item, track and goal is open to
   everyone.
 

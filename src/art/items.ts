@@ -2,6 +2,7 @@
 // two procedural ones (rug, cushion) and the lantern glow.
 
 import { blank, fromRows, hex, outline, type PixelGrid } from './pixels';
+import { SHOP_ART, SHOP_PALETTE } from './shop';
 
 const C: Record<string, string> = {
   k: '3B2922', O: 'F08A3C', o: 'C8622A', g: '86C95E', G: '4E8C3A', r: 'E4566F', R: 'B03550',
@@ -74,6 +75,45 @@ const GRIDS: Record<string, string[]> = {
   key: ['.kkk......', 'kyyyk.....', 'ky.ykkkkkk', 'kyyyyyyyyk', '.kkkkkykyk', '......k.k.'],
   star: ['....k....', '...kyk...', 'kkkkyykkk', 'kyyyyyyYk', '.kyyyyYk.', '..kyyyYk.', '.kyYkkYYk', '.kYk..kYk', '.kk....kk'],
 
+  // visitors (wildlife.ts); the hedgehog is above
+  robin: [
+    '....kkkk....', '...kNNNNk...', '..kNkNNNNk..', '.kyNNNNNNNk.', 'kyykOOONNNNk', '.kkOOOOONNNNk',
+    '..kOOOOONNNk', '..kOOOONNNk.', '...kkkkkkk..', '....k...k...',
+  ],
+  mouse: [
+    '..kk.kk.......', '.kpCkpCk......', '.kCCCCCk......', 'kCkCCCCCkk....', 'kCCCCCCCCCk...',
+    '.kpCCCCCCCCk..', '..kCCCCCCCCk.k', '...kkkkkkkk.k.', '.............',
+  ],
+  frog: [
+    '.kkk...kkk.', 'kwkgk.kwkgk', 'kkgGgkggGgk', 'kgggggggggk', 'kgGgggggGgk', '.kgGGGGGGk.',
+    'kgkkkkkkkgk', 'kk.......kk',
+  ],
+  snail: [
+    '.....kkkk...', '....kNnnNk..', '...kNnNNnNk.', '...knNkkNnk.', '...knNnnNnk.', 'k..kNnnnNk..',
+    'kfk.kkkkk...', 'kffffffffk..', '.kkkkkkkkk..',
+  ],
+  squirrel: [
+    '.......kkkk.', '..kk..koOOOk', '.kOOk.kOoOOk', 'kOkOOkkOOoOk', 'kyOOOOkOOOk.', '.kOwwOOkOOk.',
+    '.kOwwOOOkk..', '..kOOOOk....', '..kkkkkk....',
+  ],
+  owl: [
+    '.kk....kk.', 'knNkkkkNnk', 'kNyykkyyNk', 'kNykyykyNk', 'kNNNkkNNNk', 'knfFfFfFnk',
+    'knFfFfFfnk', '.knfFfFnk.', '..kkkkkk..', '..y....y..',
+  ],
+  fox: [
+    '.k..k...........', 'kOkkOk..........', 'kOOOOk..........', 'kOkOOOk.........', 'kyyOOOkkkkkk..kk',
+    '.kwwOOOOOOOOkkOk', '..kwOOOOOOOOOOOk', '..kOOOOOOOOkkwwk', '..kNkkkNNkk.kkk.', '..kk..kkk.......',
+  ],
+  // their keepsakes (collectibles.ts)
+  quill: ['......kk', '.....kHk', '....khk.', '...khk..', '..khk...', '.khk....', 'kwk.....', 'kk......'],
+  rowan: ['...kGk..', '..kGk...', '.krkrk..', 'krRkrRk.', 'krkrkrk.', '.kRkRk..', '..kkk...'],
+  thimble: ['..kkkk..', '.kbwbbk.', '.kbBbBk.', 'kbBbBbBk', 'kbbbbbBk', 'kkkkkkkk'],
+  lilypad: ['..kkkkk..', '.kgGgpgk.', 'kgGgpwpgk', 'kgggkpggk', 'kgGk.kGgk', '.kgk.kgk.', '..k...k..'],
+  dewdrop: ['...k...', '..kbk..', '.kbwbk.', 'kbwbbBk', 'kbbbbBk', '.kBBBk.', '..kkk..'],
+  hazelnut: ['..kGk..', '.kkkkk.', 'kNnNnNk', 'kFFFFTk', 'kFfFFTk', '.kFFTk.', '..kkk..'],
+  moonstone: ['..kkk..', '.kvwvk.', 'kvwvvVk', 'kvvvVVk', '.kvVVk.', '..kkk..'],
+  goldleaf: ['.....kk', '...kkyk', '..kyyYk', '.kyYyYk', 'kyYyyk.', 'kyyYk..', '.kkk...', 'k......'],
+
   // seasonal decor
   pumpkin: [
     '.....kk.....', '.....kGk....', '..kkkkGkkk..', '.kOOoOOoOOk.', 'kOOoOOOOoOOk',
@@ -106,12 +146,14 @@ const GRIDS: Record<string, string[]> = {
 /** The golden carrot: the carrot, gilded. */
 const GOLD: Record<string, string> = { ...C, O: 'F6D24A', o: 'D5A12A', g: 'F6D24A', G: 'D5A12A' };
 
-export type ItemArt = keyof typeof GRIDS | 'rug' | 'cushion' | 'golden';
+export type ItemArt = keyof typeof GRIDS | keyof typeof SHOP_ART | 'rug' | 'cushion' | 'golden';
 
 export function drawItem(name: ItemArt): PixelGrid {
   if (name === 'rug') return rug();
   if (name === 'cushion') return cushion();
   if (name === 'golden') return fromRows(GRIDS.carrot!, GOLD);
+  const shop = (SHOP_ART as Record<string, string[] | undefined>)[name];
+  if (shop) return outline(fromRows(shop, { ...C, ...SHOP_PALETTE }), hex(C.k!));
   return fromRows(GRIDS[name]!, C);
 }
 

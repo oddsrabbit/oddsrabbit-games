@@ -66,6 +66,16 @@ export function dayKey(ms: number, tz: string, rolloverHour: number): string {
 }
 
 /**
+ * Whether `today` is a day after `recorded` (or nothing is recorded yet).
+ * Daily limits only ever move forward: changing the device's time zone can
+ * move the local date back, and an equality check would then open the same
+ * day twice. Day keys sort as strings.
+ */
+export function isNewDay(recorded: string | null | undefined, today: string): boolean {
+  return !recorded || today > recorded;
+}
+
+/**
  * The first instant after `ms` when local time reaches `hour`:00. Walks forward
  * in 15-minute steps and then back to the exact minute, which stays correct
  * across DST changes without a timezone database of our own.
@@ -75,7 +85,10 @@ export function nextLocalHour(ms: number, tz: string, hour: number): number {
   let t = ms + 60_000;
   for (let i = 0; i < 4 * 50; i++, t += step) {
     const p = localParts(t, tz);
-    if (p.hour === hour) return t - p.minute * 60_000 - (t % 60_000);
+    if (p.hour !== hour) continue;
+    // already inside that hour: its start is behind us, so keep walking to tomorrow's
+    const at = t - p.minute * 60_000 - (t % 60_000);
+    if (at > ms) return at;
   }
   return ms + 24 * 3_600_000;
 }

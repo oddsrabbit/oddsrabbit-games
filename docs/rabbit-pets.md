@@ -19,8 +19,10 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
 
 - **Personality [A6]**, fixed by her id: shy, greedy or playful, each bending
   one or two numbers (petting, hunger or boredom).
-- **Upbringing marking [B3]** on day 7, chosen by which care she got most:
-  freckles (meals), a heart (cuddles) or a tuft (grooming). Permanent.
+- **Upbringing marking [B3]**: removed. It was a permanent mark on day 7
+  (freckles, a heart or a tuft) chosen by which care she got most, but
+  nearly every rabbit got the heart and it didn't earn its place. Older
+  saves keep `marking` and `careCounts`; nothing reads them.
 - **Journal [B4]** in `v1:journal`: firsts and milestones, capped at 200.
 - **Garden [C5]**: three plots. Strawberries and golden carrots go to a
   pantry for the food tray; clover sprouts sell for clover. A garden-ready
@@ -68,8 +70,11 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
   layer by depth, and she walks in front of or behind them. `v1:burrow`
   stores positions (`v: 2`); saves from the first build, which used fixed
   spots, are converted on load.
-- **The daily visitor is switched off for now** [C6]. The hedgehog art stays
-  in the sprite set for when it comes back.
+- **The daily visitor [C6] is replaced by wild visitors** (`src/wildlife.ts`):
+  eight creatures, picked by the hour, season and weather and seeded like
+  finds, so no server content is needed. Each leaves a little clover and
+  sometimes a keepsake for the Woodland keepsakes set. `content.daily` is
+  no longer planned for this game.
 - **Bond levels 2 and 3 unlock decor** (toadstool seat, dandelion jar, star
   garland).
 - **Reminders can be switched off** under More, after the first prompt.
@@ -78,7 +83,7 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
   garden. There's no fixed favourite. Each meal is rolled (seeded, so it can't
   be re-rolled): loves it, happy, or just okay. Treats and berries are loved
   far more often, and "loves it" adds a modest +6 joy.
-- **Nap can be ended early** with Wake.
+- **She can be woken at any hour** with Wake (§4.2).
 - **Sound**: short synthesised effects, with a mute button in the header.
 - **`?preview=1`** lets a signed-out player try it on web without an account.
 
@@ -106,7 +111,9 @@ below (`[A1]`, `[H4]`, …) refer to it; §7 maps every picked item to a phase.
   proportions (big head, big eyes) are the rabbit, drawn at full
   size. Days visited still count, and drive bond levels and unlocks (§4.3).
 - **The original 2D pixel style** for the MVP, not the three.js diorama.
-- **Fixed bedtime**, 22:00–07:00 local, not player-set (§4.2).
+- **Sleep follows her energy, not the clock** (2026-09-25; replaced the fixed
+  22:00–07:00 bedtime, which locked out players whose free time is at night).
+  The sky still follows local time (§4.2).
 - **Signed-out players can't reach games on mobile**, so the sign-in
   screen is web-only (§4.9).
 - **Art and a visual mock come before any engineering**, to decide whether
@@ -163,7 +170,7 @@ result shape every feature above it. Everything else can change after launch.
 | Question | Source | Why |
 | --- | --- | --- |
 | How much time has passed? | **Server clock** via `OR.time.now()` | Changing the phone's clock can't fast-forward her. It also removes clock differences between a player's phone and laptop, which share one pet. |
-| What time of day is it for the player? | **Device time zone** (`Intl…timeZone`) | Drives day/night [A5], her bedtime, the daily reset and the 09:00 gift reminder. Faking the time zone only moves her bedtime, which is harmless. |
+| What time of day is it for the player? | **Device time zone** (`Intl…timeZone`) | Drives the sky outside [A5], the daily reset and the 09:00 gift reminder. Faking the time zone only changes the sky and when the gift resets. |
 
 If `time.now` is unavailable (a mobile build that predates it), fall back to
 `Date.now()` and rely on the guards in §2.3. The game must not refuse to run.
@@ -236,7 +243,7 @@ These four needs run from 0 to 100. The starting numbers live in one
 | --- | --- | --- | --- |
 | Hunger | −3/h | −1.5/h | Feed: +25 to +60 by food |
 | Happiness | −3/h | 0 | Pet/tickle: +8, capped per hour; toys in update 1 |
-| Energy | −4/h | **+12/h** | Sleep; nap timer [C1] |
+| Energy | −4/h | **+12/h** | Sleep (§4.2) |
 | Cleanliness | −2/h | 0 | Clean: to 100 |
 
 About 23h from 100 to the grumpy threshold (30), matching the "slow" pace.
@@ -248,11 +255,21 @@ visibly improves her mood straight away.
 
 ### 4.2 Day and night [A5]
 
-She sleeps 22:00–07:00 in the player's local time. The bedtime is fixed. While
-asleep the burrow is dim, tapping her gets a sleepy reaction, and needs decay
-at the "asleep" rates above. The server doesn't need to know about sleep:
-the simulation handles it. The server has no quiet hours, so the game keeps
-its own reminders to sensible times (the daily gift is announced at 09:00).
+**The sky and her sleep are separate.** The window follows the player's
+local time: dark from 20:00 to 06:00 (`DUSK_HOUR`, `DAWN_HOUR`). If she's
+awake at night the lamps are on; asleep, the room is dim. Nothing is locked
+by the clock, so a player whose free time is at night gets the whole game.
+
+**She sleeps until she's rested.** Put to bed (the Bed button, once energy is
+under 85), she sleeps until energy is full at +12/h: from 30 that's about 6
+hours, from 80 under 2. Left alone, she dozes off by herself below 20 energy
+and wakes when rested. Wake works at any hour; she keeps what she regained
+and is left at 28 or more, drowsy, so she stays up a while before nodding off
+again. While asleep, tapping her gets a sleepy reaction, feeding, cleaning
+and play wait until she's up, and needs decay at the "asleep" rates above.
+Sleep is the `nap` timer (the name is kept for saved games), so the server
+doesn't need to know about it. The server has no quiet hours; the daily
+gift is still announced at 09:00 because that's a good time to hear it.
 
 ### 4.3 Bond and growth [B1, B2]
 
@@ -271,7 +288,7 @@ visit. At launch:
 
 | Timer | Length | Result | Reminder key |
 | --- | --- | --- | --- |
-| Nap | 2h | Energy to 100, small bond gain | `nap-done` |
+| Sleep | Until energy is full (§4.2) | Energy to 100 | `nap-done` |
 | Bake a treat | 1h | One treat (a better food) | `treat-ready` |
 
 Only one of each can run at a time. The garden [C5] in update 1 reuses this
@@ -334,7 +351,7 @@ UI is **hidden unless `capabilities.has('notifications.schedule')`**.
 
   | Key | Scheduled at | Copy (draft) |
   | --- | --- | --- |
-  | `nap-done` | Nap `endsAtMs` | "{name} is awake and wants to play." |
+  | `nap-done` | Sleep `endsAtMs` | "{name} is awake and wants to play." |
   | `treat-ready` | Bake `endsAtMs` | "Something smells good in the burrow." |
   | `daily-gift` | Next local 05:00, only if today's gift was claimed | "{name} found you a gift." |
   | `misses-you` | `lastVisit + 24h`, moved later on every visit | "{name} keeps looking at the door." |

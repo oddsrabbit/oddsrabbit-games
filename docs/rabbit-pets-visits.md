@@ -1,6 +1,6 @@
 # Rabbit Pets: friends' visits that leave something behind
 
-Status: **proposed 2026‑09‑25**, not started. Extends friends [F1] in
+Status: **built 2026‑09‑25**, not yet deployed. Game side in `rabbit-pets/` (`social.ts` `applyVisits`/`rewardVisit`/`guestsToShow`, guests in `render.ts`, care buttons on a friend's burrow). Platform: `visits.*` and `counts` in apps-sdk, both hosts and the backend (migration `20260925_003_create_app_visits.sql`, not yet run). After deploy, press "Bump cache version" for rabbit-pets so its `social.visitLines` reach the stored manifest; until then every push reads "{username} came to visit." Extends friends [F1] in
 [`rabbit-pets.md`](./rabbit-pets.md). Covers new `visits.*` bridge verbs
 (apps-sdk, both hosts, the WordPress backend) and the game changes in
 `rabbit-pets/`.
@@ -48,8 +48,8 @@ nothing.
 - **A push**, if their Game reminders setting allows it, plus a bell entry:
   "sam came by and left a snack." Tapping it opens the game.
 - **Guests in the burrow.** On open, the game draws up to **two** visiting
-  rabbits on the rug next to her, drawn in their coats, outfits and markings.
-  They potter about like she does; at night they doze. Tapping one shows
+  rabbits on the rug next to her, drawn in their coats and outfits.
+  They potter about like she does; while she sleeps they doze. Tapping one shows
   "Clover (sam) brought a snack" in the moodline.
 - **More than two visitors** shows a small "+3 visitors" chip over the stage
   that opens a list: who came, when, and what they did.
@@ -81,8 +81,7 @@ These are the visit rows of [`rabbit-pets-economy.md`](./rabbit-pets-economy.md)
 Visits beyond the caps still happen: guests still appear and the push still
 goes. Only the boost and the clover stop.
 
-Friends' care does **not** count toward her bond, days visited or the
-upbringing marking. Those are between the player and her.
+Friends' care does **not** count toward her bond or days visited. Those are between the player and her.
 
 If she's on holiday, visits still record and guests still appear when she's
 back, but care boosts are skipped (her needs are paused anyway). Clover

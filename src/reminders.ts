@@ -6,10 +6,12 @@ import type { OddsRabbitGlobal } from '@oddsrabbit/apps-sdk';
 import { nextLocalHour } from './localtime';
 import { onVacation, plots, type CropId } from './extras';
 import { giftReady, timer, type PetState } from './sim';
+import { trip } from './forage';
 import type { Settings } from './store';
 import { DAY_MS, DAY_ROLLOVER_HOUR, GIFT_REMINDER_HOUR } from './tuning';
 
-export const REMINDER_KEYS = ['nap-done', 'treat-ready', 'daily-gift', 'misses-you', 'garden-ready'] as const;
+// At most five are ever wanted at once: she can't be asleep and out foraging together.
+export const REMINDER_KEYS = ['nap-done', 'treat-ready', 'daily-gift', 'misses-you', 'garden-ready', 'forage-home'] as const;
 export type ReminderKey = (typeof REMINDER_KEYS)[number];
 
 export interface Reminder {
@@ -33,6 +35,8 @@ export function desiredReminders(pet: PetState, nowMs: number, tz: string): Remi
   }
   const nap = timer(pet, 'nap');
   if (nap && nap.endsAtMs > nowMs) out.push({ key: 'nap-done', fireAtMs: nap.endsAtMs, body: `${pet.name} is awake and wants to play.` });
+  const away = trip(pet);
+  if (away && away.endsAtMs > nowMs) out.push({ key: 'forage-home', fireAtMs: away.endsAtMs, body: `${pet.name} is home with a basket of finds.` });
   const bake = timer(pet, 'bake');
   if (bake && bake.endsAtMs > nowMs) out.push({ key: 'treat-ready', fireAtMs: bake.endsAtMs, body: 'Something smells good in the burrow.' });
   // Only tomorrow's gift: today's, if unclaimed, is already waiting on screen.
@@ -54,6 +58,7 @@ const TOLERANCE_MS: Record<ReminderKey, number> = {
   'daily-gift': 10 * 60_000,
   'misses-you': 3 * 60 * 60_000,
   'garden-ready': 5 * 60_000,
+  'forage-home': 60_000,
 };
 
 /**

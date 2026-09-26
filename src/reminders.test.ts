@@ -27,7 +27,8 @@ test('a nap and a bake each want a reminder at their end time', () => {
   assert.ok(baked.ok);
   const r = desiredReminders(baked.state, NOON + 60_000, UTC);
   assert.deepEqual(keys(r), ['misses-you', 'nap-done', 'treat-ready']);
-  assert.equal(r.find((x) => x.key === 'nap-done')!.fireAtMs, NOON + 2 * HOUR_MS);
+  // from 40 energy she sleeps until full: 60 / 12 an hour
+  assert.equal(r.find((x) => x.key === 'nap-done')!.fireAtMs, NOON + 5 * HOUR_MS);
   assert.match(r.find((x) => x.key === 'nap-done')!.body, /Clover is awake/);
 });
 
@@ -53,6 +54,7 @@ test('a gift opened just after the rollover is announced the NEXT morning, not a
 test('a growing crop wants a reminder when the soonest plot is ready', () => {
   const s = newPet('p', 'Clover', 'snow', NOON, UTC);
   s.clover = 50;
+  s.upgrades = ['plot2'];
   const a = plant(s, 0, 'golden', NOON);
   assert.ok(a.ok);
   const b = a.ok ? plant(a.state, 1, 'berry', NOON) : a;

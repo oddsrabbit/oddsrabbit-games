@@ -2,14 +2,19 @@
 // in as an argument, so catch-up after an absence and the live game are the
 // same code, and every rule here is testable (sim.test.ts).
 
-import { dayKey, localHour } from './localtime';
+import { dayKey, isNewDay, localHour } from './localtime';
 import { roll } from './rng';
-import { SHY_WARM_BOND, TRAIT_MODS, traitOf } from './world';
-import { earnMarking, onVacation, pickFind, type Marking, type Plot } from './extras';
+import { activeEvents, SHY_WARM_BOND, TRAIT_MODS, traitOf } from './world';
+import { onVacation, pickFind, ownsToy, type Plot } from './extras';
+import { conditionsAt, critterAt, leavesKeepsake, stayMs, visitClover } from './wildlife';
+import { hoursOut, isOut, trip, tripLoot, unpack, type Loot } from './forage';
+import { bondLevel, earn, settleLumps, type EarnReason, type Lump } from './economy';
+import type { StarterState } from './starter';
+import type { YardState } from './yard';
+
+export { bondLevel } from './economy';
 import {
-  BEDTIME_HOUR,
   BOND_DAILY_CAP,
-  BOND_LEVELS,
   BOND_PER_CARE,
   BOND_PER_DAY_VISITED,
   CARE,
@@ -17,16 +22,21 @@ import {
   FOOD_REACTIONS,
   FOODS,
   LOVES_BONUS_HAPPY,
+  DAWN_HOUR,
   DAY_ROLLOVER_HOUR,
   DECAY_ASLEEP,
+  DUSK_HOUR,
+  HOUR_MS,
   DECAY_AWAKE,
   LOW_NEED,
   MAX_CATCH_UP_MS,
   MAX_TREATS,
   PEBBLE_CHANCE,
+  WILDLIFE,
+  FORAGE,
+  SLEEP,
   STEP_MS,
   TIMERS,
-  WAKE_HOUR,
 } from './tuning';
 
 export const COATS = ['snow', 'cream', 'cocoa', 'silver', 'midnight', 'ginger'] as const;
@@ -42,7 +52,9 @@ export interface Needs {
 }
 export type NeedKey = keyof Needs;
 
-export type TimerKind = keyof typeof TIMERS;
+/** `nap` is her sleep, however long; the name is kept for saved games. */
+/** `forage`: out on a trip (forage.ts), ending when she's home. */
+export type TimerKind = 'nap' | 'forage' | keyof typeof TIMERS;
 export interface Timer {
   kind: TimerKind;
   startedAtMs: number;
@@ -76,10 +88,14 @@ export interface PetState {
   /** Kept for saves from when a daily visitor brought gifts; unused for now. */
   visitorsClaimed: string[];
   // ---- Update 1. All optional: saves from before them simply lack the field.
-  /** How often she's been fed, petted and cleaned; shapes her marking. */
-  careCounts?: { fed: number; pet: number; clean: number };
-  /** Earned on her seventh day together; permanent. */
-  marking?: Marking | null;
+  // (Older saves may also hold `careCounts` and `marking`, from a marking she
+  // earned on day 7; that's gone, and the fields are kept as they are.)
+  /** Welcome pieces bought, 0 to 5 (tuning.ts WELCOME): each raises what visits pay her. */
+  welcome?: number;
+  /** Festival raffle tickets bought, by event id (raffle.ts). */
+  raffle?: Record<string, number>;
+  /** Wild visitors (wildlife.ts): how often each has come, and who's here now. */
+  critters?: { seen: Record<string, number>; here: { id: string; untilMs: number } | null };
   /** Things she found while you were away: id -> count. */
   collection?: Record<string, number>;
   garden?: { plots: (Plot | null)[] };
@@ -87,19 +103,49 @@ export interface PetState {
   pantry?: { berries: number; golden: number };
   /** Needs pause until then. */
   vacationUntilMs?: number | null;
-  /** Mini-game plays today. */
+  /** Carrot catch plays, from before it was removed. Ignored. */
   plays?: { day: string; count: number };
   wardrobe?: { owned: string[]; head: string | null; neck: string | null };
   /** Seasonal gifts already handed out, by event id. */
   eventGifts?: string[];
   /** Chosen at adoption. Rabbits from before the choice have long ears (see earsOf). */
   ears?: Ears;
+  // ---- The economy (economy.ts). All optional, as above.
+  /** Set from the signed-in user each session: +25% clover. */
+  supporter?: boolean;
+  /** The fraction of a clover earn() owes, carried to the next payout. */
+  cloverCarry?: number;
+  /** Clover earned so far, by reason. */
+  earned?: Partial<Record<EarnReason, number>>;
+  /** One-off payouts already made: `bond:3`, `streak:7`… */
+  paid?: string[];
+  /** Friend rewards paid today, by kind (only the first few a day pay). */
+  friendToday?: { day: string; counts: Partial<Record<'visit' | 'giftSent' | 'hosted' | 'giftClover', number>> };
+  /** Friendship by friend uuid: a point a day each way; enough makes a best friend. */
+  friends?: Record<string, { points: number; out: string | null; in: string | null }>;
+  yard?: YardState;
+  starter?: StarterState;
+  /** Garden upgrades bought: `plot2`, `can`… (extras.ts UPGRADES). */
+  upgrades?: string[];
+  soilLevel?: number;
+  /** Toys owned besides the ball she starts with. */
+  toys?: string[];
+  /** What the player is saving up for, pinned in the shop: `decor:fireplace`… */
+  goal?: string | null;
+  /** Helping pieces placed in the garden's meadow (decor.ts meadowHelpers), for yard.ts perHour. */
+  meadow?: string[];
+  /** Friends' visits today that boosted her needs (only the first few do). */
+  visitCare?: { day: string; count: number };
 }
 
 export type PetEvent =
   | { kind: 'napDone'; atMs: number }
   | { kind: 'treatBaked'; atMs: number }
   | { kind: 'found'; atMs: number; item: string }
+  /** Home from foraging with her basket; `clover` is what it paid, after the rate. */
+  | { kind: 'forageDone'; atMs: number; loot: Loot; clover: number }
+  /** A wild visitor dropped by, left `clover`, and maybe its keepsake. */
+  | { kind: 'critter'; atMs: number; critter: string; clover: number; keepsake?: string }
   | { kind: 'fellAsleep'; atMs: number }
   | { kind: 'wokeUp'; atMs: number };
 
@@ -125,23 +171,32 @@ export function newPet(petId: string, name: string, coat: Coat, nowMs: number, t
     clover: CLOVER.start,
     gift: { lastClaimDay: null, streak: 0 },
     visitorsClaimed: [],
+    paid: [],
   };
 }
 
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
+/** Whether it's dark outside for the player. Only the window and lighting use it. */
 export function isNight(ms: number, tz: string): boolean {
   const h = localHour(ms, tz);
-  return BEDTIME_HOUR > WAKE_HOUR ? h >= BEDTIME_HOUR || h < WAKE_HOUR : h >= BEDTIME_HOUR && h < WAKE_HOUR;
+  return DUSK_HOUR > DAWN_HOUR ? h >= DUSK_HOUR || h < DAWN_HOUR : h >= DUSK_HOUR && h < DAWN_HOUR;
+}
+
+/** How long she sleeps from this energy: until it's full, in whole steps. */
+export function sleepMs(energy: number): number {
+  const hours = Math.max(0, 100 - energy) / -DECAY_ASLEEP.energy;
+  return Math.max(1, Math.ceil((hours * HOUR_MS) / STEP_MS)) * STEP_MS;
 }
 
 export function timer(state: PetState, kind: TimerKind): Timer | undefined {
   return state.timers.find((t) => t.kind === kind);
 }
 
-export function isAsleep(state: PetState, ms: number, tz: string): boolean {
+/** Asleep while her sleep timer runs, whatever the time of day. `tz` is unused, kept for callers. */
+export function isAsleep(state: PetState, ms: number, _tz?: string): boolean {
   const nap = timer(state, 'nap');
-  return isNight(ms, tz) || (!!nap && nap.endsAtMs > ms);
+  return !!nap && nap.endsAtMs > ms;
 }
 
 /**
@@ -168,8 +223,15 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
 
     // Timers that finished during this step.
     for (const tm of [...state.timers]) {
+      // a newer version's timer: leave it for that version to finish
+      if (tm.kind !== 'nap' && tm.kind !== 'bake' && tm.kind !== 'forage') continue;
       if (tm.endsAtMs > t) continue;
       state.timers = state.timers.filter((x) => x !== tm);
+      if (tm.kind === 'forage') {
+        const loot = tripLoot(state.petId, tm.startedAtMs, hoursOut(tm, tm.endsAtMs), activeEvents(tm.startedAtMs, tz).flatMap((e) => e.finds));
+        events.push({ kind: 'forageDone', atMs: tm.endsAtMs, loot, clover: unpack(state, loot) });
+        continue;
+      }
       if (tm.kind === 'nap') {
         state.needs.energy = 100;
         events.push({ kind: 'napDone', atMs: tm.endsAtMs });
@@ -177,6 +239,12 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
         state.treats = Math.min(MAX_TREATS, state.treats + 1);
         events.push({ kind: 'treatBaked', atMs: tm.endsAtMs });
       }
+    }
+
+    // Nobody put her to bed and she's worn out: she dozes off where she is
+    // (out foraging, she keeps going until she's home).
+    if (!isAsleep(state, t) && !onVacation(state, t) && !isOut(state, t) && state.needs.energy < SLEEP.dozeBelow) {
+      state.timers.push({ kind: 'nap', startedAtMs: t, endsAtMs: t + sleepMs(state.needs.energy) });
     }
 
     const asleep = isAsleep(state, t, tz);
@@ -194,11 +262,27 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
     state.needs.energy = clamp(state.needs.energy - rates.energy * per);
     state.needs.clean = clamp(state.needs.clean - rates.clean * per);
 
-    if (!asleep && roll(state.petId, state.stepIndex, 'pebble') < PEBBLE_CHANCE) {
-      const find = pickFind(state.petId, state.stepIndex);
-      state.clover += CLOVER.pebble;
+    // her finds at home; out foraging, her basket is her finds
+    if (!asleep && !isOut(state, t) && roll(state.petId, state.stepIndex, 'pebble') < PEBBLE_CHANCE) {
+      const find = pickFind(state.petId, state.stepIndex, activeEvents(t, tz).flatMap((e) => e.finds));
+      earn(state, 'find', find.rarity === 'rare' ? CLOVER.rareFind : CLOVER.pebble);
       state.collection = { ...(state.collection ?? {}), [find.id]: (state.collection?.[find.id] ?? 0) + 1 };
       events.push({ kind: 'found', atMs: t, item: find.id });
+    }
+
+    // A wild visitor, one at a time, asleep or awake (they tiptoe).
+    const here = state.critters?.here;
+    if (here && here.untilMs <= t) state.critters = { ...state.critters!, here: null };
+    if (!state.critters?.here && roll(state.petId, state.stepIndex, 'critter') < WILDLIFE.chancePerStep) {
+      const c = critterAt(state.petId, state.stepIndex, conditionsAt(t, tz));
+      if (c) {
+        const clover = earn(state, 'critter', visitClover(state.petId, state.stepIndex));
+        const keepsake = leavesKeepsake(state.petId, state.stepIndex) ? c.keepsake : undefined;
+        if (keepsake) state.collection = { ...(state.collection ?? {}), [keepsake]: (state.collection?.[keepsake] ?? 0) + 1 };
+        const seen = state.critters?.seen ?? {};
+        state.critters = { seen: { ...seen, [c.id]: (seen[c.id] ?? 0) + 1 }, here: { id: c.id, untilMs: t + stayMs(state.petId, state.stepIndex) } };
+        events.push({ kind: 'critter', atMs: t, critter: c.id, clover, ...(keepsake ? { keepsake } : {}) });
+      }
     }
   }
   return { state, events };
@@ -222,41 +306,22 @@ export function mood(state: PetState, ms: number, tz: string): Mood {
   return first ? one[first] : 'content';
 }
 
-export function bondLevel(bond: number): { level: number; into: number; span: number | null } {
-  let level = 1;
-  for (let i = 0; i < BOND_LEVELS.length; i++) if (bond >= (BOND_LEVELS[i] ?? Infinity)) level = i + 1;
-  const floor = BOND_LEVELS[level - 1] ?? 0;
-  const next = BOND_LEVELS[level];
-  return { level, into: bond - floor, span: next === undefined ? null : next - floor };
-}
-
 // ---------------------------------------------------------------- visits
 
-/**
- * Call once per visit, after catch-up. Counts a new day visited, and on her
- * seventh day hands out her marking.
- */
-export function visit(input: PetState, nowMs: number, tz: string): { state: PetState; newDay: boolean; marking: Marking | null } {
+/** Call once per visit, after catch-up. Counts a new day visited. */
+export function visit(input: PetState, nowMs: number, tz: string): { state: PetState; newDay: boolean; lumps: Lump[] } {
   const state = structuredCloneState(input);
   const today = dayKey(nowMs, tz, DAY_ROLLOVER_HOUR);
-  if (state.lastVisitDay === today) return { state, newDay: false, marking: null };
+  if (!isNewDay(state.lastVisitDay, today)) return { state, newDay: false, lumps: settleLumps(state) };
   state.lastVisitDay = today;
   state.daysVisited += 1;
   state.bond += BOND_PER_DAY_VISITED;
-  const marking = earnMarking(state);
-  if (marking) state.marking = marking;
-  return { state, newDay: true, marking };
-}
-
-function countCare(state: PetState, k: 'fed' | 'pet' | 'clean'): void {
-  const c = { fed: 0, pet: 0, clean: 0, ...(state.careCounts ?? {}) };
-  c[k] += 1;
-  state.careCounts = c;
+  return { state, newDay: true, lumps: settleLumps(state) };
 }
 
 // ---------------------------------------------------------------- actions
 
-export type Action = 'feed' | 'pet' | 'clean' | 'nap' | 'wake' | 'bake' | 'gift';
+export type Action = 'feed' | 'pet' | 'play' | 'clean' | 'nap' | 'wake' | 'bake' | 'gift' | 'forage' | 'recall';
 export type FoodId = keyof typeof FOODS;
 export const FOOD_IDS = Object.keys(FOODS) as FoodId[];
 
@@ -275,28 +340,49 @@ export function foodReaction(petId: string, meal: number, food: FoodId): FoodRea
   return 'happy';
 }
 export type ActionResult =
-  | { ok: true; state: PetState; clover: number; bond: number; note?: 'gently'; reaction?: FoodReaction }
-  | { ok: false; reason: 'full' | 'clean' | 'asleep' | 'notTired' | 'notNapping' | 'busy' | 'night' | 'claimed' | 'noTreats' | 'broke' };
+  | { ok: true; state: PetState; clover: number; bond: number; note?: 'gently'; reaction?: FoodReaction; lumps?: Lump[]; loot?: Loot }
+  | { ok: false; reason: 'full' | 'clean' | 'asleep' | 'notTired' | 'notNapping' | 'busy' | 'claimed' | 'noTreats' | 'broke' | 'noToy' | 'out' | 'tooTired' | 'notOut' };
 
-function careReward(state: PetState, nowMs: number, tz: string): { clover: number; bond: number } {
+function careReward(state: PetState, nowMs: number, tz: string): { clover: number; bond: number; lumps: Lump[] } {
   const today = dayKey(nowMs, tz, DAY_ROLLOVER_HOUR);
-  if (state.bondDay !== today) {
+  if (isNewDay(state.bondDay, today)) {
     state.bondDay = today;
     state.bondToday = 0;
   }
-  if (state.bondToday >= BOND_DAILY_CAP) return { clover: 0, bond: 0 };
+  if (state.bondToday >= BOND_DAILY_CAP) return { clover: 0, bond: 0, lumps: [] };
   state.bondToday += BOND_PER_CARE;
   state.bond += BOND_PER_CARE;
-  state.clover += CLOVER.perCare;
-  return { clover: CLOVER.perCare, bond: BOND_PER_CARE };
+  const clover = earn(state, 'care', CLOVER.perCare);
+  return { clover, bond: BOND_PER_CARE, lumps: settleLumps(state) };
 }
+const NO_REWARD = { clover: 0, bond: 0, lumps: [] as Lump[] };
 
-export function act(input: PetState, action: Action, nowMs: number, tz: string, opts: { food?: FoodId } = {}): ActionResult {
+export function act(input: PetState, action: Action, nowMs: number, tz: string, opts: { food?: FoodId; toy?: string; hours?: number } = {}): ActionResult {
   const state = structuredCloneState(input);
   const asleep = isAsleep(state, nowMs, tz);
   const n = state.needs;
+  // out foraging, she isn't here to be looked after
+  const out = isOut(state, nowMs);
+  if (out && (action === 'feed' || action === 'pet' || action === 'play' || action === 'clean' || action === 'nap' || action === 'wake' || action === 'forage')) {
+    return { ok: false, reason: 'out' };
+  }
 
   switch (action) {
+    case 'forage': {
+      if (asleep) return { ok: false, reason: 'asleep' };
+      if (n.energy < FORAGE.minEnergy) return { ok: false, reason: 'tooTired' };
+      const hours = (FORAGE.hours as readonly number[]).includes(opts.hours ?? 0) ? opts.hours! : FORAGE.hours[0];
+      state.timers.push({ kind: 'forage', startedAtMs: nowMs, endsAtMs: nowMs + hours * 3_600_000 });
+      return { ok: true, state, clover: 0, bond: 0 };
+    }
+    case 'recall': {
+      // home early, with what she'd gathered in the whole hours she was out
+      const t = trip(state);
+      if (!t || !out) return { ok: false, reason: 'notOut' };
+      state.timers = state.timers.filter((x) => x.kind !== 'forage');
+      const loot = tripLoot(state.petId, t.startedAtMs, hoursOut(t, nowMs), activeEvents(t.startedAtMs, tz).flatMap((e) => e.finds));
+      return { ok: true, state, clover: unpack(state, loot), bond: 0, loot };
+    }
     case 'feed': {
       if (asleep) return { ok: false, reason: 'asleep' };
       if (n.hunger >= CARE.full) return { ok: false, reason: 'full' };
@@ -318,7 +404,6 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
         if (state.clover < food.clover) return { ok: false, reason: 'broke' };
         state.clover -= food.clover;
       }
-      countCare(state, 'fed');
       const meal = state.meals ?? 0;
       state.meals = meal + 1;
       const reaction = foodReaction(state.petId, meal, id);
@@ -332,31 +417,38 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
       // a shy rabbit's petting penalty fades once she trusts you
       const bonus = trait === 'shy' && bondLevel(state.bond).level >= SHY_WARM_BOND ? 0 : TRAIT_MODS[trait].petBonus;
       n.happy = clamp(n.happy + (asleep ? CARE.petAsleep.happy : Math.max(1, CARE.pet.happy + bonus)));
-      countCare(state, 'pet');
-      const r = n.happy >= 100 && !asleep ? { clover: 0, bond: 0 } : careReward(state, nowMs, tz);
+      const r = n.happy >= 100 && !asleep ? NO_REWARD : careReward(state, nowMs, tz);
       return { ok: true, state, ...r, note: asleep ? 'gently' : undefined };
+    }
+    case 'play': {
+      // Toy play: no score, no limit. Joy and a care point, like petting.
+      if (asleep) return { ok: false, reason: 'asleep' };
+      if (!ownsToy(state, opts.toy ?? 'ball')) return { ok: false, reason: 'noToy' };
+      const r = n.happy >= 100 ? NO_REWARD : careReward(state, nowMs, tz);
+      n.happy = clamp(n.happy + CARE.play.happy);
+      n.energy = clamp(n.energy - CARE.play.energy);
+      return { ok: true, state, ...r };
     }
     case 'clean': {
       if (asleep) return { ok: false, reason: 'asleep' };
       if (n.clean >= CARE.full) return { ok: false, reason: 'clean' };
       n.clean = 100;
-      countCare(state, 'clean');
       return { ok: true, state, ...careReward(state, nowMs, tz) };
     }
     case 'nap': {
-      if (isNight(nowMs, tz)) return { ok: false, reason: 'night' };
+      // Bedtime, at any hour: she sleeps until she's rested.
       if (asleep) return { ok: false, reason: 'asleep' };
       if (n.energy >= CARE.napBelowEnergy) return { ok: false, reason: 'notTired' };
-      state.timers.push({ kind: 'nap', startedAtMs: nowMs, endsAtMs: nowMs + TIMERS.nap.ms });
+      state.timers.push({ kind: 'nap', startedAtMs: nowMs, endsAtMs: nowMs + sleepMs(n.energy) });
       return { ok: true, state, clover: 0, bond: 0 };
     }
     case 'wake': {
-      // Ending a nap early keeps the energy she has regained so far and skips
-      // the refill at the end. Night sleep can't be interrupted.
+      // Waking her, at any hour, keeps the energy she has regained so far and
+      // skips the refill at the end. She's drowsy, not wrecked.
       const nap = timer(state, 'nap');
-      if (isNight(nowMs, tz)) return { ok: false, reason: 'night' };
       if (!nap || nap.endsAtMs <= nowMs) return { ok: false, reason: 'notNapping' };
       state.timers = state.timers.filter((t) => t !== nap);
+      n.energy = Math.max(n.energy, SLEEP.wokenEnergy);
       return { ok: true, state, clover: 0, bond: 0 };
     }
     case 'bake': {
@@ -367,19 +459,19 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
     }
     case 'gift': {
       const today = dayKey(nowMs, tz, DAY_ROLLOVER_HOUR);
-      if (state.gift.lastClaimDay === today) return { ok: false, reason: 'claimed' };
+      if (!isNewDay(state.gift.lastClaimDay, today)) return { ok: false, reason: 'claimed' };
       // A missed day pauses the streak; nothing ever resets it.
       state.gift.streak += 1;
       state.gift.lastClaimDay = today;
-      const amount = CLOVER.giftBase + Math.min(CLOVER.giftStreakMax, state.gift.streak - 1);
-      state.clover += amount;
-      return { ok: true, state, clover: amount, bond: 0 };
+      const amount = Math.min(CLOVER.giftMax, CLOVER.giftBase + CLOVER.giftStep * (state.gift.streak - 1));
+      const clover = earn(state, 'gift', amount);
+      return { ok: true, state, clover, bond: 0, lumps: settleLumps(state) };
     }
   }
 }
 
 export function giftReady(state: PetState, nowMs: number, tz: string): boolean {
-  return state.gift.lastClaimDay !== dayKey(nowMs, tz, DAY_ROLLOVER_HOUR);
+  return isNewDay(state.gift.lastClaimDay, dayKey(nowMs, tz, DAY_ROLLOVER_HOUR));
 }
 
 export function spendClover(input: PetState, amount: number): PetState | null {
@@ -400,10 +492,20 @@ export function earsOf(pet: { ears?: unknown }): Ears {
   return (EARS as readonly unknown[]).includes(pet.ears) ? (pet.ears as Ears) : 'long';
 }
 
-/** Guard for state read back from storage: anything malformed starts over. */
+/**
+ * Guard for state read back from storage: everything the game reads without a
+ * fallback, so a half-written save shows "can't load" instead of crashing
+ * later. Fields added since the first version are optional and not checked.
+ */
 export function isPetState(x: unknown): x is PetState {
   const s = x as PetState;
-  return !!s && s.v === 1 && typeof s.petId === 'string' && typeof s.simAtMs === 'number'
-    && !!s.needs && typeof s.needs.hunger === 'number' && Array.isArray(s.timers)
-    && (COATS as readonly string[]).includes(s.coat);
+  const num = (v: unknown) => typeof v === 'number';
+  return !!s && s.v === 1 && typeof s.petId === 'string' && typeof s.name === 'string'
+    && (COATS as readonly string[]).includes(s.coat)
+    && num(s.simAtMs) && num(s.stepIndex) && num(s.rev) && num(s.bond) && num(s.bondToday)
+    && num(s.daysVisited) && num(s.clover) && num(s.treats)
+    && typeof s.bondDay === 'string' && typeof s.lastVisitDay === 'string'
+    && !!s.needs && num(s.needs.hunger) && num(s.needs.happy) && num(s.needs.energy) && num(s.needs.clean)
+    && Array.isArray(s.timers)
+    && !!s.gift && num(s.gift.streak) && (s.gift.lastClaimDay === null || typeof s.gift.lastClaimDay === 'string');
 }

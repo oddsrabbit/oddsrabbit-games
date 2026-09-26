@@ -38,7 +38,6 @@ pre{background:#15131a;border:1px solid var(--line);border-radius:8px;padding:10
   <div class="row" style="margin-top:6px">
     <select id="head"><option value="">no hat</option></select>
     <select id="neck"><option value="">no neck</option></select>
-    <select id="marking"><option value="">no marking</option><option>freckles</option><option>heart</option><option>tuft</option></select>
   </div>
   <div class="row" style="margin-top:6px">
     <label style="display:flex;gap:4px;margin:0"><input type="checkbox" id="animate"> animate</label>
@@ -285,7 +284,6 @@ function drawRabbit(coat, face, frame = 0, dress, opts = {}) {
   }
   if (dress) {
     const top = Math.round(headCy - hh), chin = Math.round(headCy + hh);
-    drawMarking(g, dress.marking, { cx, ey, exs, top, chin, asleep, pal });
     drawOutfit(g, dress.neck, { cx, top, chin, hw, asleep });
     drawOutfit(g, dress.head, { cx, top, chin, hw, asleep });
   }
@@ -319,17 +317,6 @@ function drawOutfit(g, id, a) {
   if (art.at === 'top') stamp(g, art.rows, a.cx, a.top + Math.min(3, n - 2));
   else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5, a.top + 2);
   else if (!a.asleep) stamp(g, art.rows, a.cx, a.chin + n - 2);
-}
-function drawMarking(g, id, a) {
-  const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < g.w && y < g.h) g.px[y][x] = c; };
-  if (id === 'freckles') {
-    const b = a.pal.base; const dot = b[0] + b[1] + b[2] > 480 ? hex('B0735A') : hex('E6C2A2');
-    for (const [i, ex] of a.exs.entries()) {
-      const x = i === 0 ? ex - 1 : ex + 2;
-      set(x, a.ey + 4, dot); set(x + (i === 0 ? 2 : -2), a.ey + 4, dot); set(x + (i === 0 ? 1 : -1), a.ey + 5, dot);
-    }
-  } else if (id === 'heart' && !a.asleep) stamp(g, ['.p.p.', 'ppppp', '.ppp.', '..p..'], a.cx, a.chin + 5, { p: hex('F08AA0') });
-  else if (id === 'tuft') stamp(g, ['.L.L.', 'LbLbL', 'LbbbL'], a.cx, a.top, { L: a.pal.line, b: a.pal.base });
 }
 
 // ------------------------------------------------------------ UI
@@ -412,7 +399,7 @@ function buildKnobs() {
 
 let animFrame = 0;
 function current(frame) {
-  const dress = { head: $('head').value || null, neck: $('neck').value || null, marking: $('marking').value || null };
+  const dress = { head: $('head').value || null, neck: $('neck').value || null };
   return drawRabbit($('coat').value, $('face').value, frame ?? Number($('frame').value), dress, { outline: $('outline').checked, look: look() });
 }
 function render() {
@@ -495,7 +482,7 @@ $('big').onmousemove = (e) => {
   const p = current().px[y]?.[x];
   $('hover').textContent = p ? `x ${x}, y ${y}  ${p[3] ? '#' + p.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase() : 'clear'}` : '';
 };
-for (const id of ['coat', 'face', 'frame', 'head', 'neck', 'marking', 'grid', 'outline', 'animate']) $(id).onchange = render;
+for (const id of ['coat', 'face', 'frame', 'head', 'neck', 'grid', 'outline', 'animate']) $(id).onchange = render;
 for (const id of ['ears']) $(id).onchange = () => { buildKnobs(); render(); };
 $('copy').onclick = () => navigator.clipboard.writeText(asTS()).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy as TS', 1200); });
 $('png').onclick = () => download(1);
