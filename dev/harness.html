@@ -1,0 +1,295 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Word Battle harness</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<iframe id="g" src="../dist/word-battle/index.html"></iframe>
+<script src="../js/rules.js"></script>
+<script>
+// Local stand-in for the OddsRabbit host: answers the matches bridge from
+// memory so the game runs without the platform. Not shipped.
+//   npm run build
+//   python3 -m http.server 8765        (at the repo root)
+//   open http://localhost:8765/dev/harness.html
+// Scoring comes from js/rules.js. The only dictionary check: a word with no
+// vowel (or Y) is "Not a word", so a refusal is easy to trigger.
+// The opponents pass 2 s after your move, so the watcher has something to see.
+// Params:
+//   user=0          signed out
+//   matches=0       host without the matches verbs
+//   delay=ms        answer every request this late (default 50)
+//   slowmove=ms     answer moves this late instead, for races with the watcher
+//   games=0         start with no games (the first-run landing)
+//   finished=1      add a finished game (Rematch, Moves)
+//   busy=1          add a mid-game, a stalled game and a lobby (list screen)
+//   newverbs=0      host without matches.check / matches.quick
+//   quickwait=ms    how long a quick match takes to find someone (default 4000)
+//   open=n          open the nth game straight away
+//   theme=dark      dark host theme
+//   opp=none        opponents never move
+//   passes=n        start each game with n scoreless turns already in a row
+//   idle=days       every turn counts as having started this many days ago,
+//                   to show Nudge (1+) and End game (14+)
+const q = new URLSearchParams(location.search);
+const R = window.TilesRules;
+const DELAY = Number(q.get('delay') || 50);
+const SLOW_MOVE = Number(q.get('slowmove') || DELAY);
+const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester' };
+const PEOPLE = [
+  { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, relation: 'mutual' },
+  { uuid: '33333333-3333-4333-8333-333333333333', username: 'hopper', avatar: null, relation: 'following' },
+  { uuid: '44444444-4444-4444-8444-444444444444', username: 'clover', avatar: null, relation: 'follower' },
+];
+const TILES = 'AAAAAAAAABBCCDDDDEEEEEEEEEEEEFFGGGHHIIIIIIIIIJKLLLLMMNNNNNNOOOOOOOOPPQRRRRRRSSSSTTTTTTUUUUVVWWXYYZ__';
+const IDLE_MS = Number(q.get('idle') || 0) * 86400e3;
+const matches = {};
+const turnStart = () => new Date(Date.now() - IDLE_MS).toISOString();
+let n = 0;
+
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function uuid() { n++; return 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0'); }
+
+// The server's TilesRules::wildLayout, for local Wild games.
+function wildLayout() {
+  const g = Array.from({ length: 15 }, () => new Array(15).fill('.'));
+  g[7][7] = 'w';
+  const cells = [];
+  for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) if (Math.max(Math.abs(r - 7), Math.abs(c - 7)) > 1) cells.push([r, c]);
+  shuffle(cells);
+  for (const [code, lo, hi] of [['W', 4, 12], ['L', 8, 22], ['w', 10, 24], ['l', 12, 32]]) {
+    let want = lo + Math.floor(Math.random() * (hi - lo + 1));
+    for (let i = 0; i < cells.length && want > 0; i++) {
+      const [r, c] = cells[i];
+      if ((code === 'W' || code === 'w') && (r === 7 || c === 7)) continue;
+      g[r][c] = code; cells.splice(i, 1); i--; want--;
+    }
+  }
+  return g.map((row) => row.join(''));
+}
+
+function newMatch(people, game = 'tiles', maxPlayers = 0, ageMs = 0, open = false) {
+  const bag = shuffle(TILES.split(''));
+  const seats = [ME, ...people];
+  const max = Math.max(2, maxPlayers, people.length + 1);
+  const m = {
+    uuid: uuid(), version: 1, status: open && seats.length < max ? 'lobby' : 'active',
+    joinCode: open && seats.length < max ? Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('') : null,
+    updatedAt: new Date(Date.now() - ageMs).toISOString(), history: [], turnStartedAt: turnStart(), turn: 0, ply: 0, winner: null, passes: Number(q.get('passes') || 0),
+    board: Array.from({ length: R.SIZE }, () => new Array(R.SIZE).fill(null)),
+    maxPlayers: max, game, layout: game === 'tiles-wild' ? wildLayout() : R.layout(), bag, lastMove: null, lastWords: [],
+    players: seats.map((p, seat) => ({ seat, uuid: p.uuid, username: p.username, avatar: null, status: 'joined', score: 0, rack: bag.splice(0, 7) })),
+  };
+  matches[m.uuid] = m;
+  return m;
+}
+
+function view(m) {
+  const me = m.players[0];
+  const rackCounts = {};
+  m.players.forEach((p) => { rackCounts[String(p.seat)] = p.rack.length; });
+  return {
+    matchUuid: m.uuid, game: m.game, status: m.status, version: m.version, maxPlayers: m.maxPlayers,
+    players: m.players.map((p) => ({ seat: p.seat, uuid: p.uuid, username: p.username, avatar: null, status: p.status, score: p.score, isSelf: p.seat === 0 })),
+    turnSeat: m.status === 'active' ? m.turn : null, turnDeadline: null, winnerSeat: m.winner,
+    turnStartedAt: m.status === 'active' ? m.turnStartedAt : null,
+    mySeat: 0, isMyTurn: m.status === 'active' && m.turn === 0 && me.status === 'joined',
+    updatedAt: m.updatedAt, joinCode: m.joinCode,
+    // What MatchService now puts on every row and view: the public recap of
+    // the last move, and whether this is a quick-match table.
+    recap: m.lastWords.length ? { lastWords: m.lastWords } : null, matchmaking: !!m.matchmaking,
+    view: { board: m.board, layout: m.layout, myRack: me.rack.slice(), rackCounts, bagCount: m.bag.length, lastWords: m.lastWords, passes: m.passes, history: m.history },
+    lastMove: m.lastMove,
+  };
+}
+
+function nextTurn(m) {
+  const live = m.players.filter((p) => p.status === 'joined');
+  if (live.length < 2) { m.status = 'finished'; m.winner = live[0] ? live[0].seat : null; return; }
+  do { m.turn = (m.turn + 1) % m.players.length; } while (m.players[m.turn].status !== 'joined');
+  m.turnStartedAt = turnStart();
+}
+
+function record(m, seat, move, delta) {
+  m.ply++; m.version++;
+  m.lastMove = { ply: m.ply, seat, move, scoreDelta: delta };
+  m.updatedAt = new Date().toISOString();
+  // view.history, as MatchService sends it: every lastMove, oldest first.
+  m.history.push(m.lastMove);
+}
+
+function place(m, seat, tiles) {
+  const p = m.players[seat];
+  const empty = m.board.every((row) => row.every((c) => c === null));
+  const res = R.evaluate(m.board, tiles, m.layout, empty);
+  if (!res.ok) throw { code: 'match/illegal-move', message: res.reason };
+  const bad = res.words.map((w) => w.word).filter((w) => !/[AEIOUY]/.test(w));
+  if (bad.length) throw { code: 'match/illegal-move', message: 'Not a word: ' + bad.join(', ') + '.' };
+  const rack = p.rack.slice();
+  for (const t of tiles) {
+    const i = rack.indexOf(t.blank ? '_' : t.letter);
+    if (i < 0) throw { code: 'match/illegal-move', message: 'Tile not in rack.' };
+    rack.splice(i, 1);
+  }
+  tiles.forEach((t) => { m.board[t.row][t.col] = { l: t.letter, b: !!t.blank }; });
+  while (rack.length < 7 && m.bag.length) rack.push(m.bag.shift());
+  p.rack = rack;
+  p.score += res.score;
+  m.passes = 0;
+  m.lastWords = res.words.map((w) => ({ word: w.word, score: w.score }));
+  record(m, seat, { type: 'place', tiles }, res.score);
+  nextTurn(m);
+}
+
+function pass(m, seat) {
+  m.lastWords = [];
+  m.passes++;
+  record(m, seat, { type: 'pass' }, 0);
+  if (m.passes >= 2 * m.players.filter((p) => p.status === 'joined').length) { m.status = 'finished'; m.winner = null; return; }
+  nextTurn(m);
+}
+
+function opponentsMove(m) {
+  if (q.get('opp') === 'none') return;
+  setTimeout(() => {
+    while (m.status === 'active' && m.turn !== 0) pass(m, m.turn);
+  }, 2000);
+}
+
+// Two games to start: yours to move against one player, and a three-seat table.
+// games=0 starts with none, for the first-run landing.
+// finished=1 adds a game already over, against a stranger who came in on a
+// join code, to try Rematch and Moves on.
+const STRANGER = { uuid: '55555555-5555-4555-8555-555555555555', username: 'stranger_danger' };
+if (q.get('games') !== '0') {
+  newMatch([PEOPLE[0]], 'tiles', 0, 3 * 3600e3);
+  newMatch([PEOPLE[1], PEOPLE[2]], 'tiles', 0, 2 * 86400e3);
+}
+// busy=1: a player mid-season. A game where @pip_fan just played QUIZ through
+// your TAXI (the list's spotlight), one where @clover has sat on their turn
+// for two days (Nudge), and a table still waiting for its third player.
+if (q.get('busy') === '1') {
+  const a = newMatch([PEOPLE[0]], 'tiles', 0, 20 * 60e3);
+  a.players[0].rack.splice(0, 4, 'T', 'A', 'X', 'I');
+  place(a, 0, [{ row: 4, col: 7, letter: 'T' }, { row: 5, col: 7, letter: 'A' }, { row: 6, col: 7, letter: 'X' }, { row: 7, col: 7, letter: 'I' }]);
+  a.players[1].rack.splice(0, 3, 'Q', 'U', 'Z');
+  place(a, 1, [{ row: 7, col: 5, letter: 'Q' }, { row: 7, col: 6, letter: 'U' }, { row: 7, col: 8, letter: 'Z' }]);
+  a.players[0].score += 110; a.players[1].score += 96;
+  a.updatedAt = new Date(Date.now() - 20 * 60e3).toISOString();
+  const b = newMatch([PEOPLE[2]], 'tiles', 0, 2 * 86400e3);
+  b.turn = 1; b.turnStartedAt = new Date(Date.now() - 2 * 86400e3).toISOString();
+  b.players[0].score = 45; b.players[1].score = 67;
+  newMatch([PEOPLE[1]], 'tiles', 3, 5 * 3600e3, true);
+}
+if (q.get('finished') === '1') {
+  const f = newMatch([PEOPLE[0], STRANGER], 'tiles-wild', 0, 9 * 86400e3);
+  f.players[0].rack.splice(0, 3, 'C', 'A', 'T');
+  place(f, 0, [{ row: 7, col: 6, letter: 'C' }, { row: 7, col: 7, letter: 'A' }, { row: 7, col: 8, letter: 'T' }]);
+  // @pip_fan hangs a blank T under the A: AT down, worth nothing but a word.
+  f.players[1].rack.splice(0, 1, '_');
+  place(f, 1, [{ row: 8, col: 7, letter: 'T', blank: true }]);
+  pass(f, f.turn);
+  f.status = 'finished'; f.winner = 0; f.updatedAt = new Date(Date.now() - 9 * 86400e3).toISOString();
+}
+
+const frame = document.getElementById('g');
+const caps = ['storage.get', 'storage.set', 'actions.share', 'actions.haptic', 'actions.requestSignIn'];
+if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'matches.list', 'matches.get', 'matches.move', 'matches.resign', 'matches.invitable', 'matches.nudge', 'matches.claim');
+// newverbs=0: a host from before matches.check / matches.quick (today's app).
+if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.check', 'matches.quick');
+function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
+function init() {
+  send({ type: 'init', user: q.get('user') === '0' ? null : { ...ME, avatar: null, createdAt: null },
+    sessionToken: 'x', expiresAt: null, colorScheme: q.get('theme') === 'dark' ? 'dark' : 'light', capabilities: caps,
+    initialState: Object.keys(matches)[Number(q.get('open')) - 1] ? { target: 'match', matchUuid: Object.keys(matches)[Number(q.get('open')) - 1] } : undefined });
+}
+frame.addEventListener('load', () => { init(); setTimeout(init, 200); });
+
+function handle(type, p) {
+  const m = p.matchUuid && matches[p.matchUuid];
+  switch (type) {
+    case 'matches.list': return Object.values(matches).map((x) => { const v = view(x); delete v.view; delete v.joinCode; return v; });
+    // The only dictionary here: a word with no vowel (or Y) is not one.
+    case 'matches.check': return { invalid: (p.words || []).map((w) => w.toUpperCase()).filter((w) => !/[AEIOUY]/.test(w)) };
+    // Your open quick table if there is one, else a new one that a stranger
+    // sits down at QUICK_MS later (quickwait=ms).
+    case 'matches.quick': {
+      const mine = Object.values(matches).find((x) => x.matchmaking && x.status === 'lobby');
+      if (mine) return view(mine);
+      const lobby = newMatch([], p.game, 2, 0, true);
+      lobby.matchmaking = true; lobby.joinCode = null;
+      setTimeout(() => {
+        if (lobby.status !== 'lobby') return;
+        lobby.players.push({ seat: 1, uuid: STRANGER.uuid, username: STRANGER.username, avatar: null, status: 'joined', score: 0, rack: lobby.bag.splice(0, 7) });
+        lobby.status = 'active'; lobby.version++; lobby.turn = Math.random() < 0.5 ? 0 : 1;
+        lobby.turnStartedAt = turnStart(); lobby.updatedAt = new Date().toISOString();
+        opponentsMove(lobby);
+      }, Number(q.get('quickwait') || 4000));
+      return view(lobby);
+    }
+    case 'matches.get': if (!m) throw { code: 'match/not-found', message: 'No such match.' }; return view(m);
+    case 'matches.invitable': return PEOPLE;
+    case 'matches.create': return view(newMatch(PEOPLE.filter((x) => (p.invitees || []).includes(x.uuid)), p.game, p.maxPlayers, 0, p.open));
+    case 'matches.move': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      if (m.turn !== 0 || m.status !== 'active') throw { code: 'match/not-your-turn', message: 'Not your turn.' };
+      if (p.version !== m.version) throw { code: 'match/version-conflict', message: 'Stale.' };
+      if (p.move.type === 'place') place(m, 0, p.move.tiles);
+      else if (p.move.type === 'pass') pass(m, 0);
+      else if (p.move.type === 'exchange') {
+        const me = m.players[0];
+        p.move.letters.forEach((l) => { const i = me.rack.indexOf(l); if (i >= 0) { me.rack.splice(i, 1); m.bag.push(l); } });
+        while (me.rack.length < 7) me.rack.push(m.bag.shift());
+        m.lastWords = []; m.passes++;
+        record(m, 0, { type: 'exchange', count: p.move.letters.length }, 0);
+        nextTurn(m);
+      }
+      opponentsMove(m);
+      return view(m);
+    }
+    case 'matches.nudge': {
+      const waited = Date.now() - new Date(m.turnStartedAt).getTime();
+      if (m.turn === 0 || waited < 86400e3) throw { code: 'match/too-soon', message: 'You can nudge in a few hours.' };
+      if (m.nudgedAt && Date.now() - m.nudgedAt < 86400e3) throw { code: 'match/too-soon', message: 'You can nudge again in 23 hours.' };
+      m.nudgedAt = Date.now();
+      console.log('nudge sent to', m.players[m.turn].username);
+      return { nudgedAt: new Date().toISOString() };
+    }
+    case 'matches.claim': {
+      const waited = Date.now() - new Date(m.turnStartedAt).getTime();
+      if (m.turn === 0 || waited < 14 * 86400e3) throw { code: 'match/too-soon', message: 'You can end this game in a few days.' };
+      const idle = m.players[m.turn];
+      m.lastWords = [];
+      record(m, idle.seat, { type: 'claim' }, 0);
+      const live = m.players.filter((x) => x.status === 'joined');
+      if (live.length === 2) {
+        m.status = 'finished';
+        const [a, b] = live;
+        m.winner = a.score === b.score ? null : (a.score > b.score ? a.seat : b.seat);
+      } else {
+        idle.status = 'forfeited';
+        nextTurn(m);
+      }
+      return view(m);
+    }
+    case 'matches.resign': {
+      m.players[0].status = 'resigned'; m.version++;
+      if (m.turn === 0) nextTurn(m);
+      if (m.status === 'active' && m.players.filter((x) => x.status === 'joined').length < 2) m.status = 'finished';
+      return view(m);
+    }
+  }
+  return undefined;
+}
+
+window.addEventListener('message', (e) => {
+  const r = e.data; if (!r || !r.correlationId) return;
+  setTimeout(() => {
+    try {
+      send({ type: 'response', correlationId: r.correlationId, ok: true, result: handle(r.type, r.payload || {}) });
+    } catch (err) {
+      send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: err.code || 'bridge/error', message: err.message || String(err) } });
+    }
+  }, r.type === 'matches.move' ? SLOW_MOVE : DELAY);
+});
+</script>
+</body></html>

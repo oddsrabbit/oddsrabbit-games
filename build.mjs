@@ -34,6 +34,7 @@ const UI_VERSION = await hash(['leaderboard-v1.js', 'leaderboard-v1.css']);
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/word-battle/js', { recursive: true });
+await mkdir('dist/word-battle/fonts', { recursive: true });
 
 const html = await readFile('index.html', 'utf8');
 await Promise.all([
@@ -45,6 +46,11 @@ await Promise.all([
       .replaceAll('__UI_VERSION__', UI_VERSION)
   ),
   copyFile('styles.css', 'dist/word-battle/styles.css'),
+  // The platform manifest points at <slug>/icon-512.png (tools/setup-apps-
+  // platform.php in the web repo), so the icon ships with the bundle.
+  copyFile('icon/icon-512.png', 'dist/word-battle/icon-512.png'),
+  copyFile('fonts/bricolage-grotesque-800-latin.woff2', 'dist/word-battle/fonts/bricolage-grotesque-800-latin.woff2'),
+  copyFile('fonts/OFL.txt', 'dist/word-battle/fonts/OFL.txt'),
   ...JS.map((name) => copyFile(`js/${name}`, `dist/word-battle/js/${name}`)),
 ]);
 

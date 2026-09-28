@@ -24,11 +24,11 @@
 
          Two shapes, chosen by whether the player has any games. With none, a
          centred hero puts the only two things worth doing — start one, join
-         one — in the middle of the screen. With games, the list is the screen
-         and those two actions drop to a bar pinned at the bottom, because a
-         hero above six matches would push them off it. Either way the join
-         code lives behind a button: joining is the rarer path and does not
-         earn a permanent text field. -->
+         one — in the middle of the screen. With games, the board band and its
+         sheet: the game waiting on you first, the rest as rows, and those two
+         actions in a bar pinned at the bottom. Either way the join code lives
+         behind a button: joining is the rarer path and does not earn a
+         permanent text field. -->
     <section class="screen screen-list">
       <header class="bar">
         <h1 class="title">Word Battle</h1>
@@ -37,43 +37,151 @@
 
       <p class="unsupported notice" hidden>Playing against friends isn’t available on this version of the app yet.</p>
 
+      <!-- The first thing a new player sees, so it shows the game rather than
+           describing it: the name laid out as tiles on a scrap of board, then
+           three lines on how a game goes, then the two ways in. The bar's own
+           title is hidden while this is up (.is-landing) — the tiles say it. -->
       <div class="hero" hidden>
-        <div class="hero-mark" aria-hidden="true">
-          <span class="hero-tile">W</span><span class="hero-tile">O</span><span class="hero-tile">R</span><span class="hero-tile">D</span>
+        <div class="hero-board" aria-hidden="true">
+          <span class="hero-sq sq-l">2×</span>
+          <span class="hero-tile">W<i>4</i></span><span class="hero-tile">O<i>1</i></span><span class="hero-tile">R<i>1</i></span><span class="hero-tile">D<i>2</i></span>
+          <span class="hero-sq sq-W">3×</span>
+          <span class="hero-tile">B<i>3</i></span><span class="hero-tile">A<i>1</i></span><span class="hero-tile">T<i>1</i></span><span class="hero-tile">T<i>1</i></span><span class="hero-tile">L<i>1</i></span><span class="hero-tile">E<i>1</i></span>
         </div>
-        <h2 class="hero-title">Play words with friends</h2>
-        <p class="hero-text muted">Take turns whenever you like — a few days per move, no clock to sit at.</p>
+        <h1 class="visually-hidden">Word Battle</h1>
+        <p class="hero-title">The crossword duel you play at your own pace.</p>
+        <ol class="hero-steps">
+          <li><span class="hero-step-mark" aria-hidden="true">1</span><span><strong>Set a table for 2–4.</strong> Invite people you follow, or share a join code with anyone.</span></li>
+          <li><span class="hero-step-mark" aria-hidden="true">2</span><span><strong>Move whenever.</strong> No turn clock — you get a notification when it’s your go.</span></li>
+          <li><span class="hero-step-mark" aria-hidden="true">3</span><span><strong>Outscore them.</strong> Hit the bonus squares, use all seven tiles for +50.</span></li>
+        </ol>
         <div class="hero-actions">
-          <button type="button" class="new-game-button primary">Start new game</button>
-          <button type="button" class="join-open-button">Join with a code</button>
+          <button type="button" class="new-game-button primary">Start a game</button>
+          <button type="button" class="quick-button" hidden>Find an opponent</button>
+          <button type="button" class="join-open-button">I have a join code</button>
         </div>
         <p class="sign-in-note muted" hidden></p>
-        <button type="button" class="sign-in primary" hidden>Sign in to play</button>
+        <div class="hero-actions sign-in-actions" hidden>
+          <button type="button" class="sign-in primary">Sign in to play</button>
+        </div>
+        <button type="button" class="help-link">How to play</button>
       </div>
 
       <p class="list-status muted" role="status"></p>
-      <div class="match-list"></div>
 
-      <div class="action-bar" hidden>
-        <button type="button" class="new-game-button primary">New game</button>
-        <button type="button" class="join-open-button">Join with a code</button>
+      <!-- With games: a band of board squares with the icon's two tiles runs
+           under the status bar, and the list sits on a sheet pulled up over
+           it. The sheet leads with the game waiting on you, drawn as a board
+           preview; everything else is a compact row. -->
+      <div class="list-band" aria-hidden="true" hidden>
+        <!-- The squares repeat to any width; the two tiles stay one size,
+             pinned to the bottom centre, so a tablet gets more board rather
+             than bigger letters. -->
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="band-squares" width="510" height="306" patternUnits="userSpaceOnUse" x="-45" y="-16">
+              <rect class="b-tw" x="0" y="0" width="96" height="96"/>
+              <rect class="b-p" x="102" y="0" width="96" height="96"/>
+              <rect class="b-dl" x="204" y="0" width="96" height="96"/>
+              <rect class="b-p" x="306" y="0" width="96" height="96"/>
+              <rect class="b-tl" x="408" y="0" width="96" height="96"/>
+              <rect class="b-p" x="0" y="102" width="96" height="96"/>
+              <rect class="b-dw" x="102" y="102" width="96" height="96"/>
+              <rect class="b-p" x="204" y="102" width="96" height="96"/>
+              <rect class="b-tl" x="306" y="102" width="96" height="96"/>
+              <rect class="b-p" x="408" y="102" width="96" height="96"/>
+              <rect class="b-dl" x="0" y="204" width="96" height="96"/>
+              <rect class="b-p" x="102" y="204" width="96" height="96"/>
+              <rect class="b-dw" x="204" y="204" width="96" height="96"/>
+              <rect class="b-p" x="306" y="204" width="96" height="96"/>
+              <rect class="b-tw" x="408" y="204" width="96" height="96"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#band-squares)"/>
+          <svg x="50%" y="100%" overflow="visible">
+            <g transform="translate(-195 -174)">
+              <g transform="rotate(9 238 96)">
+                <rect class="b-edge" x="198" y="60" width="82" height="82" rx="12"/>
+                <rect class="b-tile" x="198" y="55" width="82" height="82" rx="12"/>
+                <text class="b-letter" x="236" y="95">B</text>
+                <text class="b-value" x="268" y="124">3</text>
+              </g>
+              <g transform="rotate(-10 168 76)">
+                <rect class="b-edge" x="126" y="40" width="82" height="82" rx="12"/>
+                <rect class="b-tile" x="126" y="35" width="82" height="82" rx="12"/>
+                <text class="b-letter" x="164" y="75">W</text>
+                <text class="b-value" x="196" y="104">4</text>
+              </g>
+            </g>
+          </svg>
+        </svg>
+      </div>
+      <div class="list-sheet" hidden>
+        <div class="sheet-head">
+          <h1 class="sheet-title">Word Battle</h1>
+          <span class="record" hidden></span>
+        </div>
+        <div class="match-list"></div>
+        <div class="action-bar">
+          <button type="button" class="new-game-button primary">New game</button>
+          <button type="button" class="join-open-button">Join with a code</button>
+        </div>
       </div>
     </section>
 
-    <!-- Screen 2: set the table. -->
-    <section class="screen screen-new" hidden>
-      <!-- Back to the list sits at the right: the top-left corner is the app's
-           own exit button. -->
+    <!-- Screen 2a: what kind of game. Two doors, each explained, so neither
+         hides under the other's form. Only on hosts with matches.quick —
+         without it there is one kind of game and New game goes straight to 2b. -->
+    <section class="screen screen-choose" hidden>
       <header class="bar">
         <h1 class="title">New game</h1>
         <button type="button" class="back-button" aria-label="Back to games">✕</button>
       </header>
+      <div class="screen-scroll choose-body">
+        <button type="button" class="choose-card quick-button">
+          <span class="choose-art" aria-hidden="true">
+            <span class="art-tile is-you">W</span><span class="art-tile is-them">?</span>
+          </span>
+          <span class="choose-text">
+            <strong>Find an opponent</strong>
+            <span>We’ll pair you with another player who’s looking for a game. Two players, standard board — you’ll get a notification when it starts.</span>
+          </span>
+          <span class="choose-go" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="choose-card choose-friends">
+          <span class="choose-art" aria-hidden="true">
+            <span class="art-tile">W</span><span class="art-tile">B</span><span class="art-tile">+</span>
+          </span>
+          <span class="choose-text">
+            <strong>Play with friends</strong>
+            <span>Invite people you follow, or send a link to anyone. 2 to 4 players, Standard or Wild board.</span>
+          </span>
+          <span class="choose-go" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="help-link choose-join">Have a join code?</button>
+      </div>
+    </section>
+
+    <!-- Screen 2b: set the table with friends. -->
+    <section class="screen screen-new" hidden>
+      <!-- Back sits at the right: the top-left corner is the app's own exit
+           button. From here it returns to 2a when there is one. -->
+      <header class="bar">
+        <h1 class="title">Play with friends</h1>
+        <button type="button" class="back-button" aria-label="Back">✕</button>
+      </header>
       <div class="screen-scroll">
+        <!-- The table, drawn: one chip per seat. Friends picked below add a
+             chip; "+ Seat for a link" adds an open one that the invite link
+             fills. The player count is simply the number of chips. -->
+        <h2 class="group-title">Who’s playing</h2>
+        <div class="table-seats" role="list" aria-label="Seats at this table"></div>
+        <p class="table-note muted small" role="status"></p>
+
         <h2 class="group-title">Invite friends</h2>
-        <!-- Always on screen, not only when the list is empty: the rule that
-             you can invite people you follow or who follow you is the server's,
-             it is enforced, and it is the answer to "why isn't X here?". -->
-        <p class="invite-note muted small">You can invite people you follow, or who follow you. To play with anyone else, leave a seat free — you'll get a join code to send them.</p>
+        <!-- Always on screen: the follow rule is the server's, it is enforced,
+             and it is the answer to "why isn't X here?". -->
+        <p class="invite-note muted small">People you follow, or who follow you. For anyone else, add a seat for a link.</p>
         <div class="invite-search" hidden>
           <input class="invite-input" type="search" inputmode="search" autocomplete="off"
                  autocapitalize="off" spellcheck="false" placeholder="Search by username"
@@ -83,22 +191,16 @@
         <p class="invite-count muted small" role="status"></p>
         <div class="invitable-list"></div>
         <p class="invitable-empty muted" hidden></p>
-        <h2 class="group-title">Table</h2>
-        <div class="seats">
-          <span class="seats-label">Players</span>
-          <button type="button" class="seats-minus" aria-label="Fewer players">−</button>
-          <span class="seats-value" role="status" aria-live="polite">2</span>
-          <button type="button" class="seats-plus" aria-label="More players">+</button>
+        <h2 class="group-title">Board</h2>
+        <div class="board-mode" role="radiogroup" aria-label="Board">
+          <input type="radio" name="board-mode" id="mode-standard" value="standard" checked>
+          <label for="mode-standard"><strong>Standard</strong><span>The usual board, the same every game.</span></label>
+          <input type="radio" name="board-mode" id="mode-wild" value="wild">
+          <label for="mode-wild"><strong>Wild</strong><span>Bonus squares land anywhere, a new board every game. Can get silly.</span></label>
         </div>
-        <!-- No "open table" switch. Invitees are seated the moment the match is
-             created, and a join code is the only way a spare seat is ever
-             filled — so a table with a seat left over and no code is a lobby
-             nobody can enter. It was a choice between a working game and a
-             broken one; now it just says what will happen. -->
-        <p class="table-note"></p>
       </div>
       <p class="create-status muted" role="status"></p>
-      <button type="button" class="create-button primary">Start</button>
+      <button type="button" class="create-button primary">Start game</button>
     </section>
 
     <!-- Screen 3: one match. -->
@@ -111,38 +213,93 @@
 
       <div class="turn-strip">
         <span class="turn-main"></span>
-        <span class="chip chip-timer" hidden></span>
-        <span class="chip chip-bag" hidden></span>
+        <button type="button" class="chip chip-bag" hidden></button>
+        <span class="chip chip-wild" hidden title="Wild board: bonus squares were placed at random for this game.">Wild board</span>
+        <!-- Up here, not over the board: anywhere on the board covers a square
+             a player could otherwise tap. On touch, pinch does the zooming and
+             only "fit" appears, once there is something to fit. -->
+        <div class="board-zoom">
+          <button type="button" class="zoom-out icon-button" aria-label="Zoom out">−</button>
+          <button type="button" class="zoom-in icon-button" aria-label="Zoom in">+</button>
+          <button type="button" class="zoom-fit icon-button" aria-label="Fit whole board" hidden>⤢</button>
+        </div>
       </div>
       <p class="turn-warning notice notice-warn" hidden></p>
+      <!-- Waiting on someone who has gone quiet: nudge them after a day, end
+           the game (or drop them, at 3–4 seats) after 14. -->
+      <div class="stall notice" hidden>
+        <p class="stall-text"></p>
+        <div class="stall-actions">
+          <button type="button" class="nudge-button">Nudge</button>
+          <button type="button" class="claim-button" hidden></button>
+        </div>
+      </div>
       <p class="last-move" hidden></p>
 
       <!-- Waiting room. A lobby is not a game with an empty board in it, so
            the board and rack stay out of the way until someone sits down. -->
-      <div class="lobby-panel" hidden>
-        <p class="lobby-lead muted"></p>
-        <div class="lobby-code-row">
-          <span class="muted small">Join code</span>
-          <strong class="lobby-code"></strong>
+      <!-- A quick-match table waiting for its second player: not a lobby to
+           share, so none of the lobby's code and seats. Something to look at,
+           and a plain account of what happens next. -->
+      <div class="finding-panel" hidden>
+        <div class="finding-art" aria-hidden="true">
+          <span class="find-tile find-you"></span>
+          <span class="find-vs">vs</span>
+          <span class="find-tile find-them flip-tile">?</span>
         </div>
-        <button type="button" class="share-code-button primary">Share invite</button>
-        <div class="lobby-seats"></div>
+        <h2 class="finding-title">Finding you an opponent</h2>
+        <p class="finding-text muted">You’ll be paired with the next player who’s also looking for a game. That can take a while, so there’s no need to wait here — we’ll send you a notification the moment your game starts.</p>
+        <p class="finding-since muted small"></p>
+        <div class="finding-actions">
+          <button type="button" class="finding-back primary">Back to my games</button>
+          <button type="button" class="finding-stop subtle">Stop looking</button>
+        </div>
+        <p class="finding-fine muted small">A table nobody joins closes after 2 days.</p>
+      </div>
+
+      <div class="lobby-panel" hidden>
+        <!-- The table as tiles: one per seat, the empty ones flipping through
+             letters while they wait — the same "still looking" as the quick
+             match screen, for a table filled by link instead. -->
+        <div class="waiting-seats" aria-hidden="true"></div>
+        <h2 class="waiting-title"></h2>
+        <p class="lobby-lead muted"></p>
+        <!-- The link itself, on screen and copyable, for anyone who would
+             rather paste it into a chat than go through the share sheet; the
+             bare code is the fallback for someone reading it out. -->
+        <div class="share-card">
+          <div class="lobby-link" hidden>
+            <input class="lobby-link-field" type="text" readonly aria-label="Invite link" />
+            <button type="button" class="copy-link-button">Copy</button>
+          </div>
+          <button type="button" class="share-code-button primary">Share invite link</button>
+          <p class="lobby-code-row muted small">or give them the code <strong class="lobby-code"></strong></p>
+        </div>
+        <div class="finding-actions">
+          <button type="button" class="lobby-back subtle">Back to my games</button>
+          <button type="button" class="lobby-close subtle">Close table</button>
+        </div>
       </div>
 
       <div class="board-wrap">
         <!-- touch-action: none in styles.css; the renderer owns every gesture. -->
         <canvas class="board-canvas" tabindex="0" role="application"
                 aria-label="Game board. Arrow keys move the caret, letter keys place a tile, Enter plays, Escape takes everything back."></canvas>
-        <div class="board-zoom">
-          <button type="button" class="zoom-in icon-button" aria-label="Zoom in">+</button>
-          <button type="button" class="zoom-out icon-button" aria-label="Zoom out">−</button>
-          <button type="button" class="zoom-fit icon-button" aria-label="Fit whole board">⤢</button>
-        </div>
         <div class="score-pop" hidden aria-hidden="true"></div>
         <div class="game-over" hidden>
+          <div class="over-burst" aria-hidden="true"></div>
+          <div class="over-card">
+          <p class="over-kicker"></p>
           <h2 class="game-over-title"></h2>
           <p class="game-over-text"></p>
-          <button type="button" class="game-over-back primary">Back to games</button>
+          <ol class="over-scores"></ol>
+          <div class="over-highlights"></div>
+          <div class="game-over-actions">
+            <button type="button" class="rematch-button primary" hidden>Rematch</button>
+            <button type="button" class="moves-button" hidden>Moves</button>
+            <button type="button" class="game-over-back">Back to games</button>
+          </div>
+          </div>
         </div>
       </div>
       <p class="board-status visually-hidden" role="status" aria-live="polite"></p>
@@ -157,6 +314,13 @@
           <button type="button" class="pass-button subtle">Pass</button>
         </div>
         <button type="button" class="play-button primary" disabled>Play</button>
+      </div>
+      <!-- Their turn: not a disabled Play and three greyed buttons, which read
+           as broken, but what is actually going on and the one thing that
+           still works. -->
+      <div class="wait-bar" hidden>
+        <span class="wait-text"></span>
+        <button type="button" class="wait-shuffle subtle">Shuffle</button>
       </div>
     </section>
 

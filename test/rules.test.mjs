@@ -27,6 +27,22 @@ test('layout is symmetric with a double word at the centre', () => {
   }
 });
 
+test('layout matches the server: 8 W, 17 w, 12 L, 20 l, none touching', () => {
+  const n = { W: 0, w: 0, L: 0, l: 0 };
+  let touching = 0;
+  for (let r = 0; r < R.SIZE; r++) {
+    for (let c = 0; c < R.SIZE; c++) {
+      const v = lay[r].charAt(c);
+      if (v === '.') continue;
+      n[v]++;
+      if (c < R.SIZE - 1 && lay[r].charAt(c + 1) !== '.') touching++;
+      if (r < R.SIZE - 1 && lay[r + 1].charAt(c) !== '.') touching++;
+    }
+  }
+  assert.equal(JSON.stringify(n), JSON.stringify({ W: 8, w: 17, L: 12, l: 20 }));
+  assert.equal(touching, 0);
+});
+
 test('first word must cover the centre and score its premium', () => {
   assert.equal(R.evaluate(empty(), word('CAT', 0, 0), lay, true).ok, false);
   const res = R.evaluate(empty(), word('CAT', 7, 6), lay, true);
@@ -62,4 +78,24 @@ test('using all seven tiles adds the bingo bonus', () => {
   const res = R.evaluate(empty(), word('RETAINS', 7, 4), lay, true);
   assert.equal(res.bingo, true);
   assert.ok(res.score >= R.BINGO);
+});
+
+test('the bag holds 100 tiles', () => {
+  assert.equal(Object.values(R.DISTRIBUTION).reduce((a, b) => a + b, 0), 100);
+});
+
+test('unseen tiles leave out the board and your rack, blanks as blanks', () => {
+  const board = empty();
+  board[7][7] = { l: 'Q', b: false };
+  board[7][8] = { l: 'E', b: true };
+  const left = R.unseen(board, ['A', 'A', '_']);
+  assert.equal(left.Q, 0);
+  assert.equal(left.E, 12);
+  assert.equal(left._, 0);
+  assert.equal(left.A, 7);
+  assert.equal(Object.values(left).reduce((a, b) => a + b, 0), 100 - 5);
+});
+
+test('unseen never goes negative', () => {
+  assert.equal(R.unseen(empty(), ['Z', 'Z']).Z, 0);
 });

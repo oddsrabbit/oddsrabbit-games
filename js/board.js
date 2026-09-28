@@ -61,7 +61,8 @@
     ink: "#5a564b", inkStrong: "#ffffff", star: "#c9a227",
     tile: "#f7e7c1", tilePending: "#ffe9a8", tileEdge: "#b59a5b",
     tileInk: "#1f2937", tileBlankInk: "#6b7280", tileValueInk: "#4b5563",
-    selected: "#d97706", last: "#2f855a", hint: "#2f855a", cursor: "#c9542b"
+    selected: "#d97706", last: "#2f855a", hint: "#2f855a", cursor: "#c9542b",
+    danger: "#a32b1f"
   };
 
   var VARS = {
@@ -71,7 +72,7 @@
     tile: "--tile", tilePending: "--tile-pending", tileEdge: "--tile-edge",
     tileInk: "--tile-ink", tileBlankInk: "--tile-blank-ink",
     tileValueInk: "--tile-value-ink", selected: "--tile-selected",
-    last: "--turn", hint: "--hint", cursor: "--accent"
+    last: "--turn", hint: "--hint", cursor: "--accent", danger: "--danger"
   };
 
   function readPalette() {
@@ -84,6 +85,9 @@
     });
     return out;
   }
+
+  // Half the gap between two squares on the board's tray.
+  var GAP = 1.5;
 
   function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
@@ -104,7 +108,8 @@
     this.pending = [];
     this.highlight = {};
     this.hints = {};
-    this.selected = null;
+    this.invalid = {};
+    this.lifted = null;
     this.drop = null;
     this.cursor = null;
     this.cursorDir = [0, 1];
@@ -136,9 +141,18 @@
     this.draw();
   };
 
-  TilesBoard.prototype.setPending = function (pending, selectedKey) {
+  // `invalid` is a set of "row,col" keys outlined as part of a word the
+  // server rejected.
+  TilesBoard.prototype.setPending = function (pending, invalid) {
     this.pending = pending || [];
-    this.selected = selectedKey || null;
+    this.invalid = invalid || {};
+    this.draw();
+  };
+
+  // The pending tile being dragged to another square, drawn faded where it
+  // came from. null when nothing is lifted.
+  TilesBoard.prototype.setLifted = function (cell) {
+    this.lifted = cell ? cell[0] + "," + cell[1] : null;
     this.draw();
   };
 
@@ -347,10 +361,15 @@
       var ids = Object.keys(self.pointers);
       if (ids.length === 1) {
         var p = self.pointers[e.pointerId];
-        self.gesture = { type: "tap", startX: p.x, startY: p.y, lastX: p.x, lastY: p.y };
+        // A drag that starts on a tile the player has placed moves that tile
+        // instead of panning, if the app allows it.
+        var at = self.cellAt(p.x, p.y);
+        var lift = at && self.handlers.canLift && self.handlers.canLift(at[0], at[1]) ? at : null;
+        self.gesture = { type: "tap", startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, lift: lift };
       } else if (ids.length === 2) {
+        if (self.gesture && self.gesture.type === "lift" && self.handlers.onLiftCancel) self.handlers.onLiftCancel();
         var a = self.pointers[ids[0]], b = self.pointers[ids[1]];
-        self.gesture = { type: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y) };
+        self.gesture = { type: "pinch", dist: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
       }
       e.preventDefault();
     });
@@ -363,13 +382,34 @@
       if (g.type === "pinch" && ids.length >= 2) {
         var a = self.pointers[ids[0]], b = self.pointers[ids[1]];
         var d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (g.dist > 0) self._zoomAt(d / g.dist, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        // Two fingers moving together pan; spreading them zooms about their midpoint.
+        self.ox += mx - g.mx;
+        self.oy += my - g.my;
+        self._clamp();
+        if (g.dist > 0 && d !== g.dist) self._zoomAt(d / g.dist, mx, my);
+        else self.draw();
         g.dist = d;
+        g.mx = mx;
+        g.my = my;
+        return;
+      }
+      if (g.type === "lift") {
+        if (self.handlers.onLiftMove) self.handlers.onLiftMove(e.clientX, e.clientY);
+        e.preventDefault();
         return;
       }
       if (g.type === "tap" || g.type === "pan") {
         var p = self.pointers[e.pointerId];
-        if (g.type === "tap" && Math.hypot(p.x - g.startX, p.y - g.startY) > DRAG_THRESHOLD) g.type = "pan";
+        if (g.type === "tap" && Math.hypot(p.x - g.startX, p.y - g.startY) > DRAG_THRESHOLD) {
+          if (g.lift && self.handlers.onLiftStart) {
+            g.type = "lift";
+            self.handlers.onLiftStart(g.lift[0], g.lift[1], e.clientX, e.clientY, e.pointerType);
+            e.preventDefault();
+            return;
+          }
+          g.type = "pan";
+        }
         if (g.type === "pan") {
           self.ox += p.x - g.lastX;
           self.oy += p.y - g.lastY;
@@ -386,7 +426,22 @@
       var g = self.gesture;
       var p = self.pointers[e.pointerId];
       delete self.pointers[e.pointerId];
-      if (g && g.type === "pan") self._changed();
+      if (g && g.type === "lift") {
+        self.gesture = null;
+        if (e.type === "pointercancel") { if (self.handlers.onLiftCancel) self.handlers.onLiftCancel(); }
+        else if (self.handlers.onLiftEnd) self.handlers.onLiftEnd(e.clientX, e.clientY);
+        e.preventDefault();
+        return;
+      }
+      if (g && (g.type === "pan" || g.type === "pinch")) self._changed();
+      // Lifting one finger of a pinch leaves the other panning, as in a map.
+      var rest = Object.keys(self.pointers);
+      if (g && g.type === "pinch" && rest.length === 1) {
+        var q = self.pointers[rest[0]];
+        self.gesture = { type: "pan", startX: q.x, startY: q.y, lastX: q.x, lastY: q.y };
+        e.preventDefault();
+        return;
+      }
       if (g && g.type === "tap" && p) {
         var now = Date.now();
         var cell = self.cellAt(p.x, p.y);
@@ -448,15 +503,20 @@
     var pendingMap = {};
     this.pending.forEach(function (t) { pendingMap[t.row + "," + t.col] = t; });
 
+    // A tray under the squares, and each square a rounded inset on it — the
+    // same board as the list's preview and the app icon. Flat squares split
+    // by hairlines read as a spreadsheet, and with the page colour behind
+    // them the board had no edge at all.
+    ctx.fillStyle = colors.grid;
+    roundRect(ctx, -GAP, -GAP, SIZE * CELL + 2 * GAP, SIZE * CELL + 2 * GAP, 6);
+    ctx.fill();
     for (var r = 0; r < SIZE; r++) {
       for (var c = 0; c < SIZE; c++) {
         var x = c * CELL, y = r * CELL;
         var code = this.layout[r].charAt(c);
         ctx.fillStyle = colors[code] || colors.plain;
-        ctx.fillRect(x, y, CELL, CELL);
-        ctx.strokeStyle = colors.grid;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
+        roundRect(ctx, x + GAP, y + GAP, CELL - 2 * GAP, CELL - 2 * GAP, 4);
+        ctx.fill();
         var tile = this.board && this.board[r] ? this.board[r][c] : null;
         var pend = pendingMap[r + "," + c];
         if (!tile && !pend) {
@@ -488,8 +548,11 @@
           if (this.hints[r + "," + c]) this._drawHint(ctx, x, y, colors);
           continue;
         }
-        this._drawTile(ctx, x, y, tile || { l: pend.letter, b: pend.blank }, !!pend, !!this.highlight[r + "," + c],
-          !!(pend && this.selected === (r + "," + c)), colors);
+        var key = r + "," + c;
+        if (pend && this.lifted === key) ctx.globalAlpha = 0.3;
+        this._drawTile(ctx, x, y, tile || { l: pend.letter, b: pend.blank }, !!pend, !!this.highlight[key],
+          !!this.invalid[key], colors);
+        ctx.globalAlpha = 1;
       }
     }
     if (this.drop) this._drawDrop(ctx, colors);
@@ -595,14 +658,14 @@
     ctx.restore();
   };
 
-  TilesBoard.prototype._drawTile = function (ctx, x, y, tile, pending, highlighted, selected, colors) {
+  TilesBoard.prototype._drawTile = function (ctx, x, y, tile, pending, highlighted, invalid, colors) {
     var pad = 2.5;
     var w = CELL - pad * 2;
     roundRect(ctx, x + pad, y + pad, w, w, 5);
     ctx.fillStyle = pending ? colors.tilePending : colors.tile;
     ctx.fill();
-    ctx.lineWidth = selected ? 3 : highlighted ? 2.5 : 1;
-    ctx.strokeStyle = selected ? colors.selected : highlighted ? colors.last : colors.tileEdge;
+    ctx.lineWidth = invalid ? 3 : highlighted ? 2.5 : 1;
+    ctx.strokeStyle = invalid ? colors.danger : highlighted ? colors.last : colors.tileEdge;
     ctx.stroke();
 
     // The glyph sits on the cell's true centre. The value is drawn in the

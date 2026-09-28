@@ -27,11 +27,19 @@
     N: 1, O: 1, P: 3, Q: 10, R: 1, S: 1, T: 1, U: 1, V: 4, W: 4, X: 8, Y: 4, Z: 10, _: 0
   };
 
+  // The 100-tile bag every game starts with. Must match the server's bag.
+  var DISTRIBUTION = {
+    A: 9, B: 2, C: 2, D: 4, E: 12, F: 2, G: 3, H: 2, I: 9, J: 1, K: 1, L: 4, M: 2,
+    N: 6, O: 8, P: 2, Q: 1, R: 6, S: 4, T: 6, U: 4, V: 2, W: 2, X: 1, Y: 2, Z: 1, _: 2
+  };
+
+  // Must match TilesRules::PREMIUMS (revised 2026-09-26). A Wild match plays
+  // on its own layout, which only the server's view carries.
   var PREMIUMS = {
     W: [[0, 4]],
     w: [[2, 2], [3, 3], [4, 4], [5, 5], [7, 7]],
-    L: [[0, 7], [3, 7], [2, 6]],
-    l: [[1, 3], [6, 6], [4, 7], [1, 7]]
+    L: [[2, 6], [0, 7]],
+    l: [[1, 1], [1, 3], [6, 6], [3, 7]]
   };
 
   function layout() {
@@ -220,6 +228,23 @@
     }).join("");
   }
 
+  /**
+   * Tiles the viewer cannot see: the full bag, less every tile on the board
+   * (a blank counts as `_`, whatever letter it plays as) and the viewer's own
+   * rack. What is left is in the bag or on an opponent's rack. Never negative,
+   * so a board from a server with a different bag cannot print "-1".
+   */
+  function unseen(board, rack) {
+    var left = {};
+    Object.keys(DISTRIBUTION).forEach(function (l) { left[l] = DISTRIBUTION[l]; });
+    function take(l) { if (left[l] > 0) left[l]--; }
+    (board || []).forEach(function (row) {
+      row.forEach(function (t) { if (t) take(t.b ? "_" : t.l); });
+    });
+    (rack || []).forEach(take);
+    return left;
+  }
+
   function rackValue(rack) {
     return rack.reduce(function (sum, l) { return sum + (VALUES[l] || 0); }, 0);
   }
@@ -230,10 +255,12 @@
     RACK: RACK,
     BINGO: BINGO,
     VALUES: VALUES,
+    DISTRIBUTION: DISTRIBUTION,
     layout: layout,
     evaluate: evaluate,
     hints: hints,
     wordThrough: wordThrough,
+    unseen: unseen,
     rackValue: rackValue
   };
 })();
