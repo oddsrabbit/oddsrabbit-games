@@ -7,7 +7,8 @@ import type { BurrowState } from './decor';
 
 // A canvas that draws nothing: enough for the scene to run in Node.
 const ctx: unknown = new Proxy({}, {
-  get: (_t, k) => (k === 'createImageData' ? (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }) : () => ({})),
+  get: (_t, k) => (k === 'createImageData' ? (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) })
+    : k === 'createRadialGradient' ? () => ({ addColorStop: () => {} }) : () => ({})),
   set: () => true,
 });
 const fakeCanvas = () => ({ width: 0, height: 0, getContext: () => ctx });

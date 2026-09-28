@@ -4,9 +4,9 @@
 // standing, which way she faces, floating hearts); the game state it draws
 // comes in each frame.
 
-import { drawBurrow, drawWindowView, PLAIN_ROOM, SCENE_H, SCENE_W, windowOf, type RoomStyle } from './art/burrow';
+import { drawBurrow, drawWindowView, PLAIN_ROOM, ROOM_ARCH, SCENE_H, SCENE_W, WALL_INSET, windowOf, type RoomStyle } from './art/burrow';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
-import { toSprite, type Sprite } from './art/pixels';
+import { resizeCanvas, toSprite, type Sprite } from './art/pixels';
 import { drawPaw, drawRabbit, dressKey, RABBIT_GROUND, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type BurrowState, type DecorDef, type PlacedItem } from './decor';
 import type { Coat, FoodReaction, Mood } from './sim';
@@ -140,6 +140,7 @@ export class Scene {
   private blinkAt = 2000;
   private readonly soil: HTMLCanvasElement;
   private soilPattern: CanvasPattern | null = null;
+  private lamplight: CanvasGradient | null = null;
   private offsetX = 0;
   private offsetY = 0;
 
@@ -282,8 +283,7 @@ export class Scene {
    * room inside the surface and may be negative when the stage crops it.
    */
   resize(w: number, h: number, offsetX: number, offsetY: number): void {
-    if (this.canvas.width !== w) this.canvas.width = w;
-    if (this.canvas.height !== h) this.canvas.height = h;
+    resizeCanvas(this.canvas, w, h, offsetX - this.offsetX, offsetY - this.offsetY);
     this.ctx.imageSmoothingEnabled = false;
     this.offsetX = offsetX;
     this.offsetY = offsetY;
@@ -348,10 +348,13 @@ export class Scene {
     if (m.night) {
       // Darken the whole room at once (no canvas filters: Safari lacks them),
       // then put the starry window back and add warm lantern light on top.
-      // Awake, the lamps are on: a warm, lighter dim; asleep, lights out.
+      // Awake, the lamps are on: a warm pool of light in the middle of the room
+      // fading to cool blue in the corners, so it reads as night rather than a
+      // browner room, and she keeps her own coat colour in the light.
+      // Asleep, lights out.
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = asleep ? '#62608E' : '#C8AE92';
+      ctx.fillStyle = asleep ? '#62608E' : (this.lamplight ??= nightLight(ctx));
       ctx.fillRect(-this.offsetX, -this.offsetY, this.canvas.width, this.canvas.height);
       ctx.globalCompositeOperation = 'source-over';
       ctx.beginPath();
@@ -362,6 +365,12 @@ export class Scene {
       this.drawWindow(m, now);
       ctx.restore();
       ctx.save();
+      // lamplight stays in the room: it doesn't shine through the dirt around it
+      const { cx, cy, rx, ry } = ROOM_ARCH;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.rect(WALL_INSET, cy, SCENE_W - 2 * WALL_INSET, SCENE_H - cy);
+      ctx.clip();
       ctx.globalCompositeOperation = 'lighter';
       for (const p of placed.filter((p) => p.def.glow)) {
         // hanging lights glow below their top; floor ones around their upper part
@@ -631,8 +640,11 @@ export class Scene {
     // asleep: she is already curled up on her cushion, not walking to it
     if (bed) { this.targetX = bed.x; this.x = bed.x; this.hopPhase = 0; this.idle = null; return; }
     const free = m.mood !== 'asleep' && !this.reaction && !m.decorating && !m.absent;
-    // a tap, a meal or decorating calls her away from whatever she was doing
-    if (!free) this.idle = null;
+    // Sleep, decorating or going out calls her away from whatever she was
+    // doing. A tap or a meal doesn't: she's patted, or eats, where she is, and
+    // goes on with it after (dropping it had the mood line flick to "content"
+    // and back as she walked straight back to the same spot).
+    if (m.mood === 'asleep' || m.decorating || m.absent || (this.reaction && this.idle?.kind === 'binky')) this.idle = null;
     if (this.idle?.kind === 'spot' && now > this.idle.until) { this.idle = null; this.nextWander = now + 1500; }
     if (this.idle?.kind === 'binky' && now > this.idle.start + BINKY_MS) this.idle = null;
     if (free && !this.idle && now > this.nextWander) {
@@ -897,6 +909,19 @@ function makeSoilTile(): HTMLCanvasElement {
     g.fillRect(s % 32, (s >>> 8) % 32, 1, 1);
   }
   return c;
+}
+
+/**
+ * The awake night light, multiplied over the room: nearly clear where she
+ * usually sits, warm lamplight around that, cool blue night in the corners.
+ */
+function nightLight(ctx: CanvasRenderingContext2D): CanvasGradient {
+  const g = ctx.createRadialGradient(SCENE_W / 2, SCENE_H * 0.68, 6, SCENE_W / 2, SCENE_H * 0.62, SCENE_W * 0.85);
+  g.addColorStop(0, '#FFF4E4');
+  g.addColorStop(0.24, '#EFD6B4');
+  g.addColorStop(0.55, '#9C90B2');
+  g.addColorStop(1, '#4C5088');
+  return g;
 }
 
 /** Where she can stand to be beside something: not half off the edge of the room. */

@@ -73,7 +73,8 @@ const GRIDS: Record<string, string[]> = {
   marble: ['..kkk..', '.kbwbk.', 'kbwbgBk', 'kbggbBk', 'kbbgBBk', '.kBBBk.', '..kkk..'],
   lucky: ['.kk.kk.', 'kgGkGgk', 'kGgkgGk', '.kkykk.', 'kGgkgGk', 'kgGkGgk', '.kk.kk.', '...k...', '..k....'],
   key: ['.kkk......', 'kyyyk.....', 'ky.ykkkkkk', 'kyyyyyyyyk', '.kkkkkykyk', '......k.k.'],
-  star: ['....k....', '...kyk...', 'kkkkyykkk', 'kyyyyyyYk', '.kyyyyYk.', '..kyyyYk.', '.kyYkkYYk', '.kYk..kYk', '.kk....kk'],
+  // symmetric about the middle column (it leaned: its arms and feet were off by one)
+  star: ['....k....', '...kyk...', 'kkkyyykkk', 'kyyyyyyYk', '.kyyyyYk.', '..kyyyk..', '.kyyYyYk.', '.kyk.kYk.', '.kk...kk.'],
 
   // visitors (wildlife.ts); the hedgehog is above
   robin: [

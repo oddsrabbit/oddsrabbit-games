@@ -42,6 +42,15 @@ export const WEATHER_NAME: Record<Weather, string> = {
   sunny: 'Sunny', cloudy: 'Cloudy', rain: 'Rainy', snow: 'Snowy', leaves: 'Blustery',
 };
 
+/** After dark a sunny day is a clear night: the header shouldn't say "Sunny" under the stars. */
+const NIGHT_WEATHER_NAME: Record<Weather, string> = {
+  sunny: 'Clear night', cloudy: 'Cloudy night', rain: 'Rainy night', snow: 'Snowy night', leaves: 'Blustery night',
+};
+
+export function weatherName(weather: Weather, night: boolean): string {
+  return (night ? NIGHT_WEATHER_NAME : WEATHER_NAME)[weather];
+}
+
 function dayNumber(isoDate: string): number {
   return Math.floor(Date.parse(isoDate + 'T00:00:00Z') / 86_400_000);
 }

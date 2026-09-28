@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { burrowForSave, canDig, clampToZone, digRoom, hasBed, inRoom, readBurrow, roomsOf, starterBurrow, ZONES } from './decor';
+import { addStarterLantern, burrowForSave, canDig, clampToZone, digRoom, hasBed, hasLantern, inRoom, readBurrow, roomsOf, starterBurrow, ZONES } from './decor';
 
 test('positions are clamped to their zone and rounded to whole pixels', () => {
   assert.deepEqual(clampToZone('floor', -20, 500), { x: ZONES.floor.minX, y: ZONES.floor.maxY });
@@ -30,14 +30,25 @@ test('a v1 save with fixed slots becomes free positions', () => {
   ]);
 });
 
-test('a new burrow has a plant and no bed', () => {
+test('a new burrow has a plant, a lantern in storage and no bed', () => {
   const b = starterBurrow();
-  assert.deepEqual(b.items.map((i) => i.id), ['plant']);
+  assert.deepEqual(b.items.map((i) => [i.id, i.placed]), [['plant', true], ['lantern', false]]);
+  assert.equal(hasLantern(b), false, 'a lantern in storage is not hung');
   assert.equal(hasBed(b), false);
   b.items.push({ uid: 'c', id: 'cushion', x: 70, y: 99, flip: false, placed: false });
   assert.equal(hasBed(b), false, 'a bed in storage does not count');
-  b.items[1]!.placed = true;
+  b.items[2]!.placed = true;
   assert.equal(hasBed(b), true);
+  b.items[1]!.placed = true;
+  assert.equal(hasLantern(b), true);
+});
+
+test('an older burrow gets the starter lantern once, and not if it has one', () => {
+  const b = starterBurrow();
+  b.items = b.items.filter((i) => i.id !== 'lantern');
+  assert.equal(addStarterLantern(b), true);
+  assert.equal(addStarterLantern(b), false);
+  assert.equal(b.items.filter((i) => i.id === 'lantern').length, 1);
 });
 
 test('a v2 save round-trips, with positions re-clamped', () => {
@@ -47,7 +58,7 @@ test('a v2 save round-trips, with positions re-clamped', () => {
   const b = readBurrow(JSON.parse(JSON.stringify(s)));
   assert.ok(b);
   assert.equal(b.items[0]!.x, ZONES.floor.maxX);
-  assert.equal(b.items[1]!.placed, true);
+  assert.equal(b.items[2]!.placed, true);
 });
 
 test('malformed saves are rejected', () => {

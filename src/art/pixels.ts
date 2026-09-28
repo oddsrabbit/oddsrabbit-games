@@ -85,3 +85,30 @@ export function lcg(seed: number): () => number {
     return s / 4294967296;
   };
 }
+
+let keepCanvas: HTMLCanvasElement | null = null;
+/**
+ * Resize a canvas without it going blank. Setting a canvas's size clears it,
+ * and a resize (the text under the stage wrapping onto a second line, say)
+ * lands after this frame's draw, so the cleared canvas would be shown until
+ * the next one. The old picture is copied back, shifted by (dx, dy), to stand
+ * in until then.
+ */
+export function resizeCanvas(canvas: HTMLCanvasElement, w: number, h: number, dx = 0, dy = 0): void {
+  if (canvas.width === w && canvas.height === h) return;
+  const ow = canvas.width, oh = canvas.height;
+  const keep = (keepCanvas ??= document.createElement('canvas'));
+  const kctx = ow && oh ? keep.getContext('2d') : null;
+  if (kctx) {
+    keep.width = ow; keep.height = oh;
+    kctx.drawImage(canvas, 0, 0);
+  }
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.imageSmoothingEnabled = false;
+  if (kctx) {
+    ctx.drawImage(keep, dx, dy);
+    keep.width = keep.height = 0; // let go of its memory
+  }
+}

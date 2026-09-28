@@ -299,10 +299,10 @@ export interface BurrowState {
   keepRooms?: Partial<Record<ExtraRoom, unknown[]>>;
 }
 
-/** A new rabbit arrives to a cushion and a pot, so the room isn't bare. */
 /**
- * A new rabbit's burrow: just a plant, so it looks lived-in. No bed: she
- * sleeps on the floor until the player gets her one (Getting started, step 1).
+ * A new rabbit's burrow: just a plant, so it looks lived-in, and a honey
+ * lantern in storage for the player to hang (Getting started, step 1). No bed:
+ * she sleeps on the floor until the player gets her one (step 1 too).
  */
 export function starterBurrow(): BurrowState {
   return {
@@ -310,8 +310,26 @@ export function starterBurrow(): BurrowState {
     rev: 0,
     items: [
       { uid: 'starter-plant', id: 'plant', x: 12, y: 99, flip: false, placed: true },
+      STARTER_LANTERN(),
     ],
   };
+}
+
+const STARTER_LANTERN = (): PlacedItem => ({ uid: 'starter-lantern', id: 'lantern', x: ZONES.hang.x, y: ZONES.hang.y, flip: false, placed: false });
+
+/**
+ * A burrow from before the lantern came with it, still on step one: give it the
+ * lantern to hang. True if it was added. Mutates `b`.
+ */
+export function addStarterLantern(b: BurrowState): boolean {
+  if (b.items.some((i) => i.id === 'lantern')) return false;
+  b.items.push(STARTER_LANTERN());
+  return true;
+}
+
+/** Whether a honey lantern is hung, in any room, for the "Hang the lantern" goal. */
+export function hasLantern(b: BurrowState): boolean {
+  return b.items.some((i) => i.placed && i.id === 'lantern');
 }
 
 /** Whether a bed is placed, for where she sleeps and the "Get her a bed" goal. */

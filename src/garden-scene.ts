@@ -7,7 +7,7 @@
 
 import { drawCloverPatch, drawField, drawFirefly, drawGarden, drawGardenShade, drawSeedPacket, drawSignpost, drawSpot, drawTag } from './art/garden';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
-import { toSprite, type Sprite } from './art/pixels';
+import { resizeCanvas, toSprite, type Sprite } from './art/pixels';
 import { drawRabbit, dressKey, K_GARDEN, RABBIT_GROUND, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type PlacedItem } from './decor';
 import { plotOffer, plotUpgrade, stage } from './extras';
@@ -136,13 +136,13 @@ export class GardenScene {
   /** Same contract as Scene.resize: the surface in scene pixels, and where the 98x118 view sits in it. */
   resize(w: number, h: number, _offsetX: number, offsetY: number): void {
     // a column spare on the right, for the sub-pixel nudge to slide into
-    if (this.canvas.width !== w + 1) this.canvas.width = w + 1;
-    if (this.canvas.height !== h) this.canvas.height = h;
+    // the ground stays on the stage's floor; extra height is more sky
+    const oy = h >= STRIP_H ? h - STRIP_H : offsetY;
+    resizeCanvas(this.canvas, w + 1, h, 0, oy - this.offsetY);
     this.ctx.imageSmoothingEnabled = false;
     this.w = w;
     this.h = h;
-    // the ground stays on the stage's floor; extra height is more sky
-    this.offsetY = h >= STRIP_H ? h - STRIP_H : offsetY;
+    this.offsetY = oy;
   }
 
   /** A point on the surface to strip coordinates. */

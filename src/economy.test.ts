@@ -76,11 +76,11 @@ test('the gift grows 2 a day up to 40', () => {
 test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {
   let s = pet();
   assert.equal(starterStep(s), 1);
-  assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked', 'locked', 'locked']);
+  assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked']);
   for (const g of ['feed', 'toy', 'bed'] as const) markGoal(s, g);
   assert.equal(starterReady(s), false);
   assert.equal(claimStarter(s, NOON).paid, null, 'not all step-one goals done');
-  markGoal(s, 'dress');
+  markGoal(s, 'lantern');
   assert.equal(starterReady(s), true);
   assert.equal(countOf(s, 'patch'), 0, 'nothing paid until claimed');
   let r = claimStarter(s, NOON);
@@ -92,15 +92,27 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   assert.equal(starterStep(s), 2);
   assert.equal(starterView(s)[1]!.status, 'open');
   // goals done early count when their step opens, but each step is its own claim
-  for (const g of ['nap', 'harvest', 'bake', 'yard', 'friend', 'decor', 'decor', 'decor'] as const) markGoal(s, g);
+  for (const g of ['dress', 'nap', 'harvest', 'bake', 'yard', 'forage', 'friend', 'surface', 'meadowpiece'] as const) markGoal(s, g);
   s.gift.streak = 3;
-  s.upgrades = ['meadow'];
+  assert.equal(r.state.starter?.paid.length, 1);
+  r = claimStarter(s, NOON);
+  assert.equal(r.paid?.step, 2);
+  s = r.state;
+  assert.equal(claimStarter(s, NOON).paid, null, 'step three wants a second patch');
+  // goals that count what she has: however it came about
+  s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 2 } };
+  s.toys = ['yarn'];
+  s.collection = { pebble: 1 };
+  s.upgrades = ['meadow', 'plot2'];
   s.bond = 35; // bond level 3
-  for (const step of [2, 3, 4, 5, 6, 7]) {
+  const paid: number[] = [];
+  for (const step of [3, 4, 5]) {
     r = claimStarter(s, NOON);
     assert.equal(r.paid?.step, step);
+    paid.push(r.paid!.clover);
     s = r.state;
   }
+  assert.deepEqual(paid, [120, 120, 200]);
   assert.equal(starterDone(s), true);
   assert.equal(starterReady(s), false);
 });

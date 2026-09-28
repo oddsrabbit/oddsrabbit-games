@@ -55,6 +55,11 @@ button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--sun); outline-offset: 2px; }
 .px { image-rendering: pixelated; image-rendering: crisp-edges; }
+/* The game's pictures and buttons aren't documents: a long press on them
+   (iOS's preview and Save to Photos, Android's image menu), text selection
+   and dragging an image out would only get in the way of holding things. */
+img, canvas, button, [role="button"] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+img { -webkit-user-drag: none; }
 .pixfont { font-family: var(--pixel); letter-spacing: 0.02em; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -242,6 +247,18 @@ button.tchip::after { inset: -7px -3px; }
    indicator, and the buttons stay above it. */
 .visit .panel { padding-bottom: calc(14px + var(--oddsrabbit-safe-bottom, 0px)); }
 .moodline { margin: 0; font-size: 15px; font-weight: 600; min-height: 1.4em; }
+/* One line, always, so the room above never jumps as it changes. Too long,
+   main.ts fitLine steps the size down, then it ends in "…" and a tap shows it all. */
+.panel > .moodline { line-height: 1.4; height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel > .moodline.cut { cursor: pointer; }
+.line-bubble {
+  position: fixed; z-index: 40; left: 12px; right: 12px; max-width: 536px; margin: 0 auto;
+  background: var(--paper); color: var(--ink); border: 3px solid var(--ink); border-radius: 12px;
+  box-shadow: 0 4px 0 var(--ink); padding: 10px 12px; font-size: 15px; font-weight: 600; line-height: 1.4;
+  animation: bubble-in .15s ease-out;
+}
+@keyframes bubble-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .line-bubble { animation: none; } }
 .actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .act {
   height: 78px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
@@ -766,7 +783,8 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .menu-row .svg-ico { display: flex; color: var(--ink); }
 /* an on/off switch at the end of a menu row */
 .switch { position: relative; flex-shrink: 0; margin-left: auto; width: 44px; height: 26px; border-radius: 999px; background: var(--paper-2); border: 2px solid var(--ink-2); }
-.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid var(--ink-2); transition: transform .15s; }
+/* sized with its border (`*` doesn't reach ::after): 18px in a 22px-tall inside, 2px all round */
+.switch::after { content: ""; box-sizing: border-box; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 2px solid var(--ink-2); transition: transform .15s; }
 .switch.on { background: var(--clover); border-color: var(--ink); }
 .switch.on::after { transform: translateX(18px); border-color: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .switch::after { transition: none; } }
@@ -952,6 +970,13 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .door.plot .arch { background: transparent; border: 3px dashed #2f5a1f; box-shadow: none; align-items: center; font-family: var(--pixel); font-size: 18px; color: #2f5a1f; }
 .lane.small { border: 0; border-radius: 0; overflow: hidden; }
 .lane.small .lane-doors { margin: 0 auto; }
+/* no friends yet: the Invite plot to the right, and her hopping about on her own to the left of it */
+.lane.alone .lane-doors { margin: 0 8% 0 auto; }
+.lane-hopper { position: absolute; left: 8%; bottom: 30px; width: 48px; height: 48px; animation: roam 9s ease-in-out infinite; }
+.lane-hopper img { width: 48px; height: 48px; display: block; animation: hop .45s ease-in-out infinite; }
+@keyframes roam { 0%, 8% { left: 8%; } 42%, 58% { left: calc(58% - 48px); } 92%, 100% { left: 8%; } }
+@keyframes hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@media (prefers-reduced-motion: reduce) { .lane-hopper, .lane-hopper img { animation: none; } .lane-hopper { left: 24%; } }
 
 /* no friends yet */
 .friends-hero { overflow: hidden; background: var(--soil); color: var(--cream); border: 3px solid #120c09; border-radius: 16px; }
@@ -960,7 +985,8 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .friends-hero p { font-size: 14px; color: var(--cream-2); }
 .friends-hero .btn { border-color: #000; }
 .list.perks li { align-items: center; padding: 8px 10px; background: #fff; border: 2px solid var(--paper-2); border-radius: 12px; }
-.list.perks li .ico { overflow: hidden; align-items: flex-end; }
+/* her face sits on the bottom edge, cropped; the item icons stay centred */
+.list.perks li .ico.face { overflow: hidden; align-items: flex-end; }
 .list.perks li .nm { font-size: 14px; }
 
 /* invite sheet and friend bonuses */
@@ -1020,6 +1046,10 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .panel.drop-hot .store-drop { display: inline; }
 .drag-ghost { position: fixed; z-index: 30; pointer-events: none; transform: translate(-50%, -85%); filter: drop-shadow(0 4px 0 rgba(20, 13, 10, .35)); }
 @media (prefers-reduced-motion: reduce) { .store-zone { transition: none; } }
+/* arranging: her needs and the goal aren't what you're doing, and the room needs the height */
+body.arranging-burrow .hud .needs, body.arranging-burrow .hud .goal-bar { display: none; }
+/* already arranging: the way in has nothing to do */
+body.arranging-burrow .arrange-btn { visibility: hidden; }
 
 /* ---------- the Friends page's views ---------- */
 /* Today | Friends | Guest book, pinned to the top of the page as it scrolls */

@@ -1,39 +1,42 @@
-// Getting started (docs/rabbit-pets-economy.md §2.1): a checklist of seven
-// steps, each paying a lump sum the player claims, and a free clover patch
+// Getting started (docs/rabbit-pets-economy.md §2.1): a checklist of five
+// steps of four goals, each paying a lump sum the player claims, and a free clover patch
 // for the first. Steps go in order and the next opens as soon as the last is
 // claimed. Some goals pace themselves (she has to be tired to nap, the gift
 // opens once a day, bond takes time). Anything done early counts when its
 // step opens. Pure, tested in economy.test.ts.
 
 import { bondLevel, earn } from './economy';
-import { hasUpgrade } from './extras';
+import { hasUpgrade, soilLevel } from './extras';
 import type { PetState } from './sim';
-import { giveBuilding } from './yard';
+import { countOf, giveBuilding } from './yard';
 
 export type StarterGoal =
-  | 'feed' | 'nap' | 'bed' | 'decor' | 'dress'
-  | 'toy' | 'harvest' | 'bake'
-  | 'streak3' | 'yard'
-  | 'friend'
-  | 'decor3'
-  | 'upgrade'
-  | 'meadow'
+  | 'feed' | 'nap' | 'bed' | 'lantern' | 'dress'
+  | 'toy' | 'harvest' | 'bake' | 'forage'
+  | 'streak3' | 'yard' | 'patch2'
+  | 'friend' | 'newtoy' | 'surface' | 'find'
+  | 'meadow' | 'meadowpiece' | 'gardenup'
   | 'bond3';
 
 export const GOAL_TEXT: Record<StarterGoal, string> = {
   feed: 'Feed her',
   nap: 'Put her down for a nap when she\'s tired',
   bed: 'Get her a bed from the Shop (try the Cloud cushion bed)',
-  decor: 'Place a piece of decor',
+  lantern: 'Hang the honey lantern (it\'s waiting in storage)',
   dress: 'Dress her in an outfit',
   toy: 'Play with her toy',
   harvest: 'Harvest the garden',
   bake: 'Bake a treat',
+  forage: 'Send her out foraging',
   streak3: 'Open the daily gift 3 times',
   yard: 'Collect clover from the yard',
+  patch2: 'Build a second clover patch in the yard',
+  newtoy: 'Get her a new toy from the Shop',
+  surface: 'Get new wallpaper or a new floor from the Shop',
+  find: 'Find something for her collection',
+  meadowpiece: 'Put something out in the meadow',
+  gardenup: 'Buy a garden upgrade',
   friend: 'Visit a friend, or share Rabbit Pets',
-  decor3: 'Place 3 pieces of decor',
-  upgrade: 'Buy a garden upgrade',
   meadow: 'Open the meadow, past the yard',
   bond3: 'Reach bond level 3',
 };
@@ -41,15 +44,18 @@ export const GOAL_TEXT: Record<StarterGoal, string> = {
 export interface StarterStep { step: number; goals: StarterGoal[]; clover: number; patch?: boolean }
 
 export const STARTER_STEPS: StarterStep[] = [
-  // Step one can all be done in the first sitting. (The nap waits for step
-  // two: a new rabbit isn't tired for an hour or more.)
-  { step: 1, goals: ['feed', 'bed', 'toy', 'dress'], clover: 100, patch: true },
-  { step: 2, goals: ['nap', 'harvest', 'bake'], clover: 70 },
-  { step: 3, goals: ['streak3', 'yard'], clover: 70 },
-  { step: 4, goals: ['friend'], clover: 50 },
-  { step: 5, goals: ['decor3'], clover: 30 },
-  { step: 6, goals: ['meadow'], clover: 30 },
-  { step: 7, goals: ['bond3'], clover: 100 },
+  // Step one can all be done in the first sitting. The lantern comes free in
+  // storage: hanging it teaches arranging the room.
+  { step: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 100, patch: true },
+  // Something to do (dress her, with step one's clover) in the hour or more
+  // before a new rabbit is tired enough to nap.
+  { step: 2, goals: ['dress', 'nap', 'harvest', 'bake'], clover: 70 },
+  // The daily round: the gift takes three days, the rest fills them.
+  { step: 3, goals: ['streak3', 'yard', 'patch2', 'forage'], clover: 120 },
+  // Spending on her and her room, and what foraging turns up.
+  { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 120 },
+  // Saving up (about 850 clover in all) while the bond grows: about a week in.
+  { step: 5, goals: ['meadow', 'meadowpiece', 'gardenup', 'bond3'], clover: 200 },
 ];
 
 /** `paid` holds claimed step numbers (saves from the "starter week" hold the same numbers as days). */
@@ -82,7 +88,12 @@ export function goalDone(s: PetState, goal: StarterGoal): boolean {
   if (goal === 'streak3') return s.gift.streak >= 3;
   if (goal === 'bond3') return bondLevel(s.bond).level >= 3;
   if (goal === 'meadow') return hasUpgrade(s, 'meadow');
-  if (goal === 'decor3') return (c.decor ?? 0) >= 3;
+  // what she has counts however she got it (the burrow's, the surface and the
+  // meadow piece, are marked by main.ts like the bed and the lantern)
+  if (goal === 'patch2') return countOf(s, 'patch') >= 2;
+  if (goal === 'newtoy') return (s.toys ?? []).length > 0;
+  if (goal === 'find') return Object.values(s.collection ?? {}).some((n) => n > 0);
+  if (goal === 'gardenup') return soilLevel(s) > 0 || (['plot2', 'plot3', 'can', 'plot4', 'plot5'] as const).some((u) => hasUpgrade(s, u));
   return (c[goal] ?? 0) > 0;
 }
 

@@ -23,6 +23,9 @@ export interface RoomStyle { wall: string; floor: string; window: string; varian
 export function windowOf(style?: RoomStyle): { x: number; y: number; r: number } {
   return style?.variant === 'nook' ? { ...WINDOW, x: SCENE_W - WINDOW.x } : WINDOW;
 }
+/** The room dug out of the soil: an arched ceiling over straight walls (anything outside is solid dirt). */
+export const ROOM_ARCH = { cx: SCENE_W / 2, cy: 64, rx: 46, ry: 58 };
+
 export const PLAIN_ROOM: RoomStyle = { wall: 'plainwall', floor: 'plainfloor', window: 'roundwindow' };
 
 const WALLS: Record<string, [string, string, string, string]> = {
@@ -58,7 +61,7 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
   const checker = style.floor === 'checkerfloor';
   const isWall = (c: RGBA) => c === wall || c === wall2 || c === wall3 || c === rim;
   const px: RGBA[][] = Array.from({ length: H }, () => Array<RGBA>(W).fill(soil));
-  const cx = W / 2, cy = 64, rx = 46, ry = 58;
+  const { cx, cy, rx, ry } = ROOM_ARCH;
 
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     // An arched ceiling, then straight walls down to the floor from the arch's
@@ -202,19 +205,28 @@ export function drawWindowView(season: 'spring' | 'summer' | 'autumn' | 'winter'
     if (!overcast && phase !== null) {
       // the moon window: the real moon, in tonight's phase, and more stars
       for (const [sx, sy] of [[-6, -5], [4, -8], [-2, 3], [7, 0], [-8, 1], [-4, -9], [8, -5], [-7, -2]] as const) set(wx + sx, wy + sy, hex('FFF6C8'));
-      const r = 4, lit = hex('F4E3B5'), dark = hex('3A4468');
-      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-        if (dx * dx + dy * dy > r * r + 1) continue;
-        const nx = dx / r, ny = dy / r;
-        const t = Math.cos(2 * Math.PI * phase) * Math.sqrt(Math.max(0, 1 - ny * ny));
-        const on = phase < 0.5 ? nx >= t : nx <= -t;
-        set(wx + 3 + dx, wy - 4 + dy, on ? lit : dark);
+      // Each pixel is sampled 4x4 against the real disc and its lit part, and
+      // takes whichever covers most of it: a round 9-pixel moon whose edge and
+      // terminator step cleanly (a single point per pixel left notches, and
+      // lit caps on a thin crescent's top and bottom rows).
+      const R = 4.25, N = 4, lit = hex('F4E3B5'), dark = hex('3A4468');
+      const k = Math.cos(2 * Math.PI * phase);
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        let inside = 0, on = 0;
+        for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+          const x = (dx - 0.5 + (i + 0.5) / N) / R, y = (dy - 0.5 + (j + 0.5) / N) / R;
+          if (x * x + y * y > 1) continue;
+          inside++;
+          const t = k * Math.sqrt(1 - y * y);
+          if (phase < 0.5 ? x >= t : x <= -t) on++;
+        }
+        if (inside * 2 >= N * N) set(wx + 3 + dx, wy - 4 + dy, on * 2 >= inside ? lit : dark);
       }
     } else if (!overcast) {
       for (const [sx, sy] of [[-6, -5], [4, -8], [-2, 3], [7, 0], [-8, 1]] as const) set(wx + sx, wy + sy, hex('FFF6C8'));
-      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-        if (dx * dx + dy * dy <= 8 && (dx + 1.6) ** 2 + (dy + 1) ** 2 > 5) set(wx + 4 + dx, wy - 4 + dy, hex('F4E3B5'));
-      }
+      // a crescent, drawn by hand (two overlapping circles came out as a blocky L)
+      const CRESCENT = ['..###.', '...###', '....##', '....##', '....##', '...###', '..###.'];
+      CRESCENT.forEach((row, dy) => [...row].forEach((c, dx) => { if (c === '#') set(wx + 1 + dx, wy - 7 + dy, hex('F4E3B5')); }));
     } else {
       cloud(wx - 4, wy - 5, 4, hex('3A4260'));
       cloud(wx + 4, wy - 1, 3, hex('3A4260'));

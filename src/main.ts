@@ -10,7 +10,7 @@ import { drawRabbit, dressKey, type Dress, type Face, type Frame } from './art/r
 import { drawBurrow, moonPhase, roomColours, SCENE_H, SCENE_W, WALL_INSET, WINDOW, type RoomStyle } from './art/burrow';
 import { clockOffset, now, syncClock } from './clock';
 import {
-  addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, isOutdoor, meadowHelpers, meadowItems, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
+  addStarterLantern, addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, hasLantern, isOutdoor, meadowHelpers, meadowItems, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
   type BurrowState, type DecorDef, type PlacedItem, type SurfaceDef,
   canDig, digRoom, EXTRA_ROOMS, inRoom, openRoomsOf, ROOMS, ROOMS_OPEN, roomsOf, type ExtraRoom, type RoomId,
 } from './decor';
@@ -50,7 +50,7 @@ import {
 import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
 import { BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, DAY_ROLLOVER_HOUR, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
 import { dayKey, localParts } from './localtime';
-import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
+import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherName, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
 
 declare global {
   interface Window {
@@ -275,14 +275,39 @@ function payLumps(lumps: Lump[] | undefined): void {
 /** Count toward Getting started. A step that's now complete waits to be claimed. */
 function goal(g?: StarterGoal): void {
   if (!pet || starterDone(pet)) return;
-  const wasReady = starterReady(pet);
   if (g) markGoal(pet, g);
-  // a bed in the burrow counts however it got there
-  if (!goalDone(pet, 'bed') && hasBed(burrow)) markGoal(pet, 'bed');
+  markBurrowGoals();
   savePet();
-  if (!wasReady && starterReady(pet)) {
+  watchGoals();
+}
+
+/** Goals the burrow shows, not her save: they count however they came about. True if one was marked. */
+function markBurrowGoals(): boolean {
+  const has: [StarterGoal, () => boolean][] = [
+    ['bed', () => hasBed(burrow)],
+    ['lantern', () => hasLantern(burrow)],
+    ['surface', () => surfacesOf(burrow).owned.some((id) => { const k = surfaceById(id)?.kind; return k === 'wall' || k === 'floor'; })],
+    ['meadowpiece', () => meadowItems(burrow).length > 0],
+  ];
+  let marked = false;
+  for (const [g, ok] of has) if (!goalDone(pet, g) && ok()) { markGoal(pet, g); marked = true; }
+  return marked;
+}
+
+/**
+ * Tell the player when the open step is ready to claim, whatever finished it:
+ * a goal just done, or one that counts what she has (a toy bought, a find
+ * home from foraging), checked every tick.
+ */
+let starterWasReady = false;
+function watchGoals(): void {
+  if (!pet || starterDone(pet)) return;
+  if (markBurrowGoals()) savePet();
+  const ready = starterReady(pet);
+  if (ready && !starterWasReady) {
     window.setTimeout(() => toast(`Getting started: step ${starterStep(pet)} done! Claim your reward.`, () => play('gift')), 700);
   }
+  starterWasReady = ready;
 }
 
 /** Pay the open step's reward; the next step opens straight away. */
@@ -588,8 +613,21 @@ let started = false;
 function startGame(returning: boolean): void {
   // Browsers only allow audio after a gesture: unlock on the first one.
   setMuted(settings.sound === false);
+  // still on step one from before the lantern came with the burrow: here it is to hang
+  if (starterStep(pet) === 1 && !starterDone(pet) && addStarterLantern(burrow)) saveBurrow();
   buildBurrowScreen();
+  // a step already waiting when she's opened isn't news (its chip says so)
+  starterWasReady = starterReady(pet);
   catchUp(returning);
+  // the lantern to hang: the header's Arrange gives a little bounce, once a visit, to show where arranging is
+  if (!starterDone(pet) && starterStep(pet) === 1 && !goalDone(pet, 'lantern')) {
+    window.setTimeout(() => {
+      const b = document.querySelector<HTMLElement>('.arrange-btn');
+      if (!b || tab !== 'burrow' || decorating) return;
+      b.classList.add('nudge');
+      window.setTimeout(() => b.classList.remove('nudge'), 1600);
+    }, 2500);
+  }
   // Once per page: adopting again after starting over reuses the same loops.
   if (started) return;
   started = true;
@@ -643,6 +681,10 @@ function buildBurrowScreen(): void {
   // the rooms she has, once there's more than one (render keeps it up to date)
   const roomNav = h('nav', { class: 'room-nav', 'aria-label': 'Rooms', hidden: true });
   const stage = h('main', { class: 'stage' }, canvas, chips, cards, roomNav);
+  // into arranging, from the header beside Sound, off the room (a long press on a piece does it too, with that piece picked)
+  const arrange = h('button', { class: 'icon-btn arrange-btn', type: 'button', 'aria-label': 'Arrange the burrow' });
+  arrange.innerHTML = PENCIL;
+  arrange.addEventListener('click', () => goTab('shop', { arrange: true }));
 
   const actBtn = (id: 'feed' | 'pet' | 'play' | 'clean' | 'nap', label: string, icon: Node) =>
     h('button', { class: 'act', type: 'button', 'data-act': id }, icon, h('span', { text: label }));
@@ -670,7 +712,7 @@ function buildBurrowScreen(): void {
     h('header', { class: 'hud' },
       h('div', { class: 'hud-top' },
         who,
-        h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover), sound),
+        h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover), arrange, sound),
       h('div', { class: 'needs' }, ...needEls),
       goalBar),
     stage,
@@ -693,7 +735,32 @@ function buildBurrowScreen(): void {
   acts.nap.addEventListener('click', () => doAction(isAsleep(pet, now()) ? 'wake' : 'nap'));
   gift.addEventListener('click', () => doAction('gift'));
   sound.addEventListener('click', () => toggleSound());
+  // Hold a piece of decor to arrange the room with it picked up. The click
+  // that ends a long press is eaten, so it isn't a tap on her as well.
+  let hold: { timer: number; x: number; y: number } | null = null;
+  let heldOff = false;
+  const letGo = () => { if (hold) window.clearTimeout(hold.timer); hold = null; };
+  canvas.addEventListener('pointerdown', (e) => {
+    heldOff = false;
+    if (decorating || !scene || away()) return;
+    const { x, y } = toScene(e);
+    const r = scene.rabbitBox();
+    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return; // holding her is still a pat
+    const piece = scene.hitTest(here(), x, y);
+    if (!piece) return;
+    letGo();
+    hold = { x: e.clientX, y: e.clientY, timer: window.setTimeout(() => {
+      hold = null;
+      heldOff = true;
+      haptic('light');
+      play('flip');
+      goTab('shop', { arrange: piece.uid });
+    }, 550) };
+  });
+  canvas.addEventListener('pointermove', (e) => { if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 8) letGo(); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave'] as const) canvas.addEventListener(ev, letGo);
   canvas.addEventListener('click', (e) => {
+    if (heldOff) { heldOff = false; e.preventDefault(); return; }
     if (decorating || !scene || away()) return;
     const { x, y } = toScene(e);
     const gi = scene.guestAt({ guests: guestModels() } as Parameters<Scene['guestAt']>[0], x, y);
@@ -735,16 +802,22 @@ function toScene(e: { clientX: number; clientY: number }): { x: number; y: numbe
  * ~40% of the room's height goes above the fold.
  */
 function layoutStage(): void {
-  if (scene) scale = fitScene(ui.stage, ui.canvas, scene);
+  if (scene && ui.stage.isConnected) scale = fitScene(ui.stage, ui.canvas, scene, decorating);
 }
 
-/** Size a scene's canvas to fill a stage element (the burrow, or a friend's). Returns the scale. */
-function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene): number {
+/**
+ * Size a scene's canvas to fill a stage element (the burrow, or a friend's). Returns the scale.
+ * `whole` (arranging) fits the room's full height, ceiling and all, so every
+ * piece can be reached, even with the storage panel taking room below.
+ */
+function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene, whole = false): number {
   const w = stageEl.clientWidth, hgt = stageEl.clientHeight;
   // Not a whole number: a whole-number scale either cut the walls off or left
   // a wide band of dirt either side. At these sizes the odd pixel that's one
   // screen pixel wider than its neighbours doesn't show.
-  const scale = Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2);
+  const scale = whole
+    ? Math.max(1, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / SCENE_H) || 1)
+    : Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2);
   // The surface covers the whole stage in scene pixels; the room sits in it.
   const sw = Math.ceil(w / scale - 1e-6), sh = Math.ceil(hgt / scale - 1e-6);
   const offX = Math.round((sw - SCENE_W) / 2);
@@ -977,6 +1050,7 @@ function tick(): void {
     recordFinds(events);
   }
   noticeGuests();
+  watchGoals();
   render();
   renderGarden();
 }
@@ -1068,7 +1142,7 @@ function activityLine(a: Activity, name: string): string {
     case 'fire': return `${name} is curled up by the fire.`;
     case 'seat': return `${name} is watching ${out(a.weather)} from the window seat.`;
     case 'window': return `${name} is watching ${out(a.weather)} at the window.`;
-    case 'favourite': return `${name} is sitting by the ${(byId(a.piece)?.name ?? 'decor').toLowerCase()}. Her favourite spot today.`;
+    case 'favourite': return `${name}'s favourite spot today: by the ${(byId(a.piece)?.name ?? 'decor').toLowerCase()}.`;
   }
 }
 
@@ -1212,11 +1286,11 @@ function render(): void {
   const n = now();
   const m = mood(pet, n, tz);
   const asleep = isAsleep(pet, n, tz);
-  const bl = bondLevel(pet.bond);
   const w = today(n);
   ui.name.textContent = pet.name;
-  ui.sub.textContent = `${pet.daysVisited} ${pet.daysVisited === 1 ? 'day' : 'days'} · Bond ${bl.level} · ${WEATHER_NAME[w.weather]}`;
-  ui.sub.title = `${pet.daysVisited} days together, bond level ${bl.level}. Today: ${WEATHER_NAME[w.weather].toLowerCase()} ${w.season}.`;
+  // days together and the bond live on her page; the header just says what it's like out
+  ui.sub.textContent = weatherName(w.weather, isNight(n, tz));
+  ui.sub.title = `Today: ${WEATHER_NAME[w.weather].toLowerCase()} ${w.season}.`;
   ui.clover.textContent = String(pet.clover);
   const target = goalInfo(pet.goal);
   ui.goal.hidden = !target || target.owned;
@@ -1250,15 +1324,18 @@ function render(): void {
   }
   ui.needs.energy.wrap.classList.toggle('resting', !!restMs);
 
+  // One thing at a time, to keep it short: what she needs, then a visitor,
+  // then what she's up to.
   let line = MOOD_LINE[m](pet.name);
   const doing = m === 'content' ? scene?.activity() : null;
   if (doing) line = activityLine(doing, pet.name);
   const visitor = critterById(critterHere() ?? '');
-  if (visitor && m !== 'asleep') line = `${article(visitor.name).replace(/^a/, 'A')} has dropped by. ${line}`;
-  else if (visitor) line = `${line} ${article(visitor.name).replace(/^a/, 'A')} is tiptoeing about.`;
+  const Visitor = visitor ? article(visitor.name).replace(/^a/, 'A') : '';
+  if (visitor && m === 'content') line = `${Visitor} has dropped by to see ${pet.name}.`;
+  else if (visitor && m === 'asleep') line = `${pet.name} is asleep. ${Visitor} is tiptoeing about.`;
   // Hours, not minutes: the line is read out when it changes, and the
-  // Resting chip and the Energy bar already count down.
-  if (m === 'asleep' && restMs) line = `${pet.name} is asleep. She'll wake up rested ${aboutHours(restMs)}.${visitor ? ` ${article(visitor.name).replace(/^a/, 'A')} is tiptoeing about.` : ''}`;
+  // Resting chip and the Energy bar already count down. (A visitor shows anyway.)
+  if (m === 'asleep' && restMs && !visitor) line = `${pet.name} is asleep. She'll wake up rested ${aboutHours(restMs)}.`;
   if (m === 'asleep' && nap && !hasBed(burrow)) line = `${pet.name} is asleep on the floor. A bed would be cozier.`;
   const holiday = away();
   if (holiday) line = `${pet.name} is on holiday until ${fmtDate(pet.vacationUntilMs!)}. Her needs are paused.`;
@@ -1266,13 +1343,16 @@ function render(): void {
   const outFor = isOut(pet, n) ? tripOf(pet)!.endsAtMs - n : 0;
   const homeIn = aboutHours(outFor);
   if (outFor) line = `${pet.name} is out foraging, home ${homeIn}.`;
-  if (!decorating && ui.moodline.textContent !== line) ui.moodline.textContent = line;
+  // something just said (hello from a visitor) stays up a while, not just until the next tick
+  if (heldLine && performance.now() < heldLine.until) line = heldLine.text;
+  else heldLine = null;
+  if (!decorating) setLine(ui.moodline, line);
   if (!decorating) {
     // what the picture shows, for anyone who can't see it
     const decor = here().items.filter((i) => { const d = byId(i.id); return i.placed && !!d && !isOutdoor(d); }).map((i) => byId(i.id)?.name.toLowerCase()).filter(Boolean);
     const guests = guestModelsHere().map((g) => g.data.name);
     const label = [
-      `${pet.name}'s burrow, ${isNight(n, tz) ? 'at night' : 'by day'}, ${WEATHER_NAME[w.weather].toLowerCase()} outside.`,
+      `${pet.name}'s burrow, ${isNight(n, tz) ? `lamplit, ${weatherName(w.weather, true).toLowerCase()} outside` : `by day, ${WEATHER_NAME[w.weather].toLowerCase()} outside`}.`,
       line,
       guests.length ? `Visiting: ${guests.join(', ')}.` : '',
       decor.length ? `In the burrow: ${decor.join(', ')}.` : '',
@@ -1480,6 +1560,7 @@ function fmtDate(ms: number): string {
 
 const SPEAKER = '<path d="M4 9h3l5-4v14l-5-4H4z" fill="currentColor"></path>';
 const SPEAKER_ON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${SPEAKER}<path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"></path></svg>`;
+const PENCIL = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-5L15 5l4 4L9 19z"></path><path d="M13 7l4 4"></path></svg>';
 const SPEAKER_OFF = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${SPEAKER}<path d="M16 9l5 6M21 9l-5 6"></path></svg>`;
 
 // ------------------------------------------------------------------ actions
@@ -1516,7 +1597,7 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
   if (a !== 'gift' && a !== 'nap' && a !== 'wake' && a !== 'bake' && a !== 'forage' && a !== 'recall') play(a);
   if (a === 'feed' || a === 'pet' || a === 'play' || a === 'clean') careClover(r.clover, r.bond);
   payLumps(r.lumps);
-  const goals: Partial<Record<Action, StarterGoal>> = { feed: 'feed', nap: 'nap', bake: 'bake', play: 'toy' };
+  const goals: Partial<Record<Action, StarterGoal>> = { feed: 'feed', nap: 'nap', bake: 'bake', play: 'toy', forage: 'forage' };
   const g = goals[a];
   // settles too: care can finish a goal on its own (bond level 3)
   goal(g);
@@ -1864,6 +1945,72 @@ function setOff(b: HTMLButtonElement, why: string | null): void {
     delete b.dataset.why;
   }
 }
+// ------------------------------------------------------------------ the line under the room
+
+/**
+ * The line under the room is one line, always, so the room never changes
+ * size as it changes. Too long (a long name, or another language), it steps
+ * down a size or two, then ends in "…" and a tap shows the whole of it in a
+ * bubble over the room. Screen readers get all of it either way (aria-live).
+ */
+const LINE_SIZES = [14, 13];
+/** How long something said on the line (a visitor's hello) stays before her mood comes back. */
+const LINE_HOLD_MS = 6000;
+let heldLine: { text: string; until: number } | null = null;
+const lineFit = new ResizeObserver((es) => { for (const e of es) fitLine(e.target as HTMLElement); });
+
+function setLine(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) {
+    el.textContent = text;
+    closeLineBubble();
+  }
+  lineFit.observe(el);
+  fitLine(el);
+}
+
+function fitLine(el: HTMLElement): void {
+  if (!el.clientWidth) return; // not showing: fitted when it is (the observer)
+  el.style.fontSize = '';
+  const over = () => el.scrollWidth > el.clientWidth + 1;
+  for (const px of LINE_SIZES) { if (!over()) break; el.style.fontSize = `${px}px`; }
+  const cut = over();
+  el.classList.toggle('cut', cut);
+  if (cut) el.tabIndex = 0; else el.removeAttribute('tabindex');
+}
+
+let lineBubble: { el: HTMLElement; timer: number } | null = null;
+function closeLineBubble(): void {
+  if (!lineBubble) return;
+  window.clearTimeout(lineBubble.timer);
+  lineBubble.el.remove();
+  lineBubble = null;
+}
+/** The whole of a cut-short line, floating just above it for a few seconds. */
+function showLineBubble(line: HTMLElement): void {
+  closeLineBubble();
+  const r = line.getBoundingClientRect();
+  // aria-hidden: the line itself already read all of it out
+  const el = h('div', { class: 'line-bubble', 'aria-hidden': 'true', text: line.textContent ?? '' });
+  el.style.bottom = `${Math.round(window.innerHeight - r.top + 6)}px`;
+  document.body.append(el);
+  lineBubble = { el, timer: window.setTimeout(closeLineBubble, 5000) };
+}
+document.addEventListener('click', (e) => {
+  const line = (e.target as Element | null)?.closest?.<HTMLElement>('.moodline.cut');
+  if (line) { if (lineBubble) closeLineBubble(); else showLineBubble(line); }
+  else if (lineBubble) closeLineBubble();
+});
+document.addEventListener('keydown', (e) => {
+  const line = (e.target as Element | null)?.closest?.<HTMLElement>('.moodline.cut');
+  if (line && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showLineBubble(line); }
+  else if (e.key === 'Escape') closeLineBubble();
+});
+
+// A long press on a picture or button is holding it, not asking for the
+// browser's image menu (Android; iOS's is off in the CSS). Text keeps its menu.
+document.addEventListener('contextmenu', (e) => {
+  if ((e.target as Element | null)?.closest?.('img, canvas, button')) e.preventDefault();
+});
 // ahead of the button's own handler: an unavailable button explains itself instead
 document.addEventListener('click', (e) => {
   const b = (e.target as Element | null)?.closest?.<HTMLElement>('[data-why]');
@@ -1980,20 +2127,24 @@ let arrangeReturn: Tab = 'shop';
 /** Into arranging the burrow (the shop's other half), from goTab. */
 function startDecorating(): void {
   decorating = true;
+  document.body.classList.add('arranging-burrow');
   selectedUid = null;
   ui.canvas.tabIndex = 0;
   ui.canvas.setAttribute('aria-label', 'The burrow. Drag decor to move it. With the keyboard: N and P pick a piece, arrow keys move it (Shift for bigger steps), F flips it, Delete puts it away.');
   renderDecoratePanel();
+  layoutStage();
 }
 
 /** Out of arranging, from goTab. */
 function stopDecorating(): void {
   decorating = false;
+  document.body.classList.remove('arranging-burrow');
   selectedUid = null;
   drag = null;
   ui.canvas.removeAttribute('tabindex');
   ui.canvas.setAttribute('aria-label', 'The burrow');
   ui.panel.replaceChildren(...ui.panelKids);
+  layoutStage();
 }
 
 function selected(): PlacedItem | undefined {
@@ -2162,8 +2313,8 @@ function renderDecoratePanel(): void {
   const sel = selected();
   const def = sel ? byId(sel.id) : undefined;
   const where = def?.zone === 'hang' ? 'anywhere on the wall' : 'anywhere on the floor';
-  ui.moodline.textContent = sel && def ? `Drag the ${def.name.toLowerCase()} ${where}.`
-    : stored.size ? 'Drag pieces about, up out of storage, or down into it.' : 'Drag pieces about, or down into storage to put them away.';
+  setLine(ui.moodline, sel && def ? `Drag the ${def.name.toLowerCase()} ${where}.`
+    : stored.size ? 'Drag pieces about, up out of storage, or down into it.' : 'Drag pieces about, or down into storage to put them away.');
   const done = button('Done', 'btn primary', () => goTab(arrangeReturn));
   const flip = sel ? button('Flip', 'btn', () => { sel.flip = !sel.flip; saveBurrow(); play('flip'); }) : null;
   const away = sel ? button('Put away', 'btn', () => putAway(sel)) : null;
@@ -2237,7 +2388,7 @@ function wireDragOut(b: HTMLButtonElement, item: PlacedItem, def: DecorDef): voi
     if (!dragged) return;
     if (item.placed) {
       saveBurrow();
-      goal('decor');
+      goal();
       haptic('light');
       play('place');
     }
@@ -2251,7 +2402,7 @@ function wireDragOut(b: HTMLButtonElement, item: PlacedItem, def: DecorDef): voi
     if (dragged) { dragged = false; e.preventDefault(); return; }
     placeNew(item);
     saveBurrow();
-    goal('decor');
+    goal();
     haptic('light');
     play('place');
     renderDecoratePanel();
@@ -2505,7 +2656,7 @@ function buyDecor(def: DecorDef): void {
 function putOutPiece(item: PlacedItem): void {
   placeNew(item);
   saveBurrow();
-  goal('decor');
+  goal();
   play('place');
   goTab('shop', { arrange: item.uid });
 }
@@ -2574,7 +2725,8 @@ function wardrobeItems(): ShopItem[] {
     const it: ShopItem = {
       key: `outfit:${o.id}`, name: o.name, price: o.price, state, locked: locked ?? undefined, limited: o.limited,
       card: () => h('span', { class: 'on-her' }, herIn(o.slot, o.id, 2)),
-      big: () => herIn(o.slot, o.id, 4, 'happy'),
+      // hers: her as she is, so taking it off (or putting it on) shows; not hers yet: trying it on
+      big: () => herIn(o.slot, owned && !on ? null : o.id, 4, 'happy'),
       backdrop: 'her',
       what: o.slot === 'head' ? 'On her head' : 'Round her neck',
       section: o.slot === 'head' ? 'On her head' : 'Round her neck',
@@ -2812,7 +2964,7 @@ function confirmPlot(i: number): void {
         play('gift');
         haptic('success');
         toast(`The ${ORDINAL[i]} plot is dug. What shall we grow?`);
-        goal('upgrade');
+        goal();
         close();
         gardenScene?.burst('sparkle', 4, performance.now(), { x: PLOT_SPOTS[i]!.x, y: PLOT_SPOTS[i]!.y - 6 });
         gardenSig = '';
@@ -3220,7 +3372,7 @@ function renderGarden(): void {
   const g = gardenUi;
   const i = AREAS.indexOf(area);
   g.title.textContent = `${pet.name}'s garden`;
-  g.sub.textContent = `${AREA_NAME[area]} · ${WEATHER_NAME[w.weather]}`;
+  g.sub.textContent = `${AREA_NAME[area]} · ${weatherName(w.weather, isNight(n, tz))}`;
   if (!cloverCounting) g.clover.textContent = String(pet.clover);
   g.left.hidden = i === 0 || arranging;
   g.right.hidden = i === AREAS.length - 1 || arranging;
@@ -3254,8 +3406,8 @@ function renderGarden(): void {
     if (growing) chips.push(`${CROPS[growing.crop].name} · ${fmtDuration(growing.readyAtMs - n)}`);
   } else if (area === 'yard') {
     line = perHour(pet)
-      ? `${inYard >= 1 ? `${inYard} clover waiting. ` : ''}The yard makes ${Math.round(perHour(pet) * 24)} clover a day. Tap a + to build there.`
-      : 'Tap a + to build a clover patch. It makes clover every hour, even while you’re away.';
+      ? `The yard makes ${Math.round(perHour(pet) * 24)} clover a day. Tap a + to build.`
+      : 'Tap a + to build a clover patch. It grows clover all day.';
     chips.push(`${countOf(pet, 'patch')} of 10 patches`, `${countOf(pet, 'hive')} of 5 hives`);
   } else {
     line = meadowLine();
@@ -3264,9 +3416,10 @@ function renderGarden(): void {
     const help = BUILDING_IDS.reduce((sum, id) => sum + meadowPerDay(pet, id) * countOf(pet, id), 0);
     if (help > 0) chips.push(`Meadow +${Math.round(help)} a day`);
   }
-  if (asleep) line = `${pet.name} is asleep in the burrow. ${line}`;
-  else if (isOut(pet, n)) line = `${pet.name} is out foraging. ${line}`;
-  if (!decorating) g.moodline.textContent = line;
+  // "she", not her name, to keep it short (the chip and the Collect button say what's waiting)
+  if (asleep) line = `She's asleep. ${line}`;
+  else if (isOut(pet, n)) line = `She's out foraging. ${line}`;
+  if (!decorating) setLine(g.moodline, line);
   // Forage counts down in place of its label while she's out
   const outFor = isOut(pet, n) ? tripOf(pet)!.endsAtMs - n : 0;
   const forageLabel = g.forage.querySelector('span');
@@ -3506,7 +3659,7 @@ function meadowLine(): string {
   if (arranging) return gardenSel ? 'Drag it where you like.' : 'Tap a piece to move it.';
   const help = BUILDING_IDS.reduce((sum, id) => sum + meadowPerDay(pet, id) * countOf(pet, id), 0);
   if (help > 0) return `The meadow adds ${Math.round(help)} clover a day to the yard.`;
-  return meadowItems(burrow).length ? 'A lovely spot. Some pieces would help the yard, too.' : 'An empty meadow. Visit the shop for something to put out.';
+  return meadowItems(burrow).length ? 'A lovely spot. Some pieces help the yard, too.' : 'Nothing in the meadow yet. Try the shop.';
 }
 
 // ------------------------------------------------------------------ toys
@@ -3644,7 +3797,7 @@ function gardenUpgrades(redraw: () => void): HTMLElement {
     play('clover');
     haptic('success');
     toast(`${label}!`);
-    goal('upgrade');
+    goal();
     redraw();
   };
   const rows: HTMLElement[] = [];
@@ -3819,13 +3972,27 @@ function goalShortcut(g: StarterGoal): (() => void) | null {
       if (b) nudge(b);
     };
     case 'streak3': return onBurrow(() => ui.gift);
-    case 'bed': case 'decor': case 'decor3': return () => openShop({ cat: 'decor' });
+    case 'bed': return () => openShop({ cat: 'decor' });
+    // out of storage and straight into arranging, or to it where it hangs
+    case 'lantern': return () => {
+      const l = burrow.items.find((i) => i.id === 'lantern');
+      if (!l) openShop({ cat: 'decor' });
+      else if (l.placed) goTab('shop', { arrange: l.uid });
+      else putOutPiece(l);
+    };
     case 'dress': return () => openShop({ cat: 'wardrobe' });
     case 'toy': return onBurrow(() => ui.acts.play);
     case 'harvest': return inGarden('patch');
+    case 'forage': return () => { goTab('garden'); if (!isOut(pet, now())) openForage(); };
     case 'yard': return inGarden('yard');
+    case 'patch2': return inGarden('yard');
     case 'meadow': return inGarden('meadow');
-    case 'upgrade': return () => { goTab('garden'); openGardenUpgrades('garden'); };
+    case 'meadowpiece': return () => { goTab('garden'); goArea('meadow'); if (!gated('meadow')) openMeadowShop(); };
+    case 'gardenup': return () => { goTab('garden'); openGardenUpgrades('garden'); };
+    case 'newtoy': return () => openShop({ cat: 'toys' });
+    case 'surface': return () => openShop({ cat: 'walls' });
+    // finds come home from foraging (and turn up on their own, now and then)
+    case 'find': return () => { goTab('garden'); if (!isOut(pet, now())) openForage(); };
     case 'friend': return () => goTab('friends');
     case 'bond3': return null;
   }
@@ -3835,8 +4002,9 @@ function goalShortcut(g: StarterGoal): (() => void) | null {
 function goalHint(g: StarterGoal): string | null {
   switch (g) {
     case 'nap': return isAsleep(pet, now()) || pet.needs.energy < CARE.napBelowEnergy ? null : "She isn't tired yet";
+    case 'forage': return isOut(pet, now()) || pet.needs.energy >= FORAGE.minEnergy ? null : 'She needs a rest first';
+    case 'find': return isOut(pet, now()) ? 'She might bring one home' : 'Foraging turns things up';
     case 'streak3': return `${Math.min(pet.gift.streak, 3)} of 3`;
-    case 'decor3': return `${Math.min(pet.starter?.counts.decor ?? 0, 3)} of 3`;
     case 'bond3': return `Bond ${Math.min(bondLevel(pet.bond).level, 3)} of 3`;
     default: return null;
   }
@@ -4188,6 +4356,7 @@ async function startOver(): Promise<void> {
 function leaveForAdoption(): void {
   closeTray();
   decorating = false;
+  document.body.classList.remove('arranging-burrow');
   scene = null;
   pet = undefined as unknown as PetState;
   inStorage = { pet: null, burrow: null };
@@ -4699,7 +4868,8 @@ function guestbookEntry(g: NonNullable<Journal['guestbook']>[number]): HTMLEleme
 function visitLine(v: VisitIn, name: string): string {
   const info = visitInfo(v.kind);
   const note = noteOf(v.kind);
-  return `${name} (${v.from.username}) came to visit${info ? ` and ${info.did}` : ''}.${note ? ` “${noteText(note, pet.name)}”` : ''}`;
+  // kept short for the one-line line: who they are in full is in the guest book
+  return `${name} ${info ? info.did : 'came to visit'}.${note ? ` “${noteText(note, pet.name)}”` : ''}`;
 }
 
 function greetGuest(i: number): void {
@@ -4707,7 +4877,8 @@ function greetGuest(i: number): void {
   if (!g || !scene) return;
   scene.cheerGuest(i, performance.now());
   play('pet');
-  ui.moodline.textContent = visitLine(g.visit, g.data.name);
+  heldLine = { text: visitLine(g.visit, g.data.name), until: performance.now() + LINE_HOLD_MS };
+  setLine(ui.moodline, heldLine.text);
 }
 
 function sendGift(f: Friend, done: () => void): void {
@@ -4789,6 +4960,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
   const hint = holiday ? null : careHint(needs);
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite', text: holiday ? `${d.name} is away on holiday.`
     : hint ? `${d.name}'s ${hint.word}. Pick something to do for her.` : `${d.name} is happy to have a visitor. Pick something to do for her.` });
+  setLine(moodline, moodline.textContent ?? '');
   // How she is, from their snapshot: the one place a visitor sees it.
   const NEED_LABEL: Record<NeedKey, string> = { happy: 'Joy', clean: 'Clean', hunger: 'Food', energy: 'Rest' };
   const meters = holiday ? null : h('div', { class: 'visit-needs', role: 'group', 'aria-label': `How ${d.name} is` },
@@ -4841,7 +5013,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     careBox.hidden = true;
     go.disabled = true;
     go.textContent = 'Visited today';
-    moodline.textContent = line;
+    setLine(moodline, line);
   };
   if (canVisit) void OR.visits.sentToday().then((s) => { if (s.includes(f.uuid) && !done) visited(); }).catch(() => undefined);
   async function doVisit(): Promise<void> {
@@ -5086,17 +5258,19 @@ function friendPerks(): HTMLElement {
     [art('gift'), 'Friend bonuses', `${Number(firstC).toLocaleString()} clover when you and ${firstN} friends have visited each other, up to ${Number(lastC).toLocaleString()} at ${lastN}.`],
     [art('strawberry'), 'Swap spare finds', 'Send finds you have two of to friends who are still missing them.'],
   ];
-  return h('ul', { class: 'list perks' }, ...rows.map(([icon, nm, sub]) =>
-    h('li', {}, h('span', { class: 'ico' }, icon), h('span', { class: 'txt' }, h('span', { class: 'nm', text: nm }), h('span', { class: 'sub', text: sub })))));
+  return h('ul', { class: 'list perks' }, ...rows.map(([icon, nm, sub], i) =>
+    h('li', {}, h('span', { class: i === 0 ? 'ico face' : 'ico' }, icon), h('span', { class: 'txt' }, h('span', { class: 'nm', text: nm }), h('span', { class: 'sub', text: sub })))));
 }
 
-/** Her door with empty plots either side, and an invite. For the Friends tab with no friends yet. */
+/**
+ * For the Friends tab with no friends yet: the lane as it is with friends, but
+ * with only the Invite plot, and her hopping about on the grass on her own.
+ */
 function friendsHero(action: HTMLButtonElement, text: string): HTMLElement {
-  const me: ShowcaseData = { v: 1, name: pet.name, coat: pet.coat, ears: earsOf(pet), needs: pet.needs, simAtMs: pet.simAtMs, napEndsAtMs: null, vacationUntilMs: null,
-    daysVisited: pet.daysVisited, bondLevel: 1, head: dressOf(pet).head ?? null, neck: dressOf(pet).neck ?? null, items: [] };
-  const plot = { label: 'FREE', aria: 'An empty plot. Invite a friend', onClick: () => openInvite() };
+  const road = lane([{ label: 'INVITE', aria: 'Invite a friend', onClick: () => openInvite() }], 'small alone');
+  road.append(h('span', { class: 'lane-hopper', 'aria-hidden': 'true' }, img(rabbitSprite(pet.coat, 'content', 0, dressOf(pet)), 1)));
   return h('div', { class: 'friends-hero' },
-    lane([plot, { d: me, label: pet.name.toUpperCase().slice(0, 8), lit: true, aria: `${pet.name}'s burrow`, onClick: () => goTab('burrow') }, plot], 'small'),
+    road,
     h('div', { class: 'txt' }, h('h2', { text: `${pet.name} would love some company` }), h('p', { text }), action));
 }
 
