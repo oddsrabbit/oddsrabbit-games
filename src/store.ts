@@ -29,6 +29,8 @@ export interface Settings {
   sound?: boolean;
   /** Reminder key -> ISO fireAt last scheduled, to avoid re-sending the same one. */
   scheduled: Record<string, string>;
+  /** The newest guest book signature seen, so newer ones show as new. Missing: not looked yet. */
+  guestbookSeenMs?: number;
 }
 
 export function defaultSettings(): Settings {

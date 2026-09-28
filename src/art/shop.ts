@@ -18,13 +18,35 @@ export const SHOP_ART = {
   herbs: [
     '....n....', '...nnn...', '...UuU...', '..gGgGg..', '.gGgGgGg.', 'gGg.G.gGg', 'Gg..G..gG', '.G..g..G.',
   ],
+  // a round red kettle, side on: a metal handle arched over the lid, the spout rising to the right
   kettle: [
-    '....aaaa....', '...a....a...', '.....rr.....', '..rrrrrrrr..', '.rwwrrrrrrr.', 'rrwrrrrrrrrrr',
-    'rrrrrrrrrrRR.', '.rrrrrrrrRR..', '..RRRRRRRR...',
+    '..................',
+    '......aaaaa.......',
+    '.....a.....a......',
+    '.....a.....a......',
+    '.....a.....a......',
+    '....rRRRRRRRr.....',
+    '...rrrrrrrrrrr.rr.',
+    '..rwwrrrrrrrrr.rr.',
+    '..rwrrrrrrrrrrrr..',
+    '..rwrrrrrrrrrrr...',
+    '..rrrrrrrrrrrRR...',
+    '...RRRRRRRRRRR....',
+    '..................',
   ],
+  // a plump square cushion, seen from above and in front: four patches meeting at a button, its front face in shadow
   patchcushion: [
-    '..pppyyybbb...', '.ppppyyyybbbb.', 'ppplpyywybbqbb', 'ppppyyyybbbbbb', 'rrrrgggGeeeeee', 'rrwrggGgeeEeee',
-    '.rrrgggGeeeee.', '..RRGGGGEEEE..',
+    '......................',
+    '....pppppppbbbbbbb....',
+    '..pppplppppbbbbqbbbb..',
+    '.pppppppppcbbbbbbbbbb.',
+    '.ppppppppppbbbbbbbbbb.',
+    '.yyyyyyyyNNeeeeeeeeee.',
+    '.yyyywyyyyyeeeeeEeeee.',
+    '.yyyyyyyyyceeeeeeeeee.',
+    '.YYYYYYYYYYEEEEEEEEEE.',
+    '..YYYYYYYYYEEEEEEEEE..',
+    '......................',
   ],
   bunting: [
     'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnn', '.rrrr..yyyy..bbbb..pppp..gggg.', '..rr....yy....bb....pp....gg..', '..r......y....b......p....g...',
@@ -126,11 +148,14 @@ export const SHOP_ART = {
   ],
   flame1: ['...y....', '..yzy...', '..yzy.y.', '.yzOzyzy', '.zOOOzOz', 'zOOoOOOz', '.OoooOO.'],
   flame2: ['.....y..', '..y.yzy.', '.yzyyzy.', '.yzOzOzy', 'yzOOOOOz', 'zOOooOOz', '.OoooOO.'],
+  // the clocks' faces show 10:10 here, for the shop; in the burrow render.ts gives them the real time
   clock: [
-    '..nnnnnnn..', '.nnwwwwwnn.', 'nnwwwkwwwnn', 'nnwwwkwwwnn', 'nnwwwkkkwnn', 'nnwwwwwwwnn', '.nnwwwwwnn.',
+    '..nnnnnnn..', '.nnwwCwwnn.', 'nnwwwwwkwnn', 'nnwwkwkwwnn', 'nnCwwkwwCnn', 'nnwwwwwwwnn', 'nnwwwwwwwnn', '.nnwwCwwnn.',
     '..nnnnnnn..', '..nxxxxxn..', '..nxxxxxn..', '..nxxxxxn..', '..nxxxxxn..', '..nxxxxxn..', '..nxxxxxn..',
     '..nxxxxxn..', '..nxxxxxn..', '.nnnnnnnnn.', '.nNnnnnnNn.', '.NNNNNNNNN.',
   ],
+
+  wallclock: ['..uuuuuuu..', '.uuwwCwwuu.', 'uuwwwwwkwuu', 'uuwwkwkwwuu', 'uuCwwkwwCuu', 'uuwwwwwwwuu', 'uuwwwwwwwuu', '.uuwwCwwuu.', '..UUUUUUU..'],
 
   // ---------------------------------------------------------------- toys
   ball: ['..rrr..', '.rwrrr.', 'rwrrryr', 'rrrryyr', 'rrryyrr', '.RRrrR.', '..RRR..'],

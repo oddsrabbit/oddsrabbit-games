@@ -1,35 +1,9 @@
-// Things that come from who she is and what day it is, not from what the
-// player did: her personality, the season, the day's weather, limited-time
-// events. All pure and deterministic, so everyone sees the same weather on
-// the same day and a rabbit's personality never changes.
+// Things that come from what day it is, not from what the player did: the
+// season, the day's weather, limited-time events. All pure and deterministic,
+// so everyone sees the same weather on the same day.
 
 import { localParts } from './localtime';
 import { roll } from './rng';
-
-// ---------------------------------------------------------------- personality
-
-export type Trait = 'shy' | 'greedy' | 'playful';
-export const TRAITS: Trait[] = ['shy', 'greedy', 'playful'];
-
-/** Fixed for life by her id. */
-export function traitOf(petId: string): Trait {
-  return TRAITS[Math.floor(roll(petId, 0, 'trait') * TRAITS.length)] ?? 'playful';
-}
-
-export const TRAIT_INFO: Record<Trait, { name: string; blurb: string }> = {
-  shy: { name: 'Shy', blurb: 'Takes a while to warm up. Petting means more to her as your bond grows.' },
-  greedy: { name: 'Greedy', blurb: 'Always a little hungry, and loves her food more often.' },
-  playful: { name: 'Playful', blurb: 'Gets bored quickly, and adores being petted and played with.' },
-};
-
-/** How her personality bends the numbers. 1 = no change. */
-export const TRAIT_MODS: Record<Trait, { hungerDecay: number; happyDecay: number; petBonus: number; lovesBonus: number }> = {
-  shy: { hungerDecay: 1, happyDecay: 1, petBonus: -3, lovesBonus: 0 },
-  greedy: { hungerDecay: 1.25, happyDecay: 1, petBonus: 0, lovesBonus: 0.1 },
-  playful: { hungerDecay: 1, happyDecay: 1.25, petBonus: 4, lovesBonus: 0 },
-};
-/** A shy rabbit's petting penalty goes away at this bond level. */
-export const SHY_WARM_BOND = 3;
 
 // ---------------------------------------------------------------- seasons
 
@@ -119,6 +93,14 @@ function inWindow(month: number, day: number, from: [number, number], to: [numbe
 export function activeEvents(ms: number, tz: string): SeasonalEvent[] {
   const p = localParts(ms, tz);
   return EVENTS.filter((e) => inWindow(p.month, p.day, e.from, e.to));
+}
+
+/** Whole days left in a running event, counting today: 1 on its last day. */
+export function daysLeft(e: SeasonalEvent, ms: number, tz: string): number {
+  const p = localParts(ms, tz);
+  // a window that wraps the new year (Winterfest) ends next year while it's still December
+  const endYear = e.to[0] * 100 + e.to[1] < p.month * 100 + p.day ? p.year + 1 : p.year;
+  return Math.round((Date.UTC(endYear, e.to[0] - 1, e.to[1]) - Date.UTC(p.year, p.month - 1, p.day)) / 864e5) + 1;
 }
 
 /** A limited item is for sale only while one of its events is running. */

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { COLLECTIBLES } from './collectibles';
-import { bestFriends, earn, noteFriendship, rate, settleLumps } from './economy';
+import { bestFriends, earn, mutualFriends, nextFriendMilestone, noteFriendship, rate, settleLumps } from './economy';
 import { act, newPet, visit, type PetState } from './sim';
-import { markGoal, settleStarter, starterDone, starterStep, starterView, starterWaiting } from './starter';
+import { claimStarter, markGoal, starterDone, starterReady, starterStep, starterView } from './starter';
 import { DAY_MS, FRIEND_CLOVER } from './tuning';
 import { countOf } from './yard';
 
@@ -73,41 +73,36 @@ test('the gift grows 2 a day up to 40', () => {
   assert.ok(r.ok && r.clover === 40);
 });
 
-test('getting started: a step opens each day visited, pays once, and step one gives a clover patch', () => {
+test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {
   let s = pet();
   assert.equal(starterStep(s), 1);
+  assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked', 'locked', 'locked']);
   for (const g of ['feed', 'toy', 'bed'] as const) markGoal(s, g);
-  assert.deepEqual(settleStarter(s, NOON).paid, [], 'not all step-one goals done');
+  assert.equal(starterReady(s), false);
+  assert.equal(claimStarter(s, NOON).paid, null, 'not all step-one goals done');
   markGoal(s, 'dress');
-  let r = settleStarter(s, NOON);
-  assert.deepEqual(r.paid, [{ step: 1, clover: 100, patch: true }]);
+  assert.equal(starterReady(s), true);
+  assert.equal(countOf(s, 'patch'), 0, 'nothing paid until claimed');
+  let r = claimStarter(s, NOON);
+  assert.deepEqual(r.paid, { step: 1, clover: 100, patch: true });
   s = r.state;
   assert.equal(countOf(s, 'patch'), 1);
-  assert.deepEqual(settleStarter(s, NOON).paid, [], 'paid once');
-  // step two's goals, done early, wait for the next day visited
-  for (const g of ['nap', 'harvest', 'bake'] as const) markGoal(s, g);
-  assert.equal(starterWaiting(s), true);
-  assert.deepEqual(settleStarter(s, NOON).paid, []);
-  assert.equal(starterView(s).length, 1);
-  // a skipped calendar day costs nothing: the next visit, whenever, opens it
-  s = visit(s, NOON + 5 * DAY_MS, UTC).state;
-  r = settleStarter(s, NOON + 5 * DAY_MS);
-  assert.deepEqual(r.paid.map((p) => p.step), [2]);
-  assert.equal(starterView(r.state).length, 2);
-  // everything done early pays one step per day visited, then the list goes away
-  s = r.state;
+  assert.equal(claimStarter(s, NOON).paid, null, 'paid once');
+  // the next step opens straight away, no new day needed
+  assert.equal(starterStep(s), 2);
+  assert.equal(starterView(s)[1]!.status, 'open');
+  // goals done early count when their step opens, but each step is its own claim
+  for (const g of ['nap', 'harvest', 'bake', 'yard', 'friend', 'decor', 'decor', 'decor'] as const) markGoal(s, g);
   s.gift.streak = 3;
+  s.upgrades = ['meadow'];
   s.bond = 35; // bond level 3
-  for (const g of ['yard', 'friend', 'decor', 'decor', 'decor'] as const) markGoal(s, g);
-  s.upgrades = ['meadow']; // step 6: open the meadow
-  s.daysVisited = 4;
-  r = settleStarter(s, NOON);
-  assert.deepEqual(r.paid.map((p) => p.step), [3, 4]);
-  s = r.state;
-  s.daysVisited = 7;
-  s = settleStarter(s, NOON).state;
+  for (const step of [2, 3, 4, 5, 6, 7]) {
+    r = claimStarter(s, NOON);
+    assert.equal(r.paid?.step, step);
+    s = r.state;
+  }
   assert.equal(starterDone(s), true);
-  assert.equal(starterWaiting(s), false);
+  assert.equal(starterReady(s), false);
 });
 
 test('her save keeps a bounded number of friendships: best friends, then the most recent', () => {
@@ -120,4 +115,24 @@ test('her save keeps a bounded number of friendships: best friends, then the mos
   assert.ok(kept.includes('f99') && !kept.includes('f0'), 'then the newest');
   assert.equal(bestFriends(s), 1);
   assert.ok(JSON.stringify(s).length < 16_384);
+});
+
+test('friend milestones pay once each, counting only friends it goes both ways with', () => {
+  const s = pet();
+  for (let i = 0; i < 5; i++) noteFriendship(s, `f${i}`, 'out', NOON, UTC);
+  noteFriendship(s, 'f0', 'in', NOON, UTC);
+  noteFriendship(s, 'f1', 'in', NOON, UTC);
+  assert.equal(mutualFriends(s), 2);
+  assert.deepEqual(nextFriendMilestone(s), { friends: 3, clover: 250 });
+  assert.deepEqual(settleLumps(s).filter((l) => l.what.endsWith('friends')), []);
+  noteFriendship(s, 'f2', 'in', NOON, UTC);
+  const before = s.clover;
+  assert.deepEqual(settleLumps(s).filter((l) => l.what.endsWith('friends')), [{ what: '3 friends', clover: 250 }]);
+  assert.equal(s.clover, before + 250);
+  assert.deepEqual(settleLumps(s), [], 'only once');
+  assert.deepEqual(nextFriendMilestone(s), { friends: 5, clover: 500 });
+  s.supporter = true;
+  noteFriendship(s, 'f3', 'in', NOON, UTC);
+  noteFriendship(s, 'f4', 'in', NOON, UTC);
+  assert.deepEqual(settleLumps(s).map((l) => l.clover), [500], 'a lump sum: no Supporter bonus');
 });

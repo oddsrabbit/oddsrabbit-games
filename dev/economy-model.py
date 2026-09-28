@@ -73,7 +73,7 @@ MEADOW = {  # piece: (price, building it helps)
 # The launch ladder (§3.1): (price, first day it can be bought). Everything is
 # in the shop from day one; only the moon window waits for the fireplace
 # (day 0 here). Pacing comes from prices against income.
-TIER1 = [(c, 1) for c in (25, 30, 30, 35, 40, 50, 60, 25, 30, 30, 45)]
+TIER1 = [(c, 1) for c in (25, 30, 30, 35, 40, 45, 50, 60, 25, 30, 30, 45)]
 TOYS = [(c, 1) for c in (50, 80, 150, 250)]
 TIER2 = [(c, 1) for c in (150, 180, 200, 220, 250, 280, 300, 350, 400, 450, 500, 550, 600, 700)]
 FIREPLACE, MOON_WINDOW = 2000, 3000
@@ -91,7 +91,7 @@ MARKS = {'tier 1': _t1, 'through tier 2': _t1 + _t2, '+ fireplace': _t1 + _t2 + 
 SINKS = {
     'everyday decor': 13_420, 'seasonal decor': 8_100, 'showpieces': 52_000, 'walls, floors, windows': 8_980,
     'outfits': 13_540, 'toys': 2_630, 'meadow pieces': 12_700, 'rooms': 45_000,
-    'garden upgrades and soil': 22_922, 'yard and sheds': 122_308, 'raffle': 3_246,
+    'garden upgrades and soil': 22_922, 'yard and sheds': 122_308, 'raffle': 3_907,
 }
 WELCOME_TOTAL = sum(WELCOME_PRICES)
 

@@ -24,8 +24,10 @@ export function areaAt(x: number): AreaId {
 
 /** Ground lines the background is drawn to (art/garden.ts). */
 export const GROUND = {
-  /** Top of the fence posts; grass starts just below. */
+  /** Top of the fence posts in the meadow, seen side-on; grass starts just below. */
   fence: 41,
+  /** The foot of the back fence in the veg patch and the yard, seen from above: their ground starts here. */
+  backFence: 27,
   /** The path running the whole strip. */
   pathY: 69,
   pathH: 6,
@@ -34,33 +36,35 @@ export const GROUND = {
 /** A spot: the bottom-centre of whatever stands there, in strip pixels. */
 export interface Spot { x: number; y: number }
 
+/** A field in the veg patch, seen from above (3/4, like the yard's pieces): tilled soil in a wooden edge. */
+export const FIELD = { w: 26, h: 22 } as const;
 /**
- * The five beds: three up front, two behind the path's far side. Bed i holds
- * plot i, so the first plot is always front and centre-left.
+ * The five fields, a grid of three over two either side of the path, seen
+ * from above. Field i holds plot i, so the first is top left. The grid's
+ * sixth cell, bottom right, is where she sits.
  */
 export const PLOT_SPOTS: Spot[] = [
-  { x: 18, y: 84 }, { x: 49, y: 84 }, { x: 80, y: 84 },
-  { x: 27, y: 63 }, { x: 63, y: 63 },
+  { x: 18, y: 65 }, { x: 49, y: 65 }, { x: 80, y: 65 },
+  { x: 18, y: 100 }, { x: 49, y: 100 },
 ];
-/** The soil a bed's frame surrounds, for the background: width, and the soil's height. */
-export const BED = { w: 26, h: 5 } as const;
 
 const Y = AREA_W; // the yard's left edge
 /** Every building of a kind, first to last. As many spots as the kind's max. */
 export const BUILDING_SPOTS: Record<BuildingId, Spot[]> = {
-  // two rows of five behind the path
-  patch: Array.from({ length: 10 }, (_, i) => ({ x: Y + 26 + (i % 5) * 14, y: i < 5 ? 60 : 67 })),
-  hive: Array.from({ length: 5 }, (_, i) => ({ x: Y + 10 + i * 18, y: 94 })),
-  log: Array.from({ length: 5 }, (_, i) => ({ x: Y + 12 + i * 16, y: 112 })),
+  // seen from above, like the veg patch: two rows of five clover patches behind the path, the shed at their left
+  patch: Array.from({ length: 10 }, (_, i) => ({ x: Y + 30 + (i % 5) * 14, y: i < 5 ? 46 : 60 })),
+  // in front of the path, hives then logs, leaving the right-hand end for her
+  hive: Array.from({ length: 5 }, (_, i) => ({ x: Y + 8 + i * 16, y: 94 })),
+  log: Array.from({ length: 5 }, (_, i) => ({ x: Y + 9 + i * 15, y: 112 })),
 };
-export const SHED_SPOT: Spot = { x: Y + 10, y: 66 };
+export const SHED_SPOT: Spot = { x: Y + 12, y: 60 };
 
 /**
  * Tap targets, centred on a spot and standing on it: at least 12 px wide so
  * they're easy to hit at 4x, and never overlapping a neighbour's.
  */
 export const HIT: Record<'plot' | 'shed' | BuildingId, { w: number; h: number }> = {
-  plot: { w: 20, h: 20 },
+  plot: { w: FIELD.w, h: FIELD.h },
   patch: { w: 13, h: 7 },
   hive: { w: 12, h: 12 },
   log: { w: 14, h: 12 },
@@ -102,6 +106,17 @@ function shedState(pet: PetState): SpotState {
 }
 
 /** Everything the garden shows, back to front (by spot y), for drawing. */
+/**
+ * A growing field's countdown, short enough for its tag: "45m", "1h20", and
+ * from ten hours just "12h". Minutes round up, so it never reads "0m".
+ */
+export function timerLabel(ms: number): string {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  if (m < 60) return `${m}m`;
+  const hrs = Math.floor(m / 60), rest = m % 60;
+  return hrs >= 10 || !rest ? `${hrs}h` : `${hrs}h${String(rest).padStart(2, '0')}`;
+}
+
 export function gardenView(pet: PetState, nowMs: number): GardenThing[] {
   const out: GardenThing[] = PLOT_SPOTS.map((spot, index) => ({ kind: 'plot' as const, index, spot, state: plotState(pet, index, nowMs) }));
   for (const id of BUILDING_IDS) {

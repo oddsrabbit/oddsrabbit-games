@@ -14,7 +14,7 @@ test('every event has a prize that can only be won', () => {
   for (const e of EVENTS) assert.ok(e.raffle, `${e.id} has a raffle prize`);
 });
 
-test('the prize comes by the guaranteed ticket at the latest, and every other ticket brings something', () => {
+test('the prize comes by the guaranteed ticket at the latest, and every other ticket is a miss', () => {
   for (const id of ['a', 'b', 'c', 'd', 'e']) {
     let s: PetState = newPet(id, 'Mochi', 'snow', NOON, 'UTC');
     s.clover = 10_000;
@@ -24,8 +24,8 @@ test('the prize comes by the guaranteed ticket at the latest, and every other ti
       const r = drawTicket(s, spooky);
       assert.ok(r.ok);
       n++;
-      if (r.draw.kind === 'clover') assert.equal(r.state.clover, before - RAFFLE.ticket + RAFFLE.refund);
-      if (r.draw.kind === 'find') assert.ok(spooky.finds.includes(r.draw.id) && !(s.collection?.[r.draw.id]), 'a find she was missing');
+      assert.equal(r.state.clover, before - RAFFLE.ticket, 'no clover back');
+      if (r.draw.kind === 'miss') assert.deepEqual(r.state.collection, s.collection, 'nothing else changes');
       s = r.state;
       assert.ok(n <= RAFFLE.guaranteeBy);
     }

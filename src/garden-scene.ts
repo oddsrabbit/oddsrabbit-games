@@ -5,13 +5,13 @@
 // presentation state (the camera, where she's hopping to); the game state
 // comes in each frame.
 
-import { drawFirefly, drawGarden, drawGardenShade, drawSignpost, drawSpot } from './art/garden';
-import { drawGlow, drawItem, drawPlot, type ItemArt } from './art/items';
+import { drawCloverPatch, drawField, drawFirefly, drawGarden, drawGardenShade, drawSeedPacket, drawSignpost, drawSpot, drawTag } from './art/garden';
+import { drawGlow, drawItem, type ItemArt } from './art/items';
 import { toSprite, type Sprite } from './art/pixels';
-import { drawRabbit, dressKey, RABBIT_GROUND, type Dress, type Face, type Frame } from './art/rabbit';
+import { drawRabbit, dressKey, K_GARDEN, RABBIT_GROUND, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type PlacedItem } from './decor';
-import { stage, type CropId } from './extras';
-import { AREA_W, areaX, gardenView, STRIP_H, STRIP_W, type AreaId, type GardenThing } from './garden';
+import { plotOffer, plotUpgrade, stage } from './extras';
+import { AREA_W, areaX, FIELD, gardenView, STRIP_H, STRIP_W, timerLabel, type AreaId, type GardenThing } from './garden';
 import type { Coat, PetState } from './sim';
 import type { Season, Weather } from './world';
 import type { BuildingId } from './yard';
@@ -37,7 +37,7 @@ export interface GardenModel {
   items: PlacedItem[];
   /** The piece being moved, outlined while arranging. */
   selected: string | null;
-  /** A friend's garden, visiting: only what they've built, no "+" spots or signposts. */
+  /** A friend's garden, visiting: only what they've built, no "+" spots or plots for sale. */
   guest?: boolean;
 }
 
@@ -48,13 +48,27 @@ export function pieceBox(item: PlacedItem, art: { w: number; h: number }): { x: 
   return def?.zone === 'fence' ? { x, y: item.y, w: art.w, h: art.h } : { x, y: item.y - art.h, w: art.w, h: art.h };
 }
 
-const CROP_ART: Record<CropId, ItemArt> = { berry: 'strawberry', golden: 'golden', sprout: 'clover' };
 /** A free spot's outline is the size of what will stand there, a little taller for the tiny patch. */
 const SPOT: Record<BuildingId | 'shed', { w: number; h: number }> = { patch: { w: 11, h: 7 }, hive: { w: 9, h: 10 }, log: { w: 12, h: 8 }, shed: { w: 12, h: 10 } };
 /** Where she sits in each area, bottom-centre, in strip pixels. */
-const RABBIT_SPOT: Record<AreaId, number> = { patch: 64, yard: 174, meadow: 276 };
+// in the patch, the field grid's spare cell; in the yard, the end past the hives and logs
+const RABBIT_SPOT: Record<AreaId, number> = { patch: 80, yard: 184, meadow: 276 };
 const GATE_X = 2 * AREA_W;
 const AREAS_ORDER: Record<AreaId, number> = { patch: 0, yard: 1, meadow: 2 };
+/** Let go faster than this (scene px/ms, about 0.3 screen px/ms on a phone) and it's a flick. */
+const FLICK = 0.08;
+/** How long a slide between areas takes after a drag lets go. */
+const SLIDE_MS = 380;
+/** From rest (the arrows, the dots) it's slower, eased in and out: a stroll, not a flick. */
+const STROLL_MS = 700;
+/** Once the camera's there, she waits this long before hopping in after you. */
+const FOLLOW_MS = 250;
+/** Her hop, px/ms: from the edge of the view to her spot (about 90 px) in about 450 ms. */
+const HOP_SPEED = 0.2;
+/** Landed, she looks round this long after: back into the area, not at the edge she hopped to. */
+const TURN_MS = 350;
+/** Dragged `over` pixels past an end, the camera goes this far: less and less. */
+const rubber = (over: number): number => 24 * (1 - 1 / (over / 60 + 1));
 const NIGHT_TINT: [number, number, number, number] = [0x62, 0x60, 0x8e, 255];
 // Follows the setting live, not just as it was at load.
 const motionQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
@@ -68,14 +82,29 @@ export class GardenScene {
   private w = AREA_W;
   private h = STRIP_H;
   private offsetY = 0;
-  /** Strip x at the canvas's left edge. */
+  /** Strip x at the canvas's left edge. Fractional: the canvas is drawn at whole pixels and nudged by the rest (`subX`). */
   private camX = 0;
   private camReady = false;
+  /** The area the camera is at, or sliding to. */
+  private camArea: AreaId = 'patch';
+  /** A finger or mouse is holding the camera: `grabX` is where it was when grabbed. */
+  private grabX: number | null = null;
+  /** A slide under way: ease-out cubic from `from` by `d`, starting at speed `s0` (px over the whole slide). */
+  private slide: { from: number; d: number; s0: number; t0: number; ms: number } | null = null;
+  private lastNow = 0;
+  private hopping = false;
   private rabbitX = RABBIT_SPOT.patch;
   private rabbitArea: AreaId = 'patch';
+  /** She's been left behind: she sets off after you at this time. */
+  private followAt = 0;
+  /** 1 looks left, -1 right. The art faces right, so 1 is drawn mirrored. */
   private facing: 1 | -1 = 1;
+  /** She's just stopped hopping: she turns to face into her area at this time (0: nothing to do). */
+  private turnAt = 0;
   private blinkAt = 2500;
   private particles: { art: ItemArt; x: number; y: number; born: number }[] = [];
+  /** The furthest area you can walk to: past it (an area still to pay for) a drag gives like the strip's end. */
+  reach: AreaId = 'meadow';
 
   /** A few sprites rising from a strip point: clover from the yard, a picked crop. */
   burst(art: ItemArt, n: number, now: number, at: { x: number; y: number }): void {
@@ -106,7 +135,8 @@ export class GardenScene {
 
   /** Same contract as Scene.resize: the surface in scene pixels, and where the 98x118 view sits in it. */
   resize(w: number, h: number, _offsetX: number, offsetY: number): void {
-    if (this.canvas.width !== w) this.canvas.width = w;
+    // a column spare on the right, for the sub-pixel nudge to slide into
+    if (this.canvas.width !== w + 1) this.canvas.width = w + 1;
     if (this.canvas.height !== h) this.canvas.height = h;
     this.ctx.imageSmoothingEnabled = false;
     this.w = w;
@@ -117,7 +147,73 @@ export class GardenScene {
 
   /** A point on the surface to strip coordinates. */
   toRoom(x: number, y: number): { x: number; y: number } {
-    return { x: x + Math.round(this.camX), y: y - this.offsetY };
+    return { x: x + Math.floor(this.camX), y: y - this.offsetY };
+  }
+
+  /** How far past a whole pixel the camera is, 0 to 1: the page shifts the canvas left by this many scene pixels. */
+  get subX(): number {
+    return this.camX - Math.floor(this.camX);
+  }
+
+  /** The camera is being dragged or is sliding: worth drawing every frame. */
+  get moving(): boolean {
+    return this.grabX !== null || this.slide !== null || this.hopping || this.lastNow < this.followAt;
+  }
+
+  /** Take hold of the camera, for a drag. Stops any slide where it is. */
+  grab(): void {
+    this.slide = null;
+    this.grabX = this.camX;
+  }
+
+  /** Follow a drag `dx` scene pixels from where it was grabbed; past either end it gives, like a rubber band. */
+  dragTo(dx: number): void {
+    if (this.grabX === null) return;
+    const lo = this.target('patch'), hi = this.target(this.reach);
+    const want = this.grabX - dx;
+    this.camX = want < lo ? lo - rubber(lo - want) : want > hi ? hi + rubber(want - hi) : want;
+  }
+
+  /**
+   * Let go at speed `v` (scene px/ms, the finger's; left is negative). A
+   * flick goes on to the next area that way; slower, it settles on the
+   * nearest. Slides there carrying the finger's speed, no further than
+   * `reach`; returns the area it was pushed towards, which may be past it (so
+   * the page can offer to open it).
+   */
+  release(from: AreaId, v: number, now: number): AreaId {
+    this.grabX = null;
+    const order = Object.keys(AREAS_ORDER) as AreaId[];
+    const at = order.reduce((best, a) => (Math.abs(this.target(a) - this.camX) < Math.abs(this.target(best) - this.camX) ? a : best), from);
+    // the finger moving left brings the next area in from the right
+    const flick = Math.abs(v) >= FLICK ? -Math.sign(v) : 0;
+    const i = Math.max(AREAS_ORDER[from] - 1, Math.min(AREAS_ORDER[from] + 1, flick ? AREAS_ORDER[from] + flick : AREAS_ORDER[at]));
+    const to = order[Math.max(0, Math.min(order.length - 1, i))]!;
+    this.slideTo(order[Math.min(AREAS_ORDER[to], AREAS_ORDER[this.reach])]!, now, -v);
+    return to;
+  }
+
+  /** Slide to an area, starting at `v` (camera px/ms) or from rest. */
+  private slideTo(area: AreaId, now: number, v = 0): void {
+    this.camArea = area;
+    const d = this.target(area) - this.camX;
+    if (reduceMotion || Math.abs(d) < 0.5) { this.camX += d; this.slide = null; return; }
+    // a drag's speed carries in; from rest (the arrows, the dots) it starts at 0, a smoothstep
+    if (v === 0) { this.slide = { from: this.camX, d, s0: 0, t0: now, ms: STROLL_MS }; return; }
+    const s0 = Math.max(-6 * Math.abs(d), Math.min(6 * Math.abs(d), v * SLIDE_MS));
+    this.slide = { from: this.camX, d, s0, t0: now, ms: SLIDE_MS };
+  }
+
+  private stepCamera(area: AreaId, now: number): void {
+    if (this.grabX !== null) return;
+    if (area !== this.camArea) this.slideTo(area, now);
+    if (this.slide) {
+      const k = Math.min(1, (now - this.slide.t0) / this.slide.ms);
+      const u = 1 - k;
+      const { from, d, s0 } = this.slide;
+      this.camX = from + d * (1 - u * u * u) + (s0 - 3 * d) * k * u * u;
+      if (k >= 1) this.slide = null;
+    } else this.camX = this.target(area); // at rest, and after a resize
   }
 
   /** Where the camera wants to be for an area: that area centred, the strip's ends never passed. */
@@ -129,9 +225,13 @@ export class GardenScene {
 
   /** Jump straight to an area (opening the garden), rather than easing there. */
   jumpTo(area: AreaId): void {
+    this.slide = null;
+    this.grabX = null;
+    this.camArea = area;
     this.camX = this.target(area);
     this.rabbitX = RABBIT_SPOT[area];
     this.rabbitArea = area;
+    this.followAt = 0;
     this.camReady = true;
   }
 
@@ -148,19 +248,21 @@ export class GardenScene {
   draw(m: GardenModel, now: number): void {
     const ctx = this.ctx;
     if (!this.camReady) this.jumpTo(m.area);
-    const target = this.target(m.area);
-    this.camX = reduceMotion ? target : this.camX + (target - this.camX) * 0.18;
-    if (Math.abs(target - this.camX) < 0.3) this.camX = target;
-    const cam = Math.round(this.camX);
+    this.stepCamera(m.area, now);
+    const cam = Math.floor(this.camX);
 
     const phase = m.night ? Math.round(m.moon * 30) / 30 : null;
     const bg = this.sprite(`bg:${m.season}:${m.weather}:${m.night}:${phase}`, () => toSprite(drawGarden(m.season, m.weather, m.night, phase)));
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     // above the strip: the sky's top colour; either side (a very wide stage): grass
     ctx.fillStyle = skyTop(bg);
-    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(1, 0, 0, 1, -cam, this.offsetY);
     ctx.drawImage(bg.canvas, 0, 0);
+    // dragged past an end: the strip's edge column carries on, rather than a band of sky
+    if (cam < 0) ctx.drawImage(bg.canvas, 0, 0, 1, bg.h, cam, 0, -cam, bg.h);
+    const past = cam + this.canvas.width - bg.w;
+    if (past > 0) ctx.drawImage(bg.canvas, bg.w - 1, 0, 1, bg.h, bg.w, 0, past, bg.h);
 
     this.drawHedge(m);
     // fence pieces hang behind everything; lawn pieces take their place by depth
@@ -235,26 +337,52 @@ export class GardenScene {
 
   private drawThing(m: GardenModel, t: GardenThing, now: number): void {
     if (t.kind === 'plot') {
-      if (t.state === 'locked') { this.put(this.sprite('sign', () => toSprite(drawSignpost())), t.spot.x, t.spot.y); return; }
+      if (t.state === 'locked') {
+        // land still to buy: a dashed outline, as the yard's build spots are. The next field, for
+        // sale: bright, with a "+" and its price on a tag, lit and bobbing once you can afford it;
+        // further off, faint, with a padlock.
+        const next = plotOffer(m.pet, t.index) === 'next';
+        const winter = m.season === 'winter';
+        this.put(this.sprite(`plotspot:${next}:${winter}`, () => toSprite(drawSpot(FIELD.w, FIELD.h, !next, winter))), t.spot.x, t.spot.y);
+        const price = plotUpgrade(t.index)?.price;
+        if (next && price !== undefined) {
+          const afford = m.pet.clover >= price;
+          const bob = afford && !reduceMotion && Math.floor(now / 500) % 2 === 0 ? 1 : 0;
+          this.put(this.sprite(`price:${price}:${afford}`, () => toSprite(drawTag(String(price), true, afford))), t.spot.x, t.spot.y - bob);
+        }
+        return;
+      }
       const p = m.pet.garden?.plots?.[t.index] ?? null;
       const st = p ? stage(p, m.nowMs) : 0;
-      const art = p ? CROP_ART[p.crop] : null;
-      this.put(this.sprite(`plot:${art}:${st}`, () => toSprite(drawPlot(art, p ? st : 0))), t.spot.x, t.spot.y);
-      if (t.state === 'ready' && !reduceMotion) {
-        // a twinkle over a crop that's ready to pick
-        const on = Math.floor(now / 600 + t.index) % 3 === 0;
-        if (on) this.put(this.sprite('item:sparkle', () => toSprite(drawItem('sparkle'))), t.spot.x + 6, t.spot.y - 18);
+      this.put(this.sprite(`field:${m.season}:${p?.crop}:${st}`, () => toSprite(drawField(m.season, p?.crop ?? null, st))), t.spot.x, t.spot.y);
+      if (!p && !m.guest) {
+        // empty and yours: a seed packet bobbing over the soil, its shadow on the furrows, to say "plant here"
+        const bob = reduceMotion ? 0 : Math.floor(now / 500) % 2;
+        this.ctx.fillStyle = 'rgba(59,41,34,0.35)';
+        this.ctx.fillRect(Math.round(t.spot.x - 3), t.spot.y - 8, 7, 1);
+        this.put(this.sprite('packet', () => toSprite(drawSeedPacket())), t.spot.x, t.spot.y - 10 - bob);
+      }
+      if (p && t.state === 'growing') {
+        // how long it has left, on a tag over the field's front edge
+        const label = timerLabel(p.readyAtMs - m.nowMs);
+        this.put(this.sprite(`timer:${label}`, () => toSprite(drawTag(label))), t.spot.x, t.spot.y);
       }
       return;
     }
     const id = t.kind === 'shed' ? 'shed' : t.id;
-    if (t.state === 'owned') { this.put(this.sprite(`item:${id}`, () => toSprite(drawItem(id))), t.spot.x, t.spot.y); return; }
+    if (t.state === 'owned') {
+      // a clover patch is seen from above, like the yard; the hive, log and shed face the front, as they do everywhere
+      const s = id === 'patch' ? this.sprite(`patch:${m.season}`, () => toSprite(drawCloverPatch(m.season))) : this.sprite(`item:${id}`, () => toSprite(drawItem(id)));
+      this.put(s, t.spot.x, t.spot.y);
+      return;
+    }
     const { w, h } = SPOT[id];
     const dim = t.state === 'locked';
-    this.put(this.sprite(`spot:${w}:${h}:${dim}`, () => toSprite(drawSpot(w, h, dim))), t.spot.x, t.spot.y);
+    const winter = m.season === 'winter';
+    this.put(this.sprite(`spot:${w}:${h}:${dim}:${winter}`, () => toSprite(drawSpot(w, h, dim, winter))), t.spot.x, t.spot.y);
   }
 
-  /** The hedge and gate between the yard and the meadow, while the meadow is shut. */
+  /** The gate between the yard and the meadow, in the background's hedge: shut, or swung open. */
   private drawHedge(m: GardenModel): void {
     const ctx = this.ctx;
     const x = GATE_X - 3;
@@ -263,12 +391,6 @@ export class GardenScene {
       ctx.fillStyle = '#6E4527';
       ctx.fillRect(x - 1, 62, 2, 17); ctx.fillRect(x + 6, 62, 2, 17);
       return;
-    }
-    const leaf = m.season === 'winter' ? ['#C9D5E0', '#E8EEF3'] : ['#3F7F2E', '#4E9A38'];
-    for (let y = 50; y < STRIP_H; y++) {
-      if (y >= 66 && y < 78) continue; // the gate's gap, on the path
-      ctx.fillStyle = leaf[(y >> 1) % 2]!;
-      ctx.fillRect(x - ((y * 7) % 3 === 0 ? 1 : 0), y, 7, 1);
     }
     // the gate: two posts and planks, shut
     ctx.fillStyle = '#6E4527';
@@ -281,39 +403,57 @@ export class GardenScene {
   }
 
   private drawRabbit(m: GardenModel, now: number): void {
-    if (m.asleep || m.absent) return;
+    if (m.asleep || m.absent) { this.hopping = false; return; }
     if (m.area !== this.rabbitArea) {
-      // she follows you: in from the side you came from, a short hop to her spot
-      const fromLeft = AREAS_ORDER[m.area] > AREAS_ORDER[this.rabbitArea];
-      this.rabbitX = RABBIT_SPOT[m.area] + (fromLeft ? -30 : 30);
+      // she follows you: left behind while the view slides, then after a moment she hops in
       this.rabbitArea = m.area;
+      this.followAt = reduceMotion ? 0 : (this.slide ? this.slide.t0 + this.slide.ms : now) + FOLLOW_MS;
     }
+    const dt = Math.min(100, Math.max(0, now - this.lastNow));
+    this.lastNow = now;
     const goal = RABBIT_SPOT[m.area];
+    const waiting = now < this.followAt;
+    if (!waiting && this.followAt) {
+      // setting off: from just past the edge you came in by, unless she's already nearer than that
+      this.followAt = 0;
+      const cam = this.camX;
+      if (this.rabbitX < goal) this.rabbitX = Math.max(this.rabbitX, cam - 14);
+      else this.rabbitX = Math.min(this.rabbitX, cam + this.w + 14);
+    }
     const dx = goal - this.rabbitX;
-    const moving = Math.abs(dx) > 0.5 && !reduceMotion;
+    const moving = !waiting && Math.abs(dx) > 0.5 && !reduceMotion;
+    this.hopping = moving;
+    // px/ms, the same at any frame rate: a brisk hop, so following you in takes under half a second
     if (moving) {
       this.facing = dx > 0 ? -1 : 1;
-      this.rabbitX += Math.sign(dx) * Math.min(Math.abs(dx), 2.5);
-    } else this.rabbitX = goal;
+      this.rabbitX += Math.sign(dx) * Math.min(Math.abs(dx), HOP_SPEED * dt);
+      this.turnAt = now + (reduceMotion ? 0 : TURN_MS);
+    } else if (!waiting) this.rabbitX = goal;
+    // settled: she looks back into the area (her spot is off to one side), not at the edge of the view
+    if (!moving && !waiting && this.turnAt && now >= this.turnAt) {
+      this.turnAt = 0;
+      const middle = AREAS_ORDER[m.area] * AREA_W + AREA_W / 2;
+      this.facing = this.rabbitX > middle ? 1 : -1;
+    }
     let frame: Frame = 0;
     if (!moving) {
       if (now > this.blinkAt) { frame = 2; if (now > this.blinkAt + 140) this.blinkAt = now + 2500 + Math.random() * 3000; }
       else if (!reduceMotion && Math.floor(now / 900) % 3 === 1) frame = 1;
     }
     const face: Face = 'content';
-    const s = this.sprite(`rabbit:${m.coat}:${face}:${frame}:${dressKey(m.dress)}`, () => toSprite(drawRabbit(m.coat, face, frame, m.dress)));
+    const s = this.sprite(`rabbit:${m.coat}:${face}:${frame}:${dressKey(m.dress)}`, () => toSprite(drawRabbit(m.coat, face, frame, m.dress, K_GARDEN)));
     const hop = moving ? Math.round(Math.abs(Math.sin(this.rabbitX / 5)) * 3) : 0;
     const left = Math.round(this.rabbitX - s.w / 2), top = STRIP_H - RABBIT_GROUND - hop - 1;
     const ctx = this.ctx;
     ctx.save();
-    if (this.facing === -1) { ctx.translate(left * 2 + s.w, 0); ctx.scale(-1, 1); }
+    if (this.facing === 1) { ctx.translate(left * 2 + s.w, 0); ctx.scale(-1, 1); }
     ctx.drawImage(s.canvas, left, top);
     ctx.restore();
   }
 
   /** Her box in strip pixels, for tap-to-pet; null while she's asleep in the burrow. */
   rabbitBox(m: GardenModel): { x: number; y: number; w: number; h: number } | null {
-    return m.asleep || m.absent ? null : { x: this.rabbitX - 14, y: STRIP_H - 34, w: 28, h: 32 };
+    return m.asleep || m.absent ? null : { x: this.rabbitX - 12, y: STRIP_H - 30, w: 24, h: 28 }; // her garden size
   }
 
   /** Rain, snow or leaves across the whole view, like the burrow's window has them. */

@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { CATALOG, digRoom, starterBurrow } from './decor';
 import { newPet, type PetState } from './sim';
-import { applyGift, applyVisits, buildShowcase, buyWelcome, findGiftKind, GIFT_KINDS, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, giftInfo, giveFind, guestsToShow, noteOf, noteText, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, spareFinds, visitInfo, visitKind } from './social';
+import { applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRank, buyWelcome, findGiftKind, GIFT_KINDS, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, giftInfo, giveFind, guestsToShow, noteOf, noteText, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, spareFinds, visitInfo, visitKind } from './social';
 
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = () => newPet('p1', 'Clover', 'cocoa', NOON, 'UTC');
@@ -242,4 +242,22 @@ test("her dug-out rooms go in her snapshot, and a full home still fits the platf
   const back = readShowcase(JSON.parse(JSON.stringify(d)))!;
   assert.deepEqual(Object.keys(back.rooms ?? {}).sort(), ['loft', 'nook']);
   assert.equal(buildShowcase(pet(), starterBurrow()).rooms, undefined, 'no rooms dug: none sent');
+});
+
+test("a friend's needs wear down from their snapshot, and the care that helps most is picked", () => {
+  const d = readShowcase({ ...buildShowcase(pet(), starterBurrow()), needs: { hunger: 90, happy: 80, energy: 50, clean: 75 }, simAtMs: NOON });
+  assert.ok(d);
+  assert.deepEqual(friendNeeds(d, NOON), d.needs);
+  const later = friendNeeds(d, NOON + 5 * 3600e3); // hunger and happy 3/h, clean 2/h
+  assert.deepEqual([later.hunger, later.happy, later.clean], [75, 65, 65]);
+  assert.deepEqual(friendNeeds({ ...d, vacationUntilMs: NOON + 9e9 }, NOON + 5 * 3600e3), d.needs, 'paused on holiday');
+  assert.equal(careHint(d.needs), null, 'nothing low: no hint');
+  assert.deepEqual(careHint({ hunger: 50, happy: 60, energy: 10, clean: 80 }), { kind: 'snack', word: 'peckish' });
+  assert.deepEqual(careHint({ hunger: 90, happy: 90, energy: 10, clean: 40 }), { kind: 'brush', word: 'a bit dusty' }, 'energy has no care');
+});
+
+test('friends who came by and are waiting on a visit back come first, and visited ones last', () => {
+  assert.equal(friendRank({ visitedYou: true, visited: false }), 0);
+  assert.equal(friendRank({ visitedYou: false, visited: false }), 1);
+  assert.equal(friendRank({ visitedYou: true, visited: true }), 2);
 });

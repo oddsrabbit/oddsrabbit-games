@@ -43,7 +43,7 @@ const GRIDS: Record<string, string[]> = {
   ],
   mushroom: [
     '..kkkkkkkk..', '.krrwrrrrrk.', 'krrrrrwrrrrk', 'krwrrrrrrwRk', '.kkkkkkkkkk.',
-    '...kccccck..', '...kccccck..', '...kcccCck..', '..kkkkkkkkk.',
+    '...kcccck...', '...kcccck...', '...kccCck...', '..kkkkkkkk..',
   ],
   jar: [
     '.k.k..k.k.', 'kykyk.kyk.', '.kYk.kykyk', '..g...kYk.', '..g....g..', '.kbbbbbbk.',
@@ -129,6 +129,7 @@ const GRIDS: Record<string, string[]> = {
   ],
 
   // the garden: a soil mound, and what grows in it
+  can: ['....kkkk...', 'k..k....k..', 'kk.kkkkkkk.', '.kkkBbbbBk.', '..kkbwbbBk.', '...kbwbbBk.', '...kbbbbBk.', '....kkkkk..'],
   mound: ['..kkkkkkkkkk..', '.kNnNnnNnNnNk.', 'kNnnNnnnNnnnNk', 'kkkkkkkkkkkkkk'],
   seed: ['.....k..k.....', '....knk.knk...'],
   sprout: ['.....k..k.....', '....kgkkgk....', '.....kgGk.....', '......kk......'],
@@ -171,7 +172,8 @@ export function drawPlot(ready: ItemArt | null, stage: 0 | 1 | 2 | 3): PixelGrid
   };
   const mound = drawItem('mound');
   const top = g.h - mound.h;
-  if (stage === 0) put(drawItem('seed'), 2, top - 1);
+  // an empty bed (no crop coming) is just the mound; a seed means something's planted
+  if (stage === 0 && ready) put(drawItem('seed'), 2, top - 1);
   if (stage === 1) put(drawItem('sprout'), 2, top - 3);
   if (stage >= 2) put(drawItem('leafy'), 2, top - 6);
   put(mound, 2, top);

@@ -8,12 +8,10 @@
 import { bondLevel, COATS, earsOf, newPet, timer, type Coat, type Ears, type Needs, type PetState } from './sim';
 import { byId, clampToZone, EXTRA_ROOMS, isOutdoor, itemRoom, meadowItems, roomsOf, surfaceById, surfacesOf, type BurrowState, type ExtraRoom, type RoomId, type SurfaceKind } from './decor';
 import { earn, friendPays, noteFriendship } from './economy';
-import { DAY_ROLLOVER_HOUR, FRIEND_CLOVER, HOUR_MS, VISIT_CARE, WELCOME } from './tuning';
+import { DAY_ROLLOVER_HOUR, DECAY_AWAKE, FRIEND_CLOVER, HOUR_MS, VISIT_CARE, WELCOME } from './tuning';
 import { dayKey, isNewDay } from './localtime';
 import { CROPS, hasUpgrade, onVacation, outfitById, plots, type CropId } from './extras';
 import { BUILDING_IDS, BUILDINGS, countOf, yardOf, type BuildingId } from './yard';
-import type { Trait } from './world';
-import { TRAITS, traitOf } from './world';
 import { widgetSprites, type WidgetSprites } from './widgetSprites';
 import { COLLECTIBLES, COLLECTION_SETS, setComplete, type Collectible, type CollectionSet } from './collectibles';
 
@@ -30,7 +28,6 @@ export interface ShowcaseData {
   vacationUntilMs: number | null;
   daysVisited: number;
   bondLevel: number;
-  trait: Trait;
   head: string | null;
   neck: string | null;
   /** Placed decor, where it sits. */
@@ -146,7 +143,6 @@ export function buildShowcase(pet: PetState, burrow: BurrowState): ShowcaseData 
     vacationUntilMs: pet.vacationUntilMs ?? null,
     daysVisited: pet.daysVisited,
     bondLevel: bondLevel(pet.bond).level,
-    trait: traitOf(pet.petId),
     head: pet.wardrobe?.head ?? null,
     neck: pet.wardrobe?.neck ?? null,
     // the burrow's first room (the meadow's pieces go with the garden, the other rooms under `rooms`)
@@ -197,7 +193,6 @@ export function readShowcase(raw: unknown): ShowcaseData | null {
     vacationUntilMs: d.vacationUntilMs == null ? null : num(d.vacationUntilMs, 0, 8.64e15, 0),
     daysVisited: Math.round(num(d.daysVisited, 1, 100_000, 1)),
     bondLevel: Math.round(num(d.bondLevel, 1, 99, 1)),
-    trait: (TRAITS as string[]).includes(d.trait as string) ? (d.trait as Trait) : 'playful',
     head: outfit(d.head),
     neck: outfit(d.neck),
     items: items.slice(0, MAX_ITEMS).flatMap((i: unknown) => {
@@ -356,6 +351,36 @@ export const VISIT_INFO: Record<VisitKind, { label: string; art: string; need: '
 export function visitInfo(kind: unknown): (typeof VISIT_INFO)[VisitKind] | null {
   const care = typeof kind === 'string' ? kind.split('-')[0] : kind;
   return (VISIT_KINDS as unknown[]).includes(care) ? VISIT_INFO[care as VisitKind] : null;
+}
+
+/**
+ * A friend's rabbit's needs now: her snapshot's, worn down at the awake rates
+ * for the hours since it was taken (a snapshot can be a day old). Near
+ * enough to pick a care by; on holiday her needs are paused, so they stay.
+ */
+export function friendNeeds(d: ShowcaseData, nowMs: number): Needs {
+  const away = !!d.vacationUntilMs && d.vacationUntilMs > nowMs;
+  const hours = away ? 0 : Math.max(0, nowMs - d.simAtMs) / HOUR_MS;
+  const n = (k: keyof Needs) => Math.max(0, Math.min(100, d.needs[k] - DECAY_AWAKE[k] * hours));
+  return { hunger: n('hunger'), happy: n('happy'), energy: n('energy'), clean: n('clean') };
+}
+
+/** Below this, a need is worth a visitor's care. */
+const HINT_BELOW = 70;
+const HINT_WORD: Record<VisitKind, string> = { snack: 'peckish', pat: 'a bit lonely', brush: 'a bit dusty' };
+
+/** The care that would help a friend's rabbit most, and a word for how she is; null when she's doing fine. */
+export function careHint(needs: Needs): { kind: VisitKind; word: string } | null {
+  const kind = [...VISIT_KINDS].sort((a, b) => needs[VISIT_INFO[a].need] - needs[VISIT_INFO[b].need])[0]!;
+  return needs[VISIT_INFO[kind].need] < HINT_BELOW ? { kind, word: HINT_WORD[kind] } : null;
+}
+
+/**
+ * Where a friend goes in the list today: 0 came by and hasn't been visited
+ * back, 1 still to visit, 2 visited today (done).
+ */
+export function friendRank(f: { visitedYou: boolean; visited: boolean }): 0 | 1 | 2 {
+  return f.visited ? 2 : f.visitedYou ? 0 : 1;
 }
 
 // ---------------------------------------------------------------- the guest book

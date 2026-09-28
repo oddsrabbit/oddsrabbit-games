@@ -6,7 +6,7 @@ import { roll } from './rng';
 import { bondLevel, earn } from './economy';
 import { COLLECTIBLES, EVENT_SHARE, RARE_SHARE, type Collectible } from './collectibles';
 import type { PetState } from './sim';
-import { MEADOW, CAN_SPEED, DAY_MS, HOUR_MS, SOIL, SPROUT_CLOVER } from './tuning';
+import { MEADOW, CAN_SPEED, DAY_MS, HOUR_MS, BERRY_HARVEST, SOIL, SPROUT_CLOVER } from './tuning';
 
 // ---------------------------------------------------------------- garden
 
@@ -14,7 +14,7 @@ export type CropId = 'berry' | 'golden' | 'sprout';
 export interface Plot { crop: CropId; plantedAtMs: number; readyAtMs: number }
 
 export const CROPS: Record<CropId, { name: string; seedCost: number; growMs: number; yields: string }> = {
-  berry: { name: 'Strawberries', seedCost: 4, growMs: 8 * HOUR_MS, yields: '2 strawberries' },
+  berry: { name: 'Strawberries', seedCost: 0, growMs: 8 * HOUR_MS, yields: `${BERRY_HARVEST} strawberries` },
   golden: { name: 'Golden carrot', seedCost: 8, growMs: 12 * HOUR_MS, yields: '1 golden carrot' },
   sprout: { name: 'Clover sprouts', seedCost: 2, growMs: 4 * HOUR_MS, yields: 'clover' },
 };
@@ -39,6 +39,8 @@ export const UPGRADES: Upgrade[] = [
   { id: 'meadow', name: 'Meadow gate', price: MEADOW.gate, what: 'Opens the meadow: outdoor decor, some of which helps the yard.' },
 ];
 export const upgradeById = (id: string): Upgrade | undefined => UPGRADES.find((u) => u.id === id);
+/** The upgrade that opens bed `i` (0-based); the first bed comes free. */
+export const plotUpgrade = (i: number): Upgrade | undefined => (i > 0 ? upgradeById(`plot${i + 1}`) : undefined);
 
 export const hasUpgrade = (s: PetState, id: UpgradeId): boolean => (s.upgrades ?? []).includes(id);
 export const soilLevel = (s: PetState): number => s.soilLevel ?? 0;
@@ -48,7 +50,7 @@ export const soilMaxed = (s: PetState): boolean => soilLevel(s) >= SOIL.maxLevel
 
 /** What a harvest of this crop brings at her soil level: strawberries or golden carrots (sprouts pay clover: sproutClover). */
 export function cropYield(s: PetState, crop: 'berry' | 'golden', level = soilLevel(s)): number {
-  if (crop === 'berry') return 2 + SOIL.berryAt.filter((l) => level >= l).length;
+  if (crop === 'berry') return BERRY_HARVEST + SOIL.berryAt.filter((l) => level >= l).length;
   return level >= SOIL.goldenAt ? 2 : 1;
 }
 /** Clover from one sprout harvest. Flat: the clover rate doesn't touch it. */
@@ -78,6 +80,16 @@ export function buyUpgrade(s: PetState, id: UpgradeId | 'soil'): { ok: true; sta
   state.clover -= u.price;
   state.upgrades = [...(s.upgrades ?? []), id];
   return { ok: true, state };
+}
+
+/**
+ * Bed `i`, still to buy: 'next' when it's the next one and can be bought now
+ * (clover permitting), 'later' when it's further off or waits on soil.
+ */
+export function plotOffer(s: PetState, i: number): 'next' | 'later' | null {
+  if (i < plotCount(s)) return null;
+  const u = plotUpgrade(i);
+  return u && i === plotCount(s) && upgradeUnlocked(s, u) ? 'next' : 'later';
 }
 
 /** She starts with one plot; the rest are bought. */

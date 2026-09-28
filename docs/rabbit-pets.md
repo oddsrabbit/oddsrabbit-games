@@ -17,8 +17,11 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
 
 **Update 1 landed** (all of Phase 2, §7):
 
-- **Personality [A6]**, fixed by her id: shy, greedy or playful, each bending
-  one or two numbers (petting, hunger or boredom).
+- **Personality [A6]**: removed. It was shy, greedy or playful, fixed at
+  random by her id, each bending one or two numbers (petting, hunger or
+  boredom). With one rabbit for life it was a permanent handicap you couldn't
+  see or change, and it never showed in how she acted. Older snapshots still
+  carry `trait`; nothing reads it.
 - **Upbringing marking [B3]**: removed. It was a permanent mark on day 7
   (freckles, a heart or a tuft) chosen by which care she got most, but
   nearly every rabbit got the heart and it didn't earn its place. Older
@@ -77,7 +80,7 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
   no longer planned for this game.
 - **Bond levels 2 and 3 unlock decor** (toadstool seat, dandelion jar, star
   garland).
-- **Reminders can be switched off** under More, after the first prompt.
+- **Reminders can be switched off** on her page, after the first prompt.
 - **Feeding is a choice**, from a tray that opens above the action row:
   carrot, greens, strawberry, a baked treat, and golden carrots from the
   garden. There's no fixed favourite. Each meal is rolled (seeded, so it can't
@@ -85,6 +88,48 @@ build copies it to `dist/rabbit-pets/`, and the app is registered admin-only in
   far more often, and "loves it" adds a modest +6 joy.
 - **She can be woken at any hour** with Wake (§4.2).
 - **Sound**: short synthesised effects, with a mute button in the header.
+- **The Friends tab has three views** under a switch pinned to its top.
+  **Today**: her burrow, live, while friends are over or at the door;
+  otherwise your friends' doors along a lane (lamp lit once visited, a parcel
+  once gifted, "Visit back" and "zzz" badges, tap a door to visit, an Invite
+  door at the end). Then anything new in the guest book, your visits today,
+  and the six friends most worth visiting now as full cards (anyone who came
+  by first), with "See all" for the rest. **Friends**: everyone as compact
+  rows in the same order, with a search from 16 friends (the platform shares
+  at most 100, the most recently active). **Guest book**: every signature,
+  the new ones marked New. New signatures count on the Friends tab's badge
+  and the Guest book switch until you open it (`guestbookSeenMs` in
+  `v1:settings`; the first run with it counts what's there as read).
+- **A tab bar replaced the tools row and More.** Along the bottom of every
+  screen: **Home** (the burrow and care), **Garden**, **Shop**, **Friends** and
+  **her own tab**, labelled with her name
+  and drawn with her face as she's dressed. Friends is a page: who's visiting
+  today, your friends with Visit and Gift and how close you are to best
+  friends, the paid visits left today, the latest guest book entries, and
+  Invite. The Shop is a screen of its own: Decor, Walls (walls, floors,
+  windows), Wardrobe and Toys, as cards; tap one and a display case across
+  the top shows it: an outfit on her, big, so you can try it on; a wall,
+  floor or window in her own burrow, live; a toy with her playing with it;
+  a piece of decor on her own wall and floor colours. Under it is what you
+  can do: buy,
+  save up for it, put it on, use it. Decor you buy waits in storage: whether
+  it goes out is up to you. Put it out and it goes into the burrow to be
+  dragged into place (Done comes back to the shop); put it away again from
+  its card, or while arranging. Arranging has a storage strip under the
+  room: drag a piece up out of it and it appears under your finger, or drag
+  a piece in the room down onto it (it lights up) to put it away; tapping
+  still works. "Arrange the burrow" moves what's already
+  out. Putting a piece out is what counts for Getting started's decor goals. The wardrobe
+  and toy box sheets are gone: the Shop has them. Her page has her portrait
+  and bond (what her level adds to the clover rate, and what the next level
+  brings: more rate, its clover bonus and what it opens in the shop),
+  Wardrobe (to the Shop), Collection and Journal
+  as tiles, the clover rate, and the settings (sound, reminders, holiday,
+  share, start over). Her name in the header opens it too. Bake moved to the
+  foot of the Feed tray (Feed opens while she sleeps or is out, just for
+  that), with a Baking pill counting down over the burrow; Forage moved to the
+  garden's row, in every area. The Garden tab carries the ripe-plot count and
+  Friends the number of guests in now.
 - **`?preview=1`** lets a signed-out player try it on web without an account.
 
 Feature selection was done on a toggleable checklist
@@ -260,7 +305,7 @@ local time: dark from 20:00 to 06:00 (`DUSK_HOUR`, `DAWN_HOUR`). If she's
 awake at night the lamps are on; asleep, the room is dim. Nothing is locked
 by the clock, so a player whose free time is at night gets the whole game.
 
-**She sleeps until she's rested.** Put to bed (the Bed button, once energy is
+**She sleeps until she's rested.** Put down for a nap (the Nap button, once energy is
 under 85), she sleeps until energy is full at +12/h: from 30 that's about 6
 hours, from 80 under 2. Left alone, she dozes off by herself below 20 energy
 and wakes when rested. Wake works at any hour; she keeps what she regained

@@ -2,46 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  buyOutfit, buyToy, giveOutfit, buyUpgrade, CROPS, cropYield, harvest, ownsToy, pickFind, plant, plotCount, plots, soilMaxed, soilPrice,
+  buyOutfit, buyToy, giveOutfit, buyUpgrade, CROPS, cropYield, harvest, ownsToy, pickFind, plant, plotCount, plotOffer, plots, soilMaxed, soilPrice,
   startVacation, endVacation, wardrobe, wear, COLLECTIBLES,
 } from './extras';
 import { act, advance, newPet, type PetState } from './sim';
 import { DAY_MS, HOUR_MS } from './tuning';
-import { activeEvents, limitedAvailable, seasonOf, TRAITS, traitOf, weatherOf } from './world';
+import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherOf } from './world';
 
 const UTC = 'UTC';
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = (id = 'test-pet'): PetState => newPet(id, 'Clover', 'snow', NOON, UTC);
-/** A pet id with a given personality, found by searching ids. */
-function petWithTrait(trait: string): PetState {
-  for (let i = 0; i < 500; i++) if (traitOf(`p${i}`) === trait) return pet(`p${i}`);
-  throw new Error('no id for ' + trait);
-}
-
-test('personality is fixed by id, and all three occur', () => {
-  assert.equal(traitOf('abc'), traitOf('abc'));
-  const seen = new Set(Array.from({ length: 200 }, (_, i) => traitOf(`p${i}`)));
-  assert.deepEqual([...seen].sort(), [...TRAITS].sort());
-});
-
-test('a greedy rabbit gets hungry faster; a playful one gets bored faster', () => {
-  const plain = advance(petWithTrait('shy'), NOON + HOUR_MS, UTC).state;
-  const greedy = advance(petWithTrait('greedy'), NOON + HOUR_MS, UTC).state;
-  const playful = advance(petWithTrait('playful'), NOON + HOUR_MS, UTC).state;
-  assert.ok(greedy.needs.hunger < plain.needs.hunger);
-  assert.ok(playful.needs.happy < plain.needs.happy);
-});
-
-test('petting: playful gets more, shy gets less until bond level 3', () => {
-  const gain = (s: PetState) => { s.needs.happy = 20; const r = act(s, 'pet', NOON, UTC); return r.ok ? r.state.needs.happy - 20 : NaN; };
-  const shy = petWithTrait('shy');
-  const playful = petWithTrait('playful');
-  assert.ok(gain(playful) > gain(petWithTrait('greedy')));
-  assert.ok(gain(shy) < gain(petWithTrait('greedy')));
-  shy.bond = 100;
-  assert.equal(gain(shy), gain(petWithTrait('greedy')), 'warmed up');
-});
-
 test('on vacation her needs hold and she finds nothing', () => {
   const s = startVacation(pet(), 3, NOON);
   const later = advance(s, NOON + 2 * DAY_MS, UTC).state;
@@ -75,12 +45,12 @@ test('garden: plant with clover, wait, harvest into the pantry', () => {
   const h = harvest(s, 0, NOON + CROPS.berry.growMs);
   assert.ok(h.ok);
   if (!h.ok) return;
-  assert.equal(h.state.pantry?.berries, 2);
+  assert.equal(h.state.pantry?.berries, 3);
   assert.equal(plots(h.state)[0], null);
   // a home-grown berry is eaten before any clover is spent
   h.state.needs.hunger = 20;
   const fed = act(h.state, 'feed', NOON + CROPS.berry.growMs, UTC, { food: 'strawberry' });
-  assert.ok(fed.ok && fed.state.pantry?.berries === 1 && fed.state.clover === h.state.clover + 2);
+  assert.ok(fed.ok && fed.state.pantry?.berries === 2 && fed.state.clover === h.state.clover + 2);
 });
 
 test('a golden carrot is always loved', () => {
@@ -142,6 +112,18 @@ test('garden upgrades: one plot to start, plots in order, soil repeats and pays 
   assert.ok(h?.ok && h.clover === 8, '6 + 2 per soil level');
 });
 
+test('plotOffer: only the next bed is for sale, and not while it waits on soil', () => {
+  const s = pet();
+  assert.equal(plotOffer(s, 0), null, 'the first bed is hers');
+  assert.equal(plotOffer(s, 1), 'next');
+  assert.equal(plotOffer(s, 2), 'later');
+  s.upgrades = ['plot2', 'plot3'];
+  assert.equal(plotOffer(s, 1), null);
+  assert.equal(plotOffer(s, 3), 'later', 'the fourth waits on soil level 3');
+  s.soilLevel = 3;
+  assert.equal(plotOffer(s, 3), 'next');
+});
+
 test('the watering can makes crops grow 25% faster', () => {
   const s = pet();
   s.clover = 2000;
@@ -190,11 +172,20 @@ test('seasons, the weather and events come from the date', () => {
   assert.equal(limitedAvailable('cushion', NOON, UTC), true, 'regular items always');
 });
 
+test('an event counts down the days it has left', () => {
+  const [harvest] = activeEvents(NOON, UTC);
+  assert.equal(daysLeft(harvest!, NOON, UTC), 22, '24 Sep to 15 Oct, both days counted');
+  assert.equal(daysLeft(harvest!, Date.UTC(2026, 9, 15, 23), UTC), 1, 'the last day');
+  const [winter] = activeEvents(Date.UTC(2026, 11, 31), UTC);
+  assert.equal(daysLeft(winter!, Date.UTC(2026, 11, 31), UTC), 6, 'across the new year');
+  assert.equal(daysLeft(winter!, Date.UTC(2027, 0, 2), UTC), 4);
+});
+
 test('soil stops at level 5, and on the way richer soil grows more strawberries and golden carrots', () => {
   const s = newPet('soil', 'Mochi', 'snow', NOON, UTC);
   s.clover = 1e6;
   const yieldsAt = (lvl: number) => { const p = { ...s, soilLevel: lvl }; return [cropYield(p, 'berry'), cropYield(p, 'golden')]; };
-  assert.deepEqual([0, 1, 2, 3, 4, 5].map(yieldsAt), [[2, 1], [2, 1], [3, 1], [3, 1], [4, 1], [4, 2]]);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(yieldsAt), [[3, 1], [3, 1], [4, 1], [4, 1], [5, 1], [5, 2]]);
   let t = s;
   for (let i = 0; i < 5; i++) { const r = buyUpgrade(t, 'soil'); assert.ok(r.ok); t = r.state; }
   assert.equal(t.soilLevel, 5);
@@ -204,5 +195,5 @@ test('soil stops at level 5, and on the way richer soil grows more strawberries 
   const planted = plant({ ...t, clover: 100 }, 0, 'berry', NOON);
   assert.ok(planted.ok);
   const picked = harvest(planted.state, 0, NOON + 9 * HOUR_MS);
-  assert.ok(picked.ok && (picked.state.pantry?.berries ?? 0) === 4);
+  assert.ok(picked.ok && (picked.state.pantry?.berries ?? 0) === 5);
 });

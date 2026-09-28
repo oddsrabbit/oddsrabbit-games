@@ -41,11 +41,11 @@ const buildOpts = {
   logLevel: 'info',
 };
 
-// Dev pages that need the game's own modules (dev/garden-lab.html). Written
+// Dev pages that need the game's own modules (dev/garden-lab.html, dev/rabbit-lab.html, dev/eat-lab.html). Written
 // next to the local SDK copy in dist/, outside dist/rabbit-pets/, so they're
 // never uploaded.
 const devOpts = {
-  entryPoints: ['dev/garden-lab.ts'],
+  entryPoints: ['dev/garden-lab.ts', 'dev/rabbit-lab.ts', 'dev/eat-lab.ts'],
   outdir: 'dist/dev',
   bundle: true,
   format: 'esm',

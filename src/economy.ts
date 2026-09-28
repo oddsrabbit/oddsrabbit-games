@@ -12,6 +12,7 @@ import {
   BOND_LEVELS,
   DAY_ROLLOVER_HOUR,
   FRIEND_CLOVER,
+  FRIEND_MILESTONES,
   RATE,
   STREAK_MILESTONES,
   SUPPORTER_BONUS,
@@ -73,7 +74,7 @@ export function bondLevel(bond: number): { level: number; into: number; span: nu
 
 export interface Lump { what: string; clover: number }
 
-/** Pay any bond level-up and gift-streak milestones not yet paid. Mutates `state`. */
+/** Pay any bond level-up, gift-streak and friend milestones not yet paid. Mutates `state`. */
 export function settleLumps(state: PetState): Lump[] {
   const out: Lump[] = [];
   const paid = new Set(state.paid ?? []);
@@ -90,6 +91,14 @@ export function settleLumps(state: PetState): Lump[] {
     if (Number(d) <= state.gift.streak && !paid.has(key)) {
       paid.add(key);
       out.push({ what: `${d}-day gift streak`, clover: earn(state, 'milestone', clover) });
+    }
+  }
+  const friends = mutualFriends(state);
+  for (const [n, clover] of Object.entries(FRIEND_MILESTONES)) {
+    const key = `friends:${n}`;
+    if (Number(n) <= friends && !paid.has(key)) {
+      paid.add(key);
+      out.push({ what: `${n} friends`, clover: earn(state, 'friendMilestone', clover) });
     }
   }
   state.paid = [...paid];
@@ -156,6 +165,18 @@ function keepFriends(friends: Record<string, Friendship>): Record<string, Friend
   const last = (f: Friendship) => ((f.out ?? '') > (f.in ?? '') ? f.out ?? '' : f.in ?? '');
   all.sort(([, a], [, b]) => Number(best(b)) - Number(best(a)) || last(b).localeCompare(last(a)));
   return Object.fromEntries(all.slice(0, FRIEND_CLOVER.kept));
+}
+
+/** Friends you've visited or gifted, and who've visited or gifted you: what friend milestones count. */
+export function mutualFriends(state: PetState): number {
+  return Object.values(state.friends ?? {}).filter((f) => f.out && f.in).length;
+}
+
+/** The next friend milestone, or null once they're all reached. */
+export function nextFriendMilestone(state: PetState): { friends: number; clover: number } | null {
+  const have = mutualFriends(state);
+  const next = Object.entries(FRIEND_MILESTONES).map(([n, c]) => ({ friends: Number(n), clover: c })).find((m) => m.friends > have);
+  return next ?? null;
 }
 
 export function bestFriends(state: PetState): number {

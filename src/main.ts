@@ -5,40 +5,42 @@
 import type { OddsRabbitGlobal } from '@oddsrabbit/apps-sdk';
 import { drawItem, drawPlot, type ItemArt } from './art/items';
 import { blank, toSprite, type PixelGrid, type Sprite } from './art/pixels';
+import { drawPadlock } from './art/garden';
 import { drawRabbit, dressKey, type Dress, type Face, type Frame } from './art/rabbit';
-import { drawBurrow, moonPhase, SCENE_H, SCENE_W, type RoomStyle } from './art/burrow';
+import { drawBurrow, moonPhase, roomColours, SCENE_H, SCENE_W, WALL_INSET, WINDOW, type RoomStyle } from './art/burrow';
 import { clockOffset, now, syncClock } from './clock';
 import {
   addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, isOutdoor, meadowHelpers, meadowItems, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
   type BurrowState, type DecorDef, type PlacedItem, type SurfaceDef,
-  canDig, digRoom, EXTRA_ROOMS, inRoom, ROOMS, roomsOf, type ExtraRoom, type RoomId,
+  canDig, digRoom, EXTRA_ROOMS, inRoom, openRoomsOf, ROOMS, ROOMS_OPEN, roomsOf, type ExtraRoom, type RoomId,
 } from './decor';
 import {
-  buyOutfit, buyToy, buyUpgrade, COLLECTIBLES, CROPS, endVacation, giveOutfit, growMs, harvest, hasUpgrade, onVacation, OUTFITS,
-  outfitById, ownsToy, plant, plots, toyById, cropYield, soilLevel, soilMaxed, soilPrice, sproutClover, stage as cropStage, startVacation, TOYS, UPGRADES, upgradeUnlocked,
+  type Outfit, buyOutfit, buyToy, buyUpgrade, COLLECTIBLES, CROPS, endVacation, giveOutfit, growMs, harvest, hasUpgrade, onVacation, OUTFITS,
+  outfitById, ownsToy, plant, plotCount, plotOffer, plots, plotUpgrade, toyById, cropYield, soilLevel, soilMaxed, soilPrice, sproutClover, stage as cropStage, startVacation, TOYS, UPGRADES, upgradeUnlocked,
   VACATION_CHOICES, wardrobe, wear, type CropId, type Slot, type UpgradeId,
 } from './extras';
-import { bestFriends, rate, type Lump } from './economy';
+import { bestFriends, mutualFriends, nextFriendMilestone, rate, settleLumps, type Lump } from './economy';
 import { COLLECTION_SETS, setComplete } from './collectibles';
-import { GOAL_TEXT, goalDone, markGoal, settleStarter, starterDone, starterStep, starterView, starterWaiting, STARTER_STEPS, type StarterGoal } from './starter';
+import { claimStarter, GOAL_TEXT, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS, type StarterGoal, type StarterStep } from './starter';
 import {
   BUILDING_IDS, BUILDINGS, buyBuilding, buyShed, capacity, collect, countOf, nextPrice, perHour, SHED_REQUIRES, shedPrice, storageHours, stored,
   unlocked as buildingUnlocked, meadowPerDay, setMeadow, type BuildingId,
   payback,
 } from './yard';
-import { AREA_W, areaAt, AREAS, areaX, hitTest, PLOT_SPOTS, type AreaId } from './garden';
+import { AREA_W, areaAt, AREAS, areaX, GROUND, hitTest, PLOT_SPOTS, STRIP_H, type AreaId } from './garden';
 import { GardenScene, pieceBox, type GardenModel } from './garden-scene';
 import { CRITTERS, critterById } from './wildlife';
 import { isOut, trip as tripOf, type Loot } from './forage';
 import { drawTicket, prizeWon, ticketsBought } from './raffle';
 import { addEntry, emptyJournal, mergeJournal, MILESTONE_DAYS, signGuestbook, type Journal } from './journal';
 import {
-  applyGift, applyVisits, buildShowcase, buyWelcome, findGiftKind, nextWelcome, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, GUEST_NOTES, guestsToShow, noteOf, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
+  applyGift, applyVisits, buildShowcase, buyWelcome, careHint, friendNeeds, friendRank, findGiftKind, nextWelcome, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, GUEST_NOTES, noteOf, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
   type GuestNote, type ShowcaseData, type VisitIn, type VisitKind,
 } from './social';
+import { guestsHere, guestTurns, type GuestTurn } from './guests';
 import { deviceTimeZone } from './localtime';
 import { desiredReminders, reconcile } from './reminders';
-import { Scene, type Activity } from './render';
+import { EAT_SWALLOW_MS, Scene, type Activity } from './render';
 import { newPetId } from './rng';
 import { pauseSound, play, resumeSound, setMuted } from './sound';
 import {
@@ -46,9 +48,9 @@ import {
   FOOD_IDS, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
 } from './sim';
 import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
-import { BOND_DAILY_CAP, DAY_ROLLOVER_HOUR, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME } from './tuning';
-import { dayKey } from './localtime';
-import { activeEvents, limitedAvailable, seasonOf, TRAIT_INFO, traitOf, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
+import { BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, DAY_ROLLOVER_HOUR, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
+import { dayKey, localParts } from './localtime';
+import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
 
 declare global {
   interface Window {
@@ -61,6 +63,7 @@ const tz = deviceTimeZone();
 const params = new URLSearchParams(location.search);
 /** Play without signing in, saving to this browser only. For local development. */
 const PREVIEW = params.get('preview') === '1';
+/** Friends' doors along a hillside on the Friends tab: a prototype, for trying out. */
 const app = document.getElementById('app')!;
 const toastEl = document.getElementById('toast')!;
 
@@ -177,6 +180,11 @@ function fmtLong(ms: number): string {
   if (!hrs) return part(rest, 'minute');
   return rest ? `${part(hrs, 'hour')} ${part(rest, 'minute')}` : part(hrs, 'hour');
 }
+/** "in about 3 hours" or "within the hour", for lines that are read out when they change. */
+function aboutHours(ms: number): string {
+  const hrs = Math.round(ms / HOUR_MS);
+  return ms > HOUR_MS ? `in about ${hrs} ${hrs === 1 ? 'hour' : 'hours'}` : 'within the hour';
+}
 function fmtCountdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   if (s >= 3600) return fmtDuration(s * 1000);
@@ -264,19 +272,30 @@ function payLumps(lumps: Lump[] | undefined): void {
   }
 }
 
-/** Count toward Getting started, and pay any step that's now complete. */
+/** Count toward Getting started. A step that's now complete waits to be claimed. */
 function goal(g?: StarterGoal): void {
   if (!pet || starterDone(pet)) return;
+  const wasReady = starterReady(pet);
   if (g) markGoal(pet, g);
   // a bed in the burrow counts however it got there
   if (!goalDone(pet, 'bed') && hasBed(burrow)) markGoal(pet, 'bed');
-  const r = settleStarter(pet, now());
+  savePet();
+  if (!wasReady && starterReady(pet)) {
+    window.setTimeout(() => toast(`Getting started: step ${starterStep(pet)} done! Claim your reward.`, () => play('gift')), 700);
+  }
+}
+
+/** Pay the open step's reward; the next step opens straight away. */
+function claimStep(): void {
+  const r = claimStarter(pet, now());
+  if (!r.paid) return;
+  const d = r.paid;
   pet = r.state;
   savePet();
-  for (const d of r.paid) {
-    window.setTimeout(() => toast(`Getting started: step ${d.step} done! +${d.clover} clover${d.patch ? ' and a clover patch for the yard' : ''}.`, () => play('gift')), 700);
-    note(`Getting started: step ${d.step} done.`, 'clover', `starter:${d.step}`);
-  }
+  play('gift');
+  toast(`+${d.clover} clover${d.patch ? ' and a clover patch for the yard' : ''}!`);
+  note(`Getting started: step ${d.step} done.`, 'clover', `starter:${d.step}`);
+  render();
 }
 
 function note(text: string, art?: ItemArt, first?: string): void {
@@ -433,7 +452,7 @@ const RABBIT_NAMES = ['Mochi', 'Hazel', 'Pip', 'Juniper', 'Biscuit', 'Maple', 'T
 
 function renderAdopt(): void {
   let coat: Coat = 'snow';
-  let ears: Ears = 'short';
+  let ears: Ears = 'long';
   const preview = h('canvas', { width: 40, height: 40, class: 'px', style: 'width:160px;height:160px', role: 'img', 'aria-label': 'Your rabbit' });
   const pctx = preview.getContext('2d')!;
   pctx.imageSmoothingEnabled = false;
@@ -521,30 +540,44 @@ function coatName(c: Coat): string {
 
 // ------------------------------------------------------------------ the burrow
 
+/**
+ * The tab bar's places. The burrow and the shop share the burrow's screen (the
+ * shop is decorating it); the garden has its own; friends and her are pages.
+ */
+type Tab = 'burrow' | 'garden' | 'shop' | 'friends' | 'her';
+const TABS: Tab[] = ['burrow', 'garden', 'shop', 'friends', 'her'];
+
 interface Ui {
+  /** The burrow screen's own nodes: the HUD, the stage, the panel. */
+  nodes: Node[];
   name: HTMLElement;
   sub: HTMLElement;
   clover: HTMLElement;
-  needs: Record<NeedKey, { wrap: HTMLElement; fill: HTMLElement }>;
+  needs: Record<NeedKey, { wrap: HTMLElement; fill: HTMLElement; label: HTMLElement }>;
   stage: HTMLElement;
   /** The rooms, to switch between (renderRoomNav). */
   roomNav: HTMLElement;
   canvas: HTMLCanvasElement;
   chips: HTMLElement;
+  /** The right-hand column: the daily gift, running events, Getting started. */
+  cards: HTMLElement;
   gift: HTMLButtonElement;
   panel: HTMLElement;
   moodline: HTMLElement;
-  acts: Record<'feed' | 'pet' | 'clean' | 'nap', HTMLButtonElement>;
+  acts: Record<'feed' | 'pet' | 'play' | 'clean' | 'nap', HTMLButtonElement>;
   feedBadge: HTMLElement;
-  bake: HTMLButtonElement;
-  garden: HTMLButtonElement;
-  play: HTMLButtonElement;
   sound: HTMLButtonElement;
   goal: HTMLElement;
   /** The panel's normal contents, restored after decorating. */
   panelKids: Node[];
+  /** Along the bottom of every screen. */
+  tabbar: HTMLElement;
+  tabs: Record<Tab, HTMLButtonElement>;
+  /** The Friends and Her pages: one header and one scrolling body, filled by whichever is showing. */
+  page: { nodes: Node[]; title: HTMLElement; sub: HTMLElement; action: HTMLElement; clover: HTMLElement; body: HTMLElement };
 }
 let ui: Ui;
+let tab: Tab = 'burrow';
 let scale = 4;
 let decorating = false;
 /** The piece being moved while decorating. */
@@ -569,8 +602,15 @@ function startGame(returning: boolean): void {
 }
 
 function buildBurrowScreen(): void {
+  // first run with the guest book's New marks: what's in it already counts as read
+  if (settings.guestbookSeenMs === undefined) { settings.guestbookSeenMs = (journal.guestbook ?? [])[0]?.atMs ?? 0; saveSettings(); }
   // a fresh burrow screen (a new game, or starting over) starts indoors
   room = 'burrow';
+  tab = 'burrow';
+  friendsCache = null;
+  porch = null;
+  herSig = '';
+  friendsSig = '';
   gardenUi = null;
   gardenScene = null;
   gardenSig = '';
@@ -583,9 +623,10 @@ function buildBurrowScreen(): void {
   const needs = {} as Ui['needs'];
   const needEls = needDefs.map((d) => {
     const fill = h('span', { style: `background:${d.color};width:50%` });
+    const label = h('span', { text: d.label });
     const wrap = h('div', { class: 'need', role: 'meter', 'aria-label': d.label, 'aria-valuemin': 0, 'aria-valuemax': 100 },
-      h('div', { class: 'need-label' }, d.icon, d.label), h('div', { class: 'bar' }, fill));
-    needs[d.key] = { wrap, fill };
+      h('div', { class: 'need-label' }, d.icon, label), h('div', { class: 'bar' }, fill));
+    needs[d.key] = { wrap, fill, label };
     return wrap;
   });
 
@@ -593,54 +634,51 @@ function buildBurrowScreen(): void {
   const sub = h('div', { class: 'sub' });
   const clover = h('span');
   const canvas = h('canvas', { role: 'img', 'aria-label': 'The burrow' });
+  // Two columns pinned to the visible stage, not the (maybe cropped) scene:
+  // small status pills on the left (what's going on), and on the right the
+  // big cards for things to do (the daily gift, events, Getting started).
   const chips = h('div', { class: 'float-chips' });
   const gift = h('button', { class: 'gift-btn', type: 'button', hidden: true }, img(itemSprite('gift'), 3), 'Daily gift');
-  // chips and the gift button pin to the visible stage, not the (maybe cropped) scene
+  const cards = h('div', { class: 'float-cards' }, gift);
   // the rooms she has, once there's more than one (render keeps it up to date)
   const roomNav = h('nav', { class: 'room-nav', 'aria-label': 'Rooms', hidden: true });
-  const stage = h('main', { class: 'stage' }, canvas, chips, gift, roomNav);
+  const stage = h('main', { class: 'stage' }, canvas, chips, cards, roomNav);
 
-  const actBtn = (id: 'feed' | 'pet' | 'clean' | 'nap', label: string, icon: Node) =>
+  const actBtn = (id: 'feed' | 'pet' | 'play' | 'clean' | 'nap', label: string, icon: Node) =>
     h('button', { class: 'act', type: 'button', 'data-act': id }, icon, h('span', { text: label }));
   const feedBadge = h('span', { class: 'badge', hidden: true });
   const acts = {
     feed: actBtn('feed', 'Feed', img(itemSprite('carrot'), 3)),
     pet: actBtn('pet', 'Pet', img(itemSprite('heart'), 4)),
+    play: actBtn('play', 'Play', img(itemSprite('ball'), 4)),
     clean: actBtn('clean', 'Clean', img(itemSprite('droplet'), 4)),
-    nap: actBtn('nap', 'Bed', img(itemSprite('moon'), 4)),
+    nap: actBtn('nap', 'Nap', img(itemSprite('moon'), 4)),
   };
   acts.feed.append(feedBadge);
-  // the second row: smaller tools, icon over label, five across
-  const tool = (label: string, art: ItemArt, extra = '') => {
-    const s = itemSprite(art);
-    return h('button', { class: `tool ${extra}`.trim(), type: 'button' }, img(s, fitScale(s, 28)), h('span', { text: label }));
-  };
-  const decorate = tool('Shop', 'plant', 'green');
-  decorate.setAttribute('aria-label', 'Shop and decorate');
-  const garden = tool('Garden', 'leafy');
-  const playBtn = tool('Play', 'basket');
-  const bake = tool('Bake', 'treat');
-  const more = tool('More', 'book');
   const sound = h('button', { class: 'icon-btn', type: 'button', 'aria-pressed': 'true', 'aria-label': 'Sound' });
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite' });
   const goalBar = h('button', { class: 'goal-bar', type: 'button', hidden: true });
-  goalBar.addEventListener('click', () => enterDecorate());
-  const panelKids = [moodline, h('div', { class: 'actions' }, acts.feed, acts.pet, acts.clean, acts.nap),
-    h('div', { class: 'tools' }, decorate, garden, playBtn, bake, more)];
+  goalBar.addEventListener('click', () => openShop({ select: pet.goal }));
+  const panelKids = [moodline, h('div', { class: 'actions' }, acts.feed, acts.pet, acts.play, acts.clean, acts.nap)];
   const panel = h('section', { class: 'panel' }, ...panelKids);
+  // her name is a way to her page, as well as the tab
+  const who = h('button', { class: 'who who-btn', type: 'button', 'aria-description': 'Opens her page' }, name, sub);
+  who.addEventListener('click', () => goTab('her'));
 
-  setScreen('burrow');
-  app.replaceChildren(
+  const { bar: tabbar, tabs } = buildTabBar();
+  const nodes = [
     h('header', { class: 'hud' },
       h('div', { class: 'hud-top' },
-        h('div', { class: 'who' }, name, sub),
+        who,
         h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover), sound),
       h('div', { class: 'needs' }, ...needEls),
       goalBar),
     stage,
-    panel
-  );
-  ui = { name, sub, clover, needs, stage, canvas, chips, gift, panel, moodline, acts, feedBadge, bake, garden, play: playBtn, sound, goal: goalBar, panelKids, roomNav };
+    panel,
+  ];
+  setScreen('burrow');
+  app.replaceChildren(...nodes, tabbar);
+  ui = { nodes, name, sub, clover, needs, stage, canvas, chips, cards, gift, panel, moodline, acts, feedBadge, sound, goal: goalBar, panelKids, roomNav, tabbar, tabs, page: buildPage() };
 
   scene = new Scene(canvas);
   new ResizeObserver(layoutStage).observe(stage);
@@ -648,22 +686,13 @@ function buildBurrowScreen(): void {
 
   for (const k of ['pet', 'clean'] as const) acts[k].addEventListener('click', () => doAction(k));
   acts.feed.setAttribute('aria-expanded', 'false');
-  acts.feed.addEventListener('click', () => toggleFoodTray());
+  acts.feed.addEventListener('click', () => toggleTray('feed'));
+  acts.play.setAttribute('aria-expanded', 'false');
+  acts.play.addEventListener('click', () => toggleTray('play'));
   // Bed doubles as "Wake" while she's asleep, at any hour.
   acts.nap.addEventListener('click', () => doAction(isAsleep(pet, now()) ? 'wake' : 'nap'));
-  bake.addEventListener('click', () => doAction('bake'));
   gift.addEventListener('click', () => doAction('gift'));
-  decorate.addEventListener('click', () => enterDecorate());
-  garden.addEventListener('click', () => openGarden());
-  playBtn.addEventListener('click', () => openToys());
-  more.addEventListener('click', () => openMore());
-  sound.addEventListener('click', () => {
-    settings.sound = settings.sound === false;
-    setMuted(!settings.sound);
-    saveSettings();
-    if (settings.sound) play('pet');
-    render();
-  });
+  sound.addEventListener('click', () => toggleSound());
   canvas.addEventListener('click', (e) => {
     if (decorating || !scene || away()) return;
     const { x, y } = toScene(e);
@@ -700,9 +729,10 @@ function toScene(e: { clientX: number; clientY: number }): { x: number; y: numbe
 }
 
 /**
- * Whole-number scale, sized by width. On a short screen the ceiling is cropped
- * rather than shrinking everything: the scene is anchored to the floor, where
- * she and the decor are, and at most ~40% of its height goes above the fold.
+ * Sized so the room's walls meet the stage's edges, the soil beside them
+ * cropped off, and its floor sits on the stage's bottom edge. On a short
+ * screen the ceiling is cropped rather than shrinking everything: at most
+ * ~40% of the room's height goes above the fold.
  */
 function layoutStage(): void {
   if (scene) scale = fitScene(ui.stage, ui.canvas, scene);
@@ -711,17 +741,154 @@ function layoutStage(): void {
 /** Size a scene's canvas to fill a stage element (the burrow, or a friend's). Returns the scale. */
 function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene): number {
   const w = stageEl.clientWidth, hgt = stageEl.clientHeight;
-  const scale = Math.max(2, Math.min(Math.round(w / SCENE_W), Math.floor(hgt / (SCENE_H * 0.6)) || 2));
+  // Not a whole number: a whole-number scale either cut the walls off or left
+  // a wide band of dirt either side. At these sizes the odd pixel that's one
+  // screen pixel wider than its neighbours doesn't show.
+  const scale = Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2);
   // The surface covers the whole stage in scene pixels; the room sits in it.
-  const sw = Math.ceil(w / scale), sh = Math.ceil(hgt / scale);
+  const sw = Math.ceil(w / scale - 1e-6), sh = Math.ceil(hgt / scale - 1e-6);
   const offX = Math.round((sw - SCENE_W) / 2);
-  // Taller than the room: most of the spare soil goes above it, like a burrow
-  // under the ground. Shorter: crop the ceiling, keep the floor.
-  const offY = sh >= SCENE_H ? Math.round((sh - SCENE_H) * 0.6) : sh - SCENE_H;
+  // The floor always sits on the stage's bottom edge: taller than the room,
+  // the spare soil is all above it, like a burrow under the ground; shorter,
+  // the ceiling is cropped.
+  const offY = sh - SCENE_H;
   sc.resize(sw, sh, offX, offY);
   el.style.width = `${sw * scale}px`; el.style.height = `${sh * scale}px`;
   el.style.left = `${Math.floor((w - sw * scale) / 2)}px`; el.style.top = '0px';
   return scale;
+}
+
+// ------------------------------------------------------------------ tabs
+
+const TAB_ART: Record<'burrow' | 'garden' | 'shop', ItemArt> = { burrow: 'fireplace', garden: 'tulips', shop: 'plant' };
+
+/** A rabbit's head for a tab icon, cropped from her sprite. */
+function faceIcon(coat: Coat, dress?: Dress): HTMLElement {
+  return h('span', { class: 'tab-face' }, img(rabbitSprite(coat, 'content', 0, dress), 1));
+}
+
+function buildTabBar(): { bar: HTMLElement; tabs: Record<Tab, HTMLButtonElement> } {
+  const label: Record<Tab, string> = { burrow: 'Home', garden: 'Garden', shop: 'Shop', friends: 'Friends', her: 'Her' };
+  // two friends' rabbits, in coats that aren't hers
+  const others = COATS.filter((c) => c !== pet.coat);
+  const tabs = {} as Record<Tab, HTMLButtonElement>;
+  for (const t of TABS) {
+    const icon = t === 'her' ? h('span', { class: 'tab-ico' }) // her face goes in with render, as she's dressed
+      : t === 'friends' ? h('span', { class: 'tab-ico pair' }, faceIcon(others[2]!), faceIcon(others[4]!))
+        : h('span', { class: 'tab-ico' }, img(itemSprite(TAB_ART[t]), fitScale(itemSprite(TAB_ART[t]), 28)));
+    const b = h('button', { class: 'tab', type: 'button' }, icon, h('span', { class: 'tab-label', text: label[t] }));
+    b.addEventListener('click', () => { if (t === 'friends' && tab !== 'friends') friendsView = 'today'; goTab(t); });
+    tabs[t] = b;
+  }
+  tabs.shop.setAttribute('aria-label', 'Shop and decorate');
+  return { bar: h('nav', { class: 'tabbar', 'aria-label': 'Places' }, ...TABS.map((t) => tabs[t])), tabs };
+}
+
+/** The Friends and Her pages' shell: a header like the HUD's over a scrolling body. */
+function buildPage(): Ui['page'] {
+  const title = h('div', { class: 'name' });
+  const sub = h('div', { class: 'sub' });
+  const clover = h('span');
+  // a page's own button beside the clover (Friends: Invite)
+  const action = h('span', { class: 'page-action' });
+  const body = h('main', { class: 'page' });
+  const header = h('header', { class: 'hud page-hud' },
+    h('div', { class: 'hud-top' },
+      h('div', { class: 'who' }, title, sub),
+      action,
+      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
+  return { nodes: [header, body], title, sub, action, clover, body };
+}
+
+/**
+ * Go to a place in the tab bar. The Shop tab has two screens: the shop
+ * itself, and (`arrange`) the burrow while you place and move decor, with a
+ * piece picked if it's a uid. Leaving arranging puts it away, and anything
+ * that waited for it (a gift, a question) comes then; leaving the garden stops
+ * arranging the meadow.
+ */
+function goTab(t: Tab, opts: { arrange?: string | true } = {}): void {
+  if (!ui || !pet) return;
+  if (t === 'garden' && away()) { play('nope'); toast(`${pet.name} is on holiday. The garden will keep.`); return; }
+  const arrange = t === 'shop' && !!opts.arrange;
+  const pick = typeof opts.arrange === 'string' ? opts.arrange : null;
+  if (t === tab && arrange === decorating) {
+    // the page you're on: back to its top; arranging: pick the piece
+    if (t === 'friends' || t === 'her') ui.page.body.scrollTo({ top: 0, behavior: 'smooth' });
+    if (t === 'shop' && !arrange) shopUi?.grid.scrollTo({ top: 0, behavior: 'smooth' });
+    if (arrange && pick) { selectedUid = pick; renderDecoratePanel(); }
+    return;
+  }
+  const from = tab;
+  const wasArranging = decorating;
+  const tabFocused = ui.tabbar.contains(document.activeElement);
+  closeTray();
+  if (decorating && !arrange) stopDecorating();
+  if (from === 'garden' && arranging) stopArranging();
+  if (arrange && !wasArranging) arrangeReturn = from;
+  tab = t;
+  room = t === 'garden' ? 'garden' : 'burrow';
+  let nodes: Node[];
+  if (t === 'garden') nodes = (gardenUi ??= buildGardenScreen()).nodes;
+  else if (t === 'friends' || t === 'her') nodes = ui.page.nodes;
+  else if (t === 'shop' && !arrange) nodes = (shopUi ??= buildShopScreen()).nodes;
+  else nodes = ui.nodes;
+  if (app.firstChild !== nodes[0]) app.replaceChildren(...nodes, ui.tabbar);
+  if (tabFocused) ui.tabs[t].focus();
+  if (t === 'burrow' || arrange) layoutStage();
+  if (arrange && !wasArranging) startDecorating();
+  if (arrange && pick) { selectedUid = pick; renderDecoratePanel(); }
+  if (t === 'shop' && !arrange) {
+    shopSig = '';
+    renderShop();
+  }
+  if (t === 'garden') {
+    gardenScene?.jumpTo(area);
+    gardenSig = '';
+    layoutGarden();
+    renderGarden();
+  }
+  if (t === 'friends' || t === 'her') {
+    herSig = '';
+    friendsSig = '';
+    ui.page.body.scrollTop = 0;
+    if (t === 'friends') loadFriends();
+  }
+  render();
+  if (wasArranging && !decorating && !sheetStack.length) sheetQueue.shift()?.open();
+}
+
+/** Which tab is on, the badges, and her face and name on her tab. */
+function renderTabBar(n: number): void {
+  for (const t of TABS) {
+    const on = t === tab;
+    if (ui.tabs[t].hasAttribute('aria-current') !== on) {
+      if (on) ui.tabs[t].setAttribute('aria-current', 'page'); else ui.tabs[t].removeAttribute('aria-current');
+    }
+  }
+  const ripe = plots(pet).filter((p) => p && p.readyAtMs <= n).length;
+  setToolBadge(ui.tabs.garden, ripe ? String(ripe) : '');
+  setOff(ui.tabs.garden, away() ? `${pet.name} is on holiday. The garden will keep.` : null);
+  const guests = guestsHere(visitTurns, n).length;
+  const signed = unreadGuestbook();
+  setToolBadge(ui.tabs.friends, guests + signed ? String(guests + signed) : '');
+  ui.tabs.friends.setAttribute('aria-label', ['Friends', guests ? `${guests} visiting now` : '', signed ? `${signed} new in the guest book` : ''].filter(Boolean).join(', '));
+  const her = ui.tabs.her;
+  const sig = `${pet.coat}|${dressKey(dressOf(pet))}|${pet.name}`;
+  if (her.dataset.sig !== sig) {
+    her.dataset.sig = sig;
+    her.querySelector('.tab-ico')?.replaceChildren(faceIcon(pet.coat, dressOf(pet)));
+    her.querySelector('.tab-label')!.textContent = pet.name;
+    her.setAttribute('aria-label', `${pet.name}: her wardrobe, collection, journal and settings`);
+  }
+}
+
+function toggleSound(): void {
+  settings.sound = settings.sound === false;
+  setMuted(!settings.sound);
+  saveSettings();
+  if (settings.sound) play('pet');
+  render();
 }
 
 // ------------------------------------------------------------------ time passing
@@ -809,6 +976,7 @@ function tick(): void {
     }
     recordFinds(events);
   }
+  noticeGuests();
   render();
   renderGarden();
 }
@@ -818,29 +986,73 @@ let lastFrame = 0;
 let visitingFriend = false;
 function frame(t: number): void {
   requestAnimationFrame(frame);
-  if (t - lastFrame < 66 || visitingFriend) return; // ~15 fps is plenty for pixel art
+  // ~15 fps is plenty for pixel art at rest; a garden slide or drag gets every frame
+  const smooth = room === 'garden' && !!gardenScene?.moving;
+  if ((t - lastFrame < 66 && !smooth) || visitingFriend) return;
   if (room === 'garden') { lastFrame = t; drawGardenFrame(t); return; }
-  if (!scene) return;
+  // the shop shows her room only in its display, when that's a live preview
+  if (tab === 'shop' && !decorating) {
+    if (shopView?.stage.isConnected && shopPreview) { lastFrame = t; drawShopScene(t); }
+    return;
+  }
+  // on the Friends page only its porch shows the burrow (the main room); on Her page, nothing
+  if (tab === 'friends') {
+    if (porch?.stage.isConnected) { lastFrame = t; porch.scene.draw(burrowModel(now(), 'main'), t); }
+    return;
+  }
+  if (!scene || tab === 'her') return;
   lastFrame = t;
-  const n = now();
+  scene.draw(burrowModel(now(), burrowRoom), t);
+}
+
+let clockMinute = -1;
+let clockFace = { hour: 0, minute: 0 };
+/** The player's time for the burrow's clocks, worked out once a minute rather than every frame. */
+function clockTime(n: number): { hour: number; minute: number } {
+  const m = Math.floor(n / 60_000);
+  if (m !== clockMinute) {
+    clockMinute = m;
+    const p = localParts(n, tz);
+    clockFace = { hour: p.hour, minute: p.minute };
+  }
+  return clockFace;
+}
+
+/** What the burrow scene draws: her, a room of her burrow, and any guests. */
+function burrowModel(n: number, r: RoomId): Parameters<Scene['draw']>[0] {
   const w = today(n);
-  scene.draw({
+  const main = r === 'main';
+  return {
     coat: pet.coat,
     night: isNight(n, tz),
     mood: mood(pet, n, tz),
-    burrow: here(),
-    decorating,
-    selected: decorating ? selectedUid : null,
+    burrow: main && burrowRoom !== 'main' ? inRoom(burrow, 'main') : here(),
+    decorating: decorating && r === burrowRoom,
+    selected: decorating && r === burrowRoom ? selectedUid : null,
     dress: dressOf(pet),
     season: w.season,
     weather: w.weather,
     absent: away() || isOut(pet, n),
-    room: { ...roomOf(burrow), ...(burrowRoom !== 'main' ? { variant: burrowRoom } : {}) },
+    room: { ...roomOf(burrow), ...(!main ? { variant: r } : {}) },
     moon: moonPhase(n),
     guests: guestModels(),
     seed: `${pet.petId}:${dayKey(n, tz, DAY_ROLLOVER_HOUR)}`,
     critter: critterHere(),
-  }, t);
+    time: clockTime(n),
+  };
+}
+
+/** The Friends page's view of her burrow: a second scene, made once, drawn while the page shows. */
+let porch: { stage: HTMLElement; scene: Scene } | null = null;
+function porchStage(): HTMLElement {
+  if (porch) return porch.stage;
+  const canvas = h('canvas', { role: 'img', 'aria-label': `${pet.name}'s burrow` });
+  const stage = h('button', { class: 'stage porch', type: 'button', 'aria-label': `Go to ${pet.name}'s burrow` }, canvas);
+  const sc = new Scene(canvas);
+  stage.addEventListener('click', () => { goTab('burrow'); if (burrowRoom !== 'main') goRoom('main'); });
+  new ResizeObserver(() => { if (stage.isConnected) fitScene(stage, canvas, sc); }).observe(stage);
+  porch = { stage, scene: sc };
+  return stage;
 }
 
 /** The wild visitor in the burrow now, if any (none while she's on holiday). */
@@ -867,7 +1079,7 @@ function roomOf(b: BurrowState): RoomStyle {
 
 /** The rooms you can switch between, over the burrow, once there's more than one. */
 function renderRoomNav(): void {
-  const rooms = roomsOf(burrow);
+  const rooms = openRoomsOf(burrow);
   const sig = `${rooms.join()}|${burrowRoom}|${decorating}`;
   if (ui.roomNav.dataset.sig === sig) return;
   ui.roomNav.dataset.sig = sig;
@@ -925,7 +1137,7 @@ function openDig(): void {
 let burrowRoom: RoomId = 'main';
 /** The burrow as seen from that room: its pieces, and what's put away. */
 function here(): BurrowState {
-  if (!roomsOf(burrow).includes(burrowRoom)) burrowRoom = 'main';
+  if (!openRoomsOf(burrow).includes(burrowRoom)) burrowRoom = 'main';
   return inRoom(burrow, burrowRoom);
 }
 
@@ -1027,28 +1239,38 @@ function render(): void {
     ui.needs[k].wrap.setAttribute('aria-valuenow', String(v));
     ui.needs[k].wrap.classList.toggle('low', v < 30);
   }
-
+  // While she sleeps, Energy says when it'll be full: that's when she wakes.
   const nap = timer(pet, 'nap');
+  const restMs = asleep && nap ? nap.endsAtMs - n : 0;
+  // whole hours to fit the bar's label; the Resting pill has the minutes
+  const energyText = !restMs ? 'Energy' : restMs >= HOUR_MS ? `Full in ${Math.round(restMs / HOUR_MS)}h` : `Full in ${fmtDuration(restMs)}`;
+  if (ui.needs.energy.label.textContent !== energyText) {
+    ui.needs.energy.label.textContent = energyText;
+    ui.needs.energy.wrap.setAttribute('aria-label', restMs ? `Energy, full when she wakes in ${fmtLong(restMs)}` : 'Energy');
+  }
+  ui.needs.energy.wrap.classList.toggle('resting', !!restMs);
+
   let line = MOOD_LINE[m](pet.name);
   const doing = m === 'content' ? scene?.activity() : null;
   if (doing) line = activityLine(doing, pet.name);
   const visitor = critterById(critterHere() ?? '');
   if (visitor && m !== 'asleep') line = `${article(visitor.name).replace(/^a/, 'A')} has dropped by. ${line}`;
   else if (visitor) line = `${line} ${article(visitor.name).replace(/^a/, 'A')} is tiptoeing about.`;
-  // No countdown here: the line is read out when it changes, and the "Asleep"
-  // chip already counts down.
+  // Hours, not minutes: the line is read out when it changes, and the
+  // Resting chip and the Energy bar already count down.
+  if (m === 'asleep' && restMs) line = `${pet.name} is asleep. She'll wake up rested ${aboutHours(restMs)}.${visitor ? ` ${article(visitor.name).replace(/^a/, 'A')} is tiptoeing about.` : ''}`;
   if (m === 'asleep' && nap && !hasBed(burrow)) line = `${pet.name} is asleep on the floor. A bed would be cozier.`;
   const holiday = away();
   if (holiday) line = `${pet.name} is on holiday until ${fmtDate(pet.vacationUntilMs!)}. Her needs are paused.`;
   // out foraging: hours, not minutes, so the line isn't read out every minute (the chip counts down)
   const outFor = isOut(pet, n) ? tripOf(pet)!.endsAtMs - n : 0;
-  const homeIn = outFor > HOUR_MS ? `in about ${Math.round(outFor / HOUR_MS)} ${Math.round(outFor / HOUR_MS) === 1 ? 'hour' : 'hours'}` : 'within the hour';
+  const homeIn = aboutHours(outFor);
   if (outFor) line = `${pet.name} is out foraging, home ${homeIn}.`;
   if (!decorating && ui.moodline.textContent !== line) ui.moodline.textContent = line;
   if (!decorating) {
     // what the picture shows, for anyone who can't see it
     const decor = here().items.filter((i) => { const d = byId(i.id); return i.placed && !!d && !isOutdoor(d); }).map((i) => byId(i.id)?.name.toLowerCase()).filter(Boolean);
-    const guests = visitGuests.map((g) => g.data.name);
+    const guests = guestModelsHere().map((g) => g.data.name);
     const label = [
       `${pet.name}'s burrow, ${isNight(n, tz) ? 'at night' : 'by day'}, ${WEATHER_NAME[w.weather].toLowerCase()} outside.`,
       line,
@@ -1060,26 +1282,25 @@ function render(): void {
 
   const onHoliday = holiday ? `${pet.name} is on holiday. Her needs are paused.` : null;
   const sleeping = asleep ? "Shh, she's asleep. Tap Wake if you need her." : null;
-  const foraging = outFor ? `She's out foraging, home ${homeIn}. Call her home from Play.` : null;
-  setOff(ui.acts.feed, onHoliday ?? foraging ?? sleeping);
+  const foraging = outFor ? `She's out foraging, home ${homeIn}. Call her home from Forage, in the garden.` : null;
+  // Feed still opens while she sleeps or is out, for Bake in its tray; the food in it says why not
+  setOff(ui.acts.feed, onHoliday);
+  ui.acts.feed.classList.toggle('resting', !onHoliday && !!(foraging ?? sleeping));
   setOff(ui.acts.clean, onHoliday ?? foraging ?? sleeping);
   setOff(ui.acts.pet, onHoliday ?? foraging);
+  setOff(ui.acts.play, onHoliday ?? foraging ?? sleeping);
   setOff(ui.acts.nap, onHoliday ?? foraging);
   const napLabel = ui.acts.nap.querySelector('span');
-  if (napLabel) napLabel.textContent = asleep ? 'Wake' : 'Bed';
+  if (napLabel) napLabel.textContent = asleep ? 'Wake' : 'Nap';
   const petLabel = ui.acts.pet.querySelector('span');
   if (petLabel) petLabel.textContent = asleep ? 'Pet gently' : 'Pet';
   ui.feedBadge.hidden = pet.treats === 0;
   ui.feedBadge.textContent = String(pet.treats);
   ui.feedBadge.setAttribute('aria-label', `${pet.treats} treats`);
   const bake = timer(pet, 'bake');
-  setOff(ui.bake, onHoliday ?? (bake ? `A treat's in the oven, ready in ${fmtDuration(bake.endsAtMs - n)}.` : null));
-  const bakeLabel = ui.bake.querySelector('span');
-  if (bakeLabel) bakeLabel.textContent = bake ? 'Baking' : 'Bake';
-  setOff(ui.play, onHoliday ?? sleeping);
-  const ripe = plots(pet).filter((p) => p && p.readyAtMs <= n).length;
-  setToolBadge(ui.garden, ripe ? String(ripe) : '');
-  setOff(ui.garden, onHoliday);
+  // the Bake button in the open Feed tray counts down
+  const bakeBtn = tray?.kind === 'feed' ? tray.el.querySelector<HTMLButtonElement>('.bake-btn') : null;
+  if (bakeBtn) renderBakeButton(bakeBtn, n);
   ui.gift.hidden = decorating || holiday || !giftReady(pet, n, tz);
   const soundOn = settings.sound !== false;
   if (ui.sound.dataset.on !== String(soundOn)) {
@@ -1088,6 +1309,11 @@ function render(): void {
     ui.sound.setAttribute('aria-pressed', String(soundOn));
     ui.sound.title = soundOn ? 'Sound on' : 'Sound off';
   }
+  renderTabBar(n);
+  ui.page.clover.textContent = String(pet.clover);
+  if (tab === 'friends') renderFriendsPage();
+  if (tab === 'her') renderHerPage();
+  if (tab === 'shop' && !decorating) renderShop();
 
   // rooms can be switched while decorating too
   renderRoomNav();
@@ -1096,8 +1322,9 @@ function render(): void {
   const napping = !!nap && nap.endsAtMs > n;
   const out = isOut(pet, n) ? tripOf(pet)! : null;
   const times = [napping ? nap!.endsAtMs : null, out ? out.endsAtMs : null, bake ? bake.endsAtMs : null].filter((t): t is number => t !== null);
-  // Timers tick every second; event chips are buttons, rebuilt only when the
-  // events change so a tap isn't lost to a rebuild.
+  // Left, the pills: what's going on, each one tappable to say more. The
+  // timers' countdowns tick every second; the pills themselves are rebuilt
+  // only when which ones show changes, so a tap isn't lost to a rebuild.
   let timersBox = ui.chips.querySelector<HTMLElement>('.chips-timers');
   let eventsBox = ui.chips.querySelector<HTMLElement>('.chips-events');
   if (!timersBox || !eventsBox) {
@@ -1109,55 +1336,124 @@ function render(): void {
   if (timersBox.dataset.sig !== timerSig) {
     timersBox.dataset.sig = timerSig;
     const chips: Node[] = [];
-    if (napping) chips.push(h('div', { class: 'tchip' }, img(itemSprite('moon'), 2), 'Asleep', h('span', { class: 'time' })));
-    if (out) chips.push(h('div', { class: 'tchip' }, img(itemSprite('basket'), 2), 'Foraging', h('span', { class: 'time' })));
-    if (bake) chips.push(h('div', { class: 'tchip' }, img(itemSprite('treat'), 2), 'Baking', h('span', { class: 'time' })));
-    else if (pet.treats > 0) chips.push(h('div', { class: 'tchip ready' }, img(itemSprite('treat'), 2), `${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready`));
+    if (napping) {
+      const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': `Resting until her energy is full. About sleep` },
+        img(itemSprite('moon'), 2), 'Resting', h('span', { class: 'time' }));
+      chip.addEventListener('click', () => openSleep());
+      chips.push(chip);
+    }
+    if (out) {
+      const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': 'Out foraging. About her trip' },
+        img(itemSprite('basket'), 2), 'Foraging', h('span', { class: 'time' }));
+      chip.addEventListener('click', () => openForage());
+      chips.push(chip);
+    }
+    if (bake) {
+      const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': 'A treat is baking. When it will be ready' },
+        img(itemSprite('treat'), 2), 'Baking', h('span', { class: 'time' }));
+      chip.addEventListener('click', () => {
+        const b = timer(pet, 'bake');
+        if (b) toast(`Your treat will be ready in ${fmtLong(b.endsAtMs - now())}. It goes in the pantry, under Feed.`);
+      });
+      chips.push(chip);
+    }
+    if (!bake && pet.treats > 0) {
+      const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready. Feed her` },
+        img(itemSprite('treat'), 2), `${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready`);
+      // through the Feed button, so it explains itself when she can't eat
+      chip.addEventListener('click', () => ui.acts.feed.click());
+      chips.push(chip);
+    }
     timersBox.replaceChildren(...chips);
   }
   timersBox.querySelectorAll('.time').forEach((el, i) => {
     const text = fmtCountdown(times[i]! - n);
     if (el.textContent !== text) el.textContent = text;
   });
-  const events = holiday ? [] : activeEvents(n, tz);
   const inYard = Math.floor(stored(pet, n));
-  const starter = starterDone(pet) ? null : starterView(pet).find((d) => !d.paid);
-  // between steps: a quiet chip saying more is coming, so the sheet stays reachable
-  const starterNext = !starter && starterWaiting(pet);
-  const sig = [...events.map((e) => e.id), `y${inYard}`, `v${visitGuests.length}`, starter ? `s${starter.step.step}:${starter.done.filter(Boolean).length}` : '', starterNext ? 'sw' : ''].join('|');
-  if (eventsBox.dataset.sig !== sig) {
-    eventsBox.dataset.sig = sig;
-    const chips = events.map((e) => {
-      const chip = h('button', { class: 'tchip event', type: 'button', 'aria-label': `${e.name}. ${e.blurb}` }, img(itemSprite(EVENT_ART[e.id] ?? 'sparkle'), 1), e.name);
-      chip.addEventListener('click', () => openEvent(e.id));
-      return chip;
-    });
-    if (visitGuests.length) {
-      const n = visitGuests.length;
-      const chip = h('button', { class: 'tchip event', type: 'button', 'aria-label': `${n} ${n === 1 ? 'friend is' : 'friends are'} visiting` },
-        img(itemSprite('heart'), 2), n === 1 ? `${visitGuests[0]!.data.name} is visiting` : `${n} visiting`);
-      chip.addEventListener('click', () => openVisitors());
+  const guests = guestsHere(visitTurns, n);
+  const pillSig = `y${inYard}|v${guests.map((g) => g.visit.from.uuid).join(',')}`;
+  if (eventsBox.dataset.sig !== pillSig) {
+    eventsBox.dataset.sig = pillSig;
+    const chips: Node[] = [];
+    if (guests.length) {
+      const k = guests.length;
+      // someone just hopped in: a little wave to say so
+      const fresh = guests.some((g) => n - g.fromMs < 2 * 60e3);
+      const chip = h('button', { class: `tchip event${fresh ? ' fresh' : ''}`, type: 'button', 'aria-label': `${k} ${k === 1 ? 'friend is' : 'friends are'} visiting` },
+        img(itemSprite('heart'), 2), k === 1 ? `${guests[0]!.data.name} is visiting` : `${k} visiting`);
+      chip.addEventListener('click', () => goTab('friends'));
       chips.push(chip);
     }
     if (inYard >= 1) {
-      const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `Collect ${inYard} clover from the yard` }, img(itemSprite('clover'), 2), `+${inYard} from the yard`);
-      chip.addEventListener('click', () => collectYard());
-      chips.push(chip);
-    }
-    if (starter) {
-      const done = starter.done.filter(Boolean).length;
-      const chip = h('button', { class: 'tchip event', type: 'button', 'aria-label': `Getting started, step ${starter.step.step} of ${STARTER_STEPS.length}: ${done} of ${starter.step.goals.length} done` },
-        img(itemSprite('sparkle'), 1), `Getting started · ${done}/${starter.step.goals.length}`);
-      chip.addEventListener('click', () => openStarter());
-      chips.push(chip);
-    } else if (starterNext) {
-      const chip = h('button', { class: 'tchip event', type: 'button', 'aria-label': 'Getting started: the next step opens next time you drop by' },
-        img(itemSprite('sparkle'), 1), 'Getting started · more next time');
-      chip.addEventListener('click', () => openStarter());
+      // collected in the yard itself; this just says it's there and walks you over
+      const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `${inYard} clover waiting in the yard. Go to the yard` }, img(itemSprite('clover'), 2), `${inYard} in the yard`);
+      chip.addEventListener('click', () => { goTab('garden'); goArea('yard'); });
       chips.push(chip);
     }
     eventsBox.replaceChildren(...chips);
   }
+
+  // Right, the cards: things to do, under the daily gift.
+  let cardsBox = ui.cards.querySelector<HTMLElement>('.cards-events');
+  if (!cardsBox) {
+    cardsBox = h('div', { class: 'cards-events' });
+    ui.cards.append(cardsBox);
+  }
+  const events = holiday ? [] : activeEvents(n, tz);
+  const starter = starterDone(pet) ? null : starterView(pet).find((d) => d.status === 'open');
+  const cardSig = [...events.map((e) => `${e.id}:${daysLeft(e, n, tz)}:${e.raffle && !prizeWon(pet, e) ? 'r' : ''}`), starter ? `s${starter.step.step}:${starter.done.filter(Boolean).length}` : ''].join('|');
+  if (cardsBox.dataset.sig !== cardSig) {
+    cardsBox.dataset.sig = cardSig;
+    const cards = events.map((e) => {
+      const left = daysLeft(e, n, tz);
+      const when = left === 1 ? 'Last day' : `${left} days left`;
+      const sub = e.raffle && !prizeWon(pet, e) ? `Raffle open · ${when}` : when;
+      const card = h('button', { class: `event-card ev-${e.id}`, type: 'button', 'aria-label': `${e.name}, ${sub.toLowerCase()}. ${e.blurb}` },
+        img(itemSprite(EVENT_ART[e.id] ?? 'sparkle'), 2),
+        h('span', { class: 'event-card-text' }, h('span', { class: 'event-card-name', text: e.name }), h('span', { class: 'event-card-sub', text: sub })));
+      card.addEventListener('click', () => openEvent(e.id));
+      return card;
+    });
+    if (starter) {
+      const done = starter.done.filter(Boolean).length;
+      const all = starter.step.goals.length;
+      const ready = done === all;
+      const { step, clover } = starter.step;
+      // the prize rides on the card, and it turns green and bobs when it's ready to claim
+      const card = h('button', {
+        class: `event-card starter-card-btn${ready ? ' claim' : ''}`, type: 'button',
+        'aria-label': ready
+          ? `Getting started: step ${step} done. Claim ${clover} clover`
+          : `Getting started, step ${step} of ${STARTER_STEPS.length}: ${done} of ${all} done, for ${clover} clover`,
+      },
+      img(itemSprite(ready ? 'clover' : 'star'), 2),
+      h('span', { class: 'event-card-text' },
+        h('span', { class: 'event-card-name', text: ready ? `Step ${step} done!` : 'Getting started' }),
+        ready
+          ? h('span', { class: 'event-card-sub', text: `Claim +${clover} clover` })
+          : h('span', { class: 'event-card-sub' }, `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))));
+      card.addEventListener('click', () => openStarter());
+      cards.push(card);
+    }
+    cardsBox.replaceChildren(...cards);
+  }
+}
+
+/** What the Resting pill says: why she's asleep this long, and what waking her does. */
+function openSleep(): void {
+  const n = now();
+  const nap = timer(pet, 'nap');
+  if (!nap || nap.endsAtMs <= n) return;
+  openSheet((close) => [
+    h('div', { class: 'eyebrow', text: 'Resting' }),
+    h('h2', { text: `${pet.name} is asleep` }),
+    h('p', { text: `She sleeps until her energy is full, so the more tired she is, the longer she sleeps. She'll wake up rested in ${fmtLong(nap.endsAtMs - n)}.` }),
+    h('p', { class: 'note', text: `You can wake her any time. She keeps the energy she's got back so far, but she'll be drowsy and nod off again sooner.${hasBed(burrow) ? '' : ' A bed from the shop makes her sleep cozier.'}` }),
+    h('div', { class: 'actions-col' },
+      button('Let her sleep', 'btn primary', close),
+      button('Wake her', 'btn', () => { close(); doAction('wake'); })),
+  ]);
 }
 
 function setToolBadge(b: HTMLElement, text: string): void {
@@ -1227,9 +1523,10 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
   switch (a) {
     case 'feed': {
       const food = opts.food ?? 'carrot';
-      scene?.react('eating', t, FOOD_INFO[food].art);
+      scene?.react('eating', t, FOOD_INFO[food].art, r.reaction);
       if (r.reaction === 'loves') {
-        window.setTimeout(() => { play('pet'); scene?.burst('heart', 3, performance.now()); }, 500);
+        // hearts once she's swallowed
+        window.setTimeout(() => { play('pet'); scene?.burst('heart', 3, performance.now()); }, EAT_SWALLOW_MS);
         toast(`${pet.name} loves it!${reward}`);
         note(`${pet.name} loved her ${FOOD_INFO[food].name.toLowerCase()}.`, FOOD_INFO[food].art, `loves:${food}`);
       } else if (r.reaction === 'okay') {
@@ -1346,34 +1643,54 @@ const FOOD_INFO: Record<FoodId, { name: string; short: string; art: ItemArt; blu
   golden: { name: 'Golden carrot', short: 'Golden', art: 'golden', blurb: '+40 food · +15 joy · always loved' },
 };
 
-let foodTray: HTMLElement | null = null;
+/** The tray open over the action row, if any, and the button it points to. */
+let tray: { el: HTMLElement; kind: 'feed' | 'play' } | null = null;
 
-/** Close the food tray if it's open. */
-function closeFoodTray(): void {
-  if (!foodTray) return;
-  foodTray.remove();
-  foodTray = null;
-  ui.acts.feed.setAttribute('aria-expanded', 'false');
-  document.removeEventListener('pointerdown', onOutsideFoodTray, true);
-  document.removeEventListener('keydown', onFoodTrayKey);
+/** Close the tray if it's open. */
+function closeTray(): void {
+  if (!tray) return;
+  tray.el.remove();
+  ui.acts[tray.kind].setAttribute('aria-expanded', 'false');
+  tray = null;
+  document.removeEventListener('pointerdown', onOutsideTray, true);
+  document.removeEventListener('keydown', onTrayKey);
 }
-function onOutsideFoodTray(e: Event): void {
+function onOutsideTray(e: Event): void {
   const t = e.target as Node;
-  if (foodTray?.contains(t) || ui.acts.feed.contains(t)) return;
-  closeFoodTray();
+  if (!tray || tray.el.contains(t) || ui.acts[tray.kind].contains(t)) return;
+  closeTray();
 }
-function onFoodTrayKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') { closeFoodTray(); ui.acts.feed.focus(); }
+function onTrayKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && tray) { const b = ui.acts[tray.kind]; closeTray(); b.focus(); }
 }
 
 /**
- * The food choices, as a row of buttons like the action row, popping up just
- * above it with a pointer to Feed.
+ * Feed's food or Play's toys, as a row of buttons like the action row, popping
+ * up just above it with a pointer to the button.
  */
-function toggleFoodTray(): void {
-  if (foodTray) { closeFoodTray(); return; }
+function toggleTray(kind: 'feed' | 'play'): void {
+  const was = tray?.kind;
+  closeTray();
+  if (was === kind) return;
+  const el = kind === 'feed' ? foodTray() : toyTray();
+  // the pointer sits over the button's column
+  const col = [...ui.acts[kind].parentElement!.children].indexOf(ui.acts[kind]);
+  el.style.setProperty('--tip', `${(col + 0.5) * 20}%`);
+  tray = { el, kind };
+  ui.acts[kind].parentElement?.append(el);
+  ui.acts[kind].setAttribute('aria-expanded', 'true');
+  document.addEventListener('pointerdown', onOutsideTray, true);
+  document.addEventListener('keydown', onTrayKey);
+  (el.querySelector('button:not(:disabled)') as HTMLButtonElement | null)?.focus();
+}
+
+function foodTray(): HTMLElement {
+  const n = now();
   const berries = pet.pantry?.berries ?? 0;
   const golden = pet.pantry?.golden ?? 0;
+  // the tray opens while she sleeps or is out (for Bake); the food waits
+  const cantEat = isOut(pet, n) ? "She's out foraging. Feed her when she's home."
+    : isAsleep(pet, n, tz) ? REFUSAL.asleep! : null;
   // the golden carrot only shows once she has one from the garden
   const foods = FOOD_IDS.filter((id) => id !== 'golden' || golden > 0);
   const buttons = foods.map((id) => {
@@ -1391,18 +1708,60 @@ function toggleFoodTray(): void {
     img(s, Math.max(1, Math.floor(30 / Math.max(s.w, s.h)))),
     h('span', { class: 'nm', text: info.short }),
     h('span', { class: 'cost' }, paysClover ? img(itemSprite('clover'), 1) : null, cost));
-    b.addEventListener('click', () => { closeFoodTray(); doAction('feed', { food: id }); });
-    if (!available) setOff(b, id === 'treat' ? REFUSAL.noTreats! : `Strawberries cost 3 clover, or grow them in the garden.`);
+    b.addEventListener('click', () => { closeTray(); doAction('feed', { food: id }); });
+    if (cantEat) setOff(b, cantEat);
+    else if (!available) setOff(b, id === 'treat' ? REFUSAL.noTreats! : `Strawberries cost 3 clover, or grow them in the garden.`);
     return b;
   });
-  foodTray = h('div', { class: 'food-tray', role: 'group', 'aria-label': `What would ${pet.name} like?` },
+  const bake = h('button', { class: 'btn bake-btn', type: 'button' }, img(itemSprite('treat'), 2), h('span', { class: 'lbl' }), h('span', { class: 'meta' }));
+  bake.addEventListener('click', () => { closeTray(); doAction('bake'); });
+  renderBakeButton(bake, n);
+  const hint = cantEat ? `${isOut(pet, n) ? "She's out foraging" : "Shh, she's asleep"}. You can still bake her a treat for later.`
+    : 'Baked treats and berries delight her most.';
+  return h('div', { class: 'food-tray', role: 'group', 'aria-label': `What would ${pet.name} like?` },
     h('div', { class: 'food-row', style: `grid-template-columns:repeat(${buttons.length},minmax(0,1fr))` }, ...buttons),
-    h('p', { class: 'food-hint', text: 'Baked treats and berries delight her most.' }));
-  ui.acts.feed.parentElement?.append(foodTray);
-  ui.acts.feed.setAttribute('aria-expanded', 'true');
-  document.addEventListener('pointerdown', onOutsideFoodTray, true);
-  document.addEventListener('keydown', onFoodTrayKey);
-  (foodTray.querySelector('button:not(:disabled)') as HTMLButtonElement | null)?.focus();
+    h('p', { class: 'food-hint', text: hint }),
+    bake);
+}
+
+/** Bake, at the foot of the Feed tray: a treat for the pantry in an hour, or the countdown to one. */
+function renderBakeButton(b: HTMLButtonElement, n: number): void {
+  const t = timer(pet, 'bake');
+  const full = !t && pet.treats >= 3;
+  const lbl = t ? 'Baking' : full ? 'The pantry is full' : 'Bake a treat';
+  const meta = t ? fmtCountdown(t.endsAtMs - n) : full ? `${pet.treats} treats` : 'Ready in an hour';
+  const l = b.querySelector('.lbl')!, m = b.querySelector('.meta')!;
+  if (l.textContent !== lbl) l.textContent = lbl;
+  if (m.textContent !== meta) m.textContent = meta;
+  b.classList.toggle('counting', !!t);
+  b.setAttribute('aria-label', t ? `A treat is baking, ready in ${fmtLong(t.endsAtMs - n)}` : full ? 'Bake a treat. The pantry is full' : 'Bake a treat, ready in an hour');
+  setOff(b, t ? `A treat's in the oven, ready in ${fmtDuration(t.endsAtMs - n)}.` : full ? 'The pantry is full. Feed her a treat first.' : null);
+}
+
+/** Short enough for a tray button. */
+const TOY_SHORT: Record<string, string> = { yarn: 'Yarn', box: 'Box', swing: 'Swing', ballpit: 'Ball pit', maze: 'Maze' };
+
+/** Her toys, one tap to play; the toy box (to buy more) at the end. */
+function toyTray(): HTMLElement {
+  const buttons = TOYS.filter((t) => ownsToy(pet, t.id)).map((t) => {
+    const s = itemSprite(TOY_ART[t.id] ?? 'sparkle');
+    const b = h('button', { class: 'act food-act', type: 'button', 'aria-label': `Play with the ${t.name.toLowerCase()}` },
+      img(s, Math.max(1, Math.floor(30 / Math.max(s.w, s.h)))),
+      h('span', { class: 'nm', text: TOY_SHORT[t.id] ?? t.name }));
+    b.addEventListener('click', () => { closeTray(); doAction('play', { toy: t.id }); });
+    return b;
+  });
+  if (TOYS.some((t) => !ownsToy(pet, t.id))) {
+    const s = itemSprite('gift');
+    const more = h('button', { class: 'act food-act', type: 'button', 'aria-label': 'More toys' },
+      img(s, Math.max(1, Math.floor(30 / Math.max(s.w, s.h)))),
+      h('span', { class: 'nm', text: 'More toys' }));
+    more.addEventListener('click', () => { closeTray(); openShop({ cat: 'toys' }); });
+    buttons.push(more);
+  }
+  return h('div', { class: 'food-tray', role: 'group', 'aria-label': `What would ${pet.name} like to play with?` },
+    h('div', { class: 'food-row', style: `grid-template-columns:repeat(${Math.min(buttons.length, 4)},minmax(0,1fr))` }, ...buttons),
+    h('p', { class: 'food-hint', text: 'Playing cheers her up and counts as care.' }));
 }
 
 // ------------------------------------------------------------------ away summary
@@ -1455,7 +1814,7 @@ function showAway(gap: number, events: PetEvent[], newDay: boolean, backFromHoli
       return b;
     };
     const quick: HTMLButtonElement[] = [];
-    if (inYard >= 1) quick.push(doing(`Collect ${inYard} clover`, 'Collected', () => collectYard()));
+    if (inYard >= 1) quick.push(button('Go to the yard', 'btn', () => { close(); goTab('garden'); goArea('yard'); }));
     if (ripe) quick.push(doing(ripe === 1 ? 'Pick it' : `Pick all ${ripe}`, 'Picked', () => pickAll()));
     if (giftReady(pet, now(), tz) && !away()) quick.push(doing('Open the daily gift', 'Opened', () => doAction('gift')));
     // her portrait as she is now: asleep, grumpy or pleased to see you
@@ -1477,6 +1836,16 @@ function button(label: string, cls: string, onClick: () => void): HTMLButtonElem
   const b = h('button', { class: cls, type: 'button', text: label });
   b.addEventListener('click', onClick);
   return b;
+}
+
+const CROSS = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
+
+/** A close button pinned to a sheet's top-right corner, there however far it scrolls. Put it first. */
+function closeX(close: () => void): HTMLElement {
+  const b = h('button', { class: 'sheet-x', type: 'button', 'aria-label': 'Close', title: 'Close' });
+  b.innerHTML = CROSS;
+  b.addEventListener('click', close);
+  return h('div', { class: 'sheet-x-pin' }, b);
 }
 
 /**
@@ -1574,7 +1943,7 @@ async function maybeAskReminders(kind: 'nap' | 'bake' | 'forage'): Promise<void>
     h('div', { class: 'actions-col' },
       button('Yes, nudge me', 'btn primary', () => { settings.reminders = 'on'; saveSettings(); queueReconcile(); render(); close(); }),
       button('Not now', 'btn', () => { settings.reminders = 'off'; saveSettings(); render(); close(); })),
-    h('p', { class: 'note', text: 'You can turn reminders on or off any time under More.' }),
+    h('p', { class: 'note', text: `You can turn reminders on or off any time on ${pet.name}'s page, in the tab bar.` }),
   ], { queue: true });
 }
 
@@ -1605,25 +1974,26 @@ function queueReconcile(): void {
 
 // ------------------------------------------------------------------ decorating
 
-function enterDecorate(): void {
+/** Where Done goes from arranging: back to the shop, or to wherever you came from. */
+let arrangeReturn: Tab = 'shop';
+
+/** Into arranging the burrow (the shop's other half), from goTab. */
+function startDecorating(): void {
   decorating = true;
   selectedUid = null;
   ui.canvas.tabIndex = 0;
   ui.canvas.setAttribute('aria-label', 'The burrow. Drag decor to move it. With the keyboard: N and P pick a piece, arrow keys move it (Shift for bigger steps), F flips it, Delete puts it away.');
   renderDecoratePanel();
-  render();
 }
 
-function exitDecorate(): void {
+/** Out of arranging, from goTab. */
+function stopDecorating(): void {
   decorating = false;
   selectedUid = null;
   drag = null;
   ui.canvas.removeAttribute('tabindex');
   ui.canvas.setAttribute('aria-label', 'The burrow');
   ui.panel.replaceChildren(...ui.panelKids);
-  render();
-  // anything that came in while decorating (a gift, a question) comes now
-  if (!sheetStack.length) sheetQueue.shift()?.open();
 }
 
 function selected(): PlacedItem | undefined {
@@ -1660,8 +2030,13 @@ function wireDecorDrag(canvas: HTMLCanvasElement): void {
     const p = toScene(e);
     moveItem(item, p.x + drag.dx, p.y + drag.dy);
     drag.moved = true;
+    // dragged down off the room, onto the storage strip: let go to put it away
+    storeHot(overStorage(e));
   });
   const end = () => {
+    const item = drag ? burrow.items.find((i) => i.uid === drag!.uid) : undefined;
+    if (item && drag?.moved && ui.panel.classList.contains('drop-hot')) { storeHot(false); drag = null; putAway(item); haptic('light'); return; }
+    storeHot(false);
     if (drag?.moved) { saveBurrow(); haptic('light'); play('place'); }
     drag = null;
   };
@@ -1712,7 +2087,7 @@ function putAway(item: PlacedItem): void {
   delete item.room;
   selectedUid = null;
   saveBurrow();
-  toast('Put away. You can place it again for free.');
+  toast('Put away in storage. Put it out again any time.');
   renderDecoratePanel();
 }
 
@@ -1724,7 +2099,7 @@ function surfaceSprite(def: SurfaceDef): Sprite {
   let sp = spriteCache.get(key);
   if (!sp) {
     const room = drawBurrow(false, { ...roomOf(starterBurrow()), [def.kind]: def.id });
-    const box = def.kind === 'wall' ? { x: 58, y: 36, w: 22, h: 16 } : def.kind === 'floor' ? { x: 38, y: 96, w: 22, h: 16 } : { x: 13, y: 17, w: 27, h: 27 };
+    const box = def.kind === 'wall' ? { x: 58, y: 36, w: 22, h: 16 } : def.kind === 'floor' ? { x: 38, y: 96, w: 22, h: 16 } : { x: WINDOW.x - 13, y: WINDOW.y - 13, w: 27, h: 27 };
     const g: PixelGrid = blank(box.w, box.h);
     for (let y = 0; y < box.h; y++) for (let x = 0; x < box.w; x++) g.px[y]![x] = room.px[box.y + y]![box.x + x]!;
     sp = toSprite(g);
@@ -1737,13 +2112,13 @@ type ShopThing =
   | { kind: 'decor'; def: DecorDef; stored: PlacedItem[] }
   | { kind: 'surface'; def: SurfaceDef };
 
-/** Why it can't be bought yet, or null. */
+/** How to unlock it, in a sentence, or null if it's open. */
 function lockedBy(t: ShopThing): string | null {
   const bl = bondLevel(pet.bond).level;
   const bond = t.kind === 'decor' ? t.def.bond : t.def.bond ?? 1;
-  if (bl < bond) return `Bond ${bond}`;
+  if (bl < bond) return `Reach bond ${bond} with ${pet.name}. Your bond grows as you look after her each day (it's ${bl} now).`;
   const after = t.def.after;
-  if (after && !ownsDecor(burrow, after)) return `After the ${(byId(after)?.name ?? surfaceById(after)?.name ?? after).toLowerCase()}`;
+  if (after && !ownsDecor(burrow, after)) return `Get the ${(byId(after)?.name ?? surfaceById(after)?.name ?? after).toLowerCase()} first, and this opens up.`;
   return null;
 }
 
@@ -1767,123 +2142,600 @@ function toggleGoal(key: string, name: string): void {
   render();
 }
 
+/** The panel while arranging: pieces put away, to put out, and the picked piece's buttons. */
 function renderDecoratePanel(): void {
-  const n = now();
-  const tray = h('div', { class: 'tray', role: 'list' });
-  const things: ShopThing[] = [];
-  for (const def of CATALOG) {
-    if (isOutdoor(def)) continue; // the meadow's, sold in the garden
-    const stored = burrow.items.filter((i) => i.id === def.id && !i.placed);
-    // seasonal pieces are for sale during their event; once owned, they're yours
-    if (!stored.length && (def.giftOnly || (def.limited && !limitedAvailable(def.id, n, tz)))) continue;
-    things.push({ kind: 'decor', def, stored });
+  const stored = new Map<string, PlacedItem[]>();
+  for (const i of burrow.items) {
+    const d = byId(i.id);
+    if (!i.placed && d && !isOutdoor(d)) stored.set(i.id, [...(stored.get(i.id) ?? []), i]);
   }
-  // a plain wall, floor or window only shows once there's something to switch back from
-  const fancy = new Set(SURFACES.filter((d) => d.price > 0 && ownsSurface(burrow, d.id)).map((d) => d.kind));
-  for (const def of SURFACES) if (def.price > 0 || fancy.has(def.kind)) things.push({ kind: 'surface', def });
-
-  // owned first (put away, or a wall you can switch to), then what you can
-  // afford, then what to save for, then what isn't open yet
-  const rank = (t: ShopThing): number => {
-    if (t.kind === 'decor' && t.stored.length) return 0;
-    if (t.kind === 'surface' && ownsSurface(burrow, t.def.id)) return 1;
-    if (lockedBy(t)) return 4;
-    return t.def.price <= pet.clover ? 2 : 3;
-  };
-  // owned walls and floors come after what you can buy
-  const order = [0, 2, 1, 3, 4];
-  things.sort((a, b) => order[rank(a)]! - order[rank(b)]! || a.def.price - b.def.price);
-
-  let savingShown = false;
-  for (const t of things) {
-    const r = rank(t);
-    if (r >= 3 && !savingShown) {
-      savingShown = true;
-      tray.append(h('div', { class: 'tray-divider', role: 'presentation', text: 'Saving up' }));
-    }
-    tray.append(shopButton(t, r));
-  }
-
+  // Storage, always there: drag a piece up out of it into the room, or a piece in the room down into it
+  const tray = stored.size ? h('div', { class: 'tray', role: 'list', 'aria-label': 'In storage' }, ...[...stored].map(([id, items]) => {
+    const def = byId(id)!;
+    const s = itemSprite(def.art);
+    const b = h('button', { class: 'titem', type: 'button', role: 'listitem', 'aria-label': `${def.name}. ${items.length} in storage. Put one out, or drag it into the room.` },
+      h('span', { class: 'art' }, img(s, fitScale(s, 44))), h('span', { class: 'nm', text: def.name }), h('span', { class: 'pr', text: `${items.length} in storage` }));
+    wireDragOut(b, items[0]!, def);
+    return b;
+  })) : h('p', { class: 'store-empty', text: 'Nothing in storage. Drag a piece down here to put it away.' });
+  const store = h('div', { class: 'store-zone' }, h('div', { class: 'store-head' }, h('span', { text: 'Storage' }), h('span', { class: 'store-drop', text: 'Let go to put it away' })), tray);
   const sel = selected();
   const def = sel ? byId(sel.id) : undefined;
   const where = def?.zone === 'hang' ? 'anywhere on the wall' : 'anywhere on the floor';
-  ui.moodline.textContent = sel && def
-    ? `Drag the ${def.name.toLowerCase()} ${where}.`
-    : 'Drag decor to move it, or pick something below. Tap something you can\'t afford yet to save up for it.';
-  const done = button('Done', 'btn primary', exitDecorate);
+  ui.moodline.textContent = sel && def ? `Drag the ${def.name.toLowerCase()} ${where}.`
+    : stored.size ? 'Drag pieces about, up out of storage, or down into it.' : 'Drag pieces about, or down into storage to put them away.';
+  const done = button('Done', 'btn primary', () => goTab(arrangeReturn));
   const flip = sel ? button('Flip', 'btn', () => { sel.flip = !sel.flip; saveBurrow(); play('flip'); }) : null;
   const away = sel ? button('Put away', 'btn', () => putAway(sel)) : null;
-  ui.panel.replaceChildren(ui.moodline, tray, h('div', { class: 'row2' }, done, flip, away));
+  // digging out rooms lives with the rest of the burrow's shopping
+  const dig = !sel && ROOMS_OPEN && EXTRA_ROOMS.some((r) => !roomsOf(burrow).includes(r)) ? button('Dig a new room', 'btn', () => openDig()) : null;
+  ui.panel.replaceChildren(ui.moodline, store, h('div', { class: 'row2' }, done, flip, away, dig));
   ui.chips.replaceChildren();
+  ui.cards.querySelector('.cards-events')?.remove();
 }
 
-function shopButton(t: ShopThing, rank: number): HTMLElement {
-  const locked = lockedBy(t);
-  const sp = t.kind === 'decor' ? itemSprite(t.def.art) : surfaceSprite(t.def);
-  const key = `${t.kind}:${t.def.id}`;
-  const pinned = pet.goal === key;
-  const inUse = t.kind === 'surface' && surfacesOf(burrow)[t.def.kind] === t.def.id;
-  const price = locked ? h('span', { class: 'pr', text: locked })
-    : rank === 0 && t.kind === 'decor' ? h('span', { class: 'pr', text: `${t.stored.length} put away` })
-      : rank === 1 ? h('span', { class: 'pr', text: inUse ? 'In use' : 'Owned' })
-        : h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(t.def.price));
-  const label = locked ? `${t.def.name}. ${locked}.`
-    : rank === 0 ? `${t.def.name}. Place one.`
-      : rank === 1 ? `${t.def.name}. ${inUse ? 'In use.' : 'Owned. Use it.'}`
-        : rank === 2 ? `${t.def.name}. Buy for ${t.def.price} clover.`
-          : `${t.def.name}. ${t.def.price} clover. ${pinned ? 'Your goal. Tap to unpin.' : 'Tap to save up for it.'}`;
-  const b = h('button', {
-    class: 'titem' + (rank >= 3 ? ' saving' : '') + (pinned ? ' pinned' : ''), type: 'button', role: 'listitem',
-    'aria-label': label, 'aria-pressed': t.kind === 'surface' ? String(inUse) : undefined,
-  },
-  t.kind === 'decor' && t.def.limited && rank > 0 ? h('span', { class: 'tag', text: 'Limited' }) : null,
-  pinned ? h('span', { class: 'tag goal', text: 'Goal' }) : null,
-  h('span', { class: 'art' }, img(sp, fitScale(sp, 54))), h('span', { class: 'nm', text: t.def.name }), price);
-  b.addEventListener('click', () => {
-    if (locked) { play('nope'); toast(`${locked}.`); return; }
-    if (rank >= 3) { toggleGoal(key, t.def.name); renderDecoratePanel(); return; }
-    if (t.kind === 'surface') {
-      if (rank === 2) {
-        const paid = spendClover(pet, t.def.price);
-        if (!paid) { play('nope'); toast('Not enough clover yet.'); return; }
-        pet = paid;
-        addSurface(burrow, t.def.id);
-        play('clover');
-        toast(`${t.def.name} up. Switch any time.`);
-        note(`Put up the ${t.def.name.toLowerCase()}.`, 'sparkle', `surface:${t.def.id}`);
-      } else {
-        useSurface(burrow, t.def.id);
-        play('flip');
+/** Whether a pointer is over the arranging panel (below the room): where a piece dropped goes into storage. */
+function overStorage(e: { clientY: number }): boolean {
+  return e.clientY > ui.stage.getBoundingClientRect().bottom;
+}
+
+/** Light up the storage strip while a piece held over it would go in. */
+function storeHot(on: boolean): void {
+  if (ui.panel.classList.contains('drop-hot') !== on) ui.panel.classList.toggle('drop-hot', on);
+}
+
+/**
+ * A piece in storage: tap it to put it out at its usual spot, or drag it up
+ * into the room, where it appears under your finger to be let go wherever.
+ * Dragged back down, it goes back in. Sideways drags scroll the strip.
+ */
+function wireDragOut(b: HTMLButtonElement, item: PlacedItem, def: DecorDef): void {
+  let start: { x: number; y: number; id: number } | null = null;
+  let ghost: HTMLImageElement | null = null;
+  let dragged = false;
+  const inRoom = (e: PointerEvent) => !overStorage(e) && e.clientY > ui.stage.getBoundingClientRect().top;
+  b.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    dragged = false;
+  });
+  b.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (!ghost) {
+      // up and away: a drag; sideways is the strip scrolling
+      if (dy > -10 || Math.abs(dy) < Math.abs(dx)) return;
+      try { b.setPointerCapture(e.pointerId); } catch { /* already released */ }
+      ghost = img(itemSprite(def.art), Math.max(2, Math.round(scale)));
+      ghost.className = 'px drag-ghost';
+      document.body.append(ghost);
+      dragged = true;
+    }
+    e.preventDefault();
+    if (inRoom(e)) {
+      // in the room: it's out, under your finger
+      if (!item.placed) {
+        item.placed = true;
+        if (burrowRoom === 'main') delete item.room; else item.room = burrowRoom;
+        selectedUid = item.uid;
       }
-      if (pet.goal === key) pet = { ...pet, goal: null };
-      savePet();
-      saveBurrow();
-      renderDecoratePanel();
-      render();
-      return;
-    }
-    const first = t.stored[0];
-    if (first) {
-      placeNew(first);
+      const p = toScene(e);
+      moveItem(item, p.x, p.y + 6);
+      ghost.hidden = true;
     } else {
-      const paid = spendClover(pet, t.def.price);
-      if (!paid) { play('nope'); toast('Not enough clover yet.'); return; }
-      pet = paid;
-      if (pet.goal === key) pet = { ...pet, goal: null };
-      savePet();
-      const item: PlacedItem = { uid: newUid(), id: t.def.id, x: 0, y: 0, flip: false, placed: false };
-      burrow.items.push(item);
-      placeNew(item);
-      toast(`${t.def.name} placed. Drag it where you like.`);
-      play('clover');
+      if (item.placed) { item.placed = false; delete item.room; selectedUid = null; }
+      ghost.hidden = false;
+      ghost.style.left = `${e.clientX}px`;
+      ghost.style.top = `${e.clientY}px`;
     }
+  });
+  const end = () => {
+    if (!start) return;
+    start = null;
+    ghost?.remove();
+    ghost = null;
+    if (!dragged) return;
+    if (item.placed) {
+      saveBurrow();
+      goal('decor');
+      haptic('light');
+      play('place');
+    }
+    renderDecoratePanel();
+    render();
+  };
+  b.addEventListener('pointerup', end);
+  b.addEventListener('pointercancel', end);
+  b.addEventListener('click', (e) => {
+    // a drag ends in a click on the button: that's not a tap
+    if (dragged) { dragged = false; e.preventDefault(); return; }
+    placeNew(item);
     saveBurrow();
     goal('decor');
     haptic('light');
-    // bought: the blip first, then the thock as it lands
-    if (first) play('place'); else window.setTimeout(() => play('place'), 180);
+    play('place');
     renderDecoratePanel();
     render();
+  });
+}
+
+// ------------------------------------------------------------------ the shop
+// A screen of its own on the Shop tab: decor, walls and floors, her wardrobe
+// and toys. Tap a thing to see it in the display case at the top (an outfit
+// on her; a wall, floor or window in her room, live; her playing with a toy;
+// decor against her walls), with what you can do with it. Decor bought or put away goes into
+// the burrow to be arranged (decorating, below), and Done comes back here.
+
+type ShopCat = 'decor' | 'walls' | 'wardrobe' | 'toys';
+const SHOP_CATS: ShopCat[] = ['decor', 'walls', 'wardrobe', 'toys'];
+const SHOP_CAT_NAME: Record<ShopCat, string> = { decor: 'Decor', walls: 'Walls', wardrobe: 'Wardrobe', toys: 'Toys' };
+
+interface ShopUi {
+  nodes: Node[];
+  sub: HTMLElement;
+  clover: HTMLElement;
+  cats: Record<ShopCat, HTMLButtonElement>;
+  display: HTMLElement;
+  grid: HTMLElement;
+}
+let shopUi: ShopUi | null = null;
+type ShopBackdrop = 'wall' | 'floor' | 'her';
+/** Which part of the room the display frames: her and the floor, closer in for play, or the wall and window. */
+type ShopFrame = 'play' | 'floor' | 'wall';
+interface ShopPreview { room?: Partial<RoomStyle>; play?: ItemArt; frame: ShopFrame; label: string }
+/** The display's live room: a scene of its own, made once, drawn while a preview shows. */
+let shopView: { stage: HTMLElement; canvas: HTMLCanvasElement; scene: Scene } | null = null;
+let shopPreview: ShopPreview | null = null;
+/** When she next starts playing again in the display, so the preview keeps playing; 0: now. */
+let shopPlayAt = 0;
+let shopCat: ShopCat = 'decor';
+/** The thing in the display case, by its goal key (`decor:fireplace`); null for the category's own intro. */
+let shopSel: string | null = null;
+/** Decor for one seasonal event only (from its sheet's See the decor). */
+let shopEvent: string | null = null;
+let shopSig = '';
+
+/** One thing in the shop, whatever its kind, and what it's up to. */
+interface ShopItem {
+  key: string;
+  name: string;
+  /** For its card. */
+  card: () => Node;
+  /** For the display case: big, and an outfit on her. Not used when there's a `preview`. */
+  big: () => Node;
+  /** What the display's backdrop is for `big`: a wall (hung decor), a floor (standing decor), or her own spot. */
+  backdrop?: ShopBackdrop;
+  /** Instead of `big`, her room, live: with a surface swapped in, or her playing with a toy. */
+  preview?: ShopPreview;
+  /** What it is, in a few words. */
+  what: string;
+  section: string;
+  /** buy: affordable; saving: not yet; locked: not open yet; place: put away, ready to put out; owned/inuse/wearing: yours. */
+  state: 'buy' | 'saving' | 'locked' | 'place' | 'owned' | 'inuse' | 'wearing';
+  price: number;
+  /** Its card's last line when it isn't a price. */
+  note?: string;
+  locked?: string;
+  limited?: boolean;
+  /** What you can do with it, most likely first. */
+  actions: () => HTMLButtonElement[];
+}
+
+function buildShopScreen(): ShopUi {
+  const sub = h('div', { class: 'sub' });
+  const clover = h('span');
+  const cats = {} as Record<ShopCat, HTMLButtonElement>;
+  for (const c of SHOP_CATS) {
+    const b = h('button', { type: 'button', class: 'seg-tab', text: SHOP_CAT_NAME[c] });
+    b.addEventListener('click', () => { if (shopCat === c) return; shopCat = c; shopSel = null; shopEvent = null; play('flip'); renderShop(); shopUi!.grid.scrollTop = 0; });
+    cats[c] = b;
+  }
+  const display = h('section', { class: 'shop-display', 'aria-live': 'polite' });
+  const grid = h('main', { class: 'shop-grid-wrap' });
+  const header = h('header', { class: 'hud page-hud' },
+    h('div', { class: 'hud-top' },
+      h('div', { class: 'who' }, h('div', { class: 'name', text: 'Shop' }), sub),
+      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
+  const top = h('div', { class: 'shop-top' }, h('nav', { class: 'seg shop-cats', 'aria-label': 'Shop sections' }, ...SHOP_CATS.map((c) => cats[c])), display);
+  return { nodes: [header, top, grid], sub, clover, cats, display, grid };
+}
+
+/** To the shop: a category, one event's decor, or one thing in the display case (a goal key). */
+function openShop(opts: { cat?: ShopCat; event?: string | null; select?: string | null } = {}): void {
+  const kind = opts.select?.split(':')[0];
+  shopCat = opts.cat ?? (kind === 'surface' ? 'walls' : kind === 'outfit' ? 'wardrobe' : kind === 'toy' ? 'toys' : kind === 'decor' ? 'decor' : shopCat);
+  shopEvent = opts.event ?? null;
+  shopSel = opts.select ?? null;
+  shopSig = '';
+  if (tab === 'shop' && !decorating) { renderShop(); return; }
+  goTab('shop');
+}
+
+/** The price, with its clover. */
+function priceTag(price: number): HTMLElement {
+  return h('span', { class: 'pr' }, img(itemSprite('clover'), 1), price.toLocaleString());
+}
+
+/** Her, as dressed, with one slot changed: for the wardrobe's cards and the display. */
+function herIn(slot: Slot | null, id: string | null, scale: number, face: Face = 'content'): HTMLImageElement {
+  const dress = slot ? { ...dressOf(pet), [slot]: id } : dressOf(pet);
+  return img(rabbitSprite(pet.coat, face, 0, dress), scale, `${pet.name}${id ? ` in the ${outfitById(id)?.name.toLowerCase() ?? 'outfit'}` : ''}`);
+}
+
+function shopStage(): HTMLElement {
+  if (shopView) return shopView.stage;
+  const canvas = h('canvas', { role: 'img' });
+  const stage = h('div', { class: 'shop-stage live' }, canvas);
+  const scene = new Scene(canvas);
+  shopView = { stage, canvas, scene };
+  new ResizeObserver(() => fitShopScene()).observe(stage);
+  return stage;
+}
+
+/**
+ * What each framing keeps in view: the room's bottom (her and the floor) or
+ * from near its top (the wall and window), and at least this many rows of it.
+ */
+const SHOP_FRAMES: Record<ShopFrame, { anchor: 'bottom' | number; rows: number }> = {
+  play: { anchor: 'bottom', rows: 50 },
+  floor: { anchor: 'bottom', rows: 50 },
+  wall: { anchor: 16, rows: 44 },
+};
+
+/** Like fitScene, framed on part of the room: the room's width fills the display, unless that leaves too few rows. */
+function fitShopScene(): void {
+  if (!shopView || !shopPreview || !shopView.stage.isConnected) return;
+  const { stage, canvas, scene } = shopView;
+  const w = stage.clientWidth, hgt = stage.clientHeight;
+  if (!w || !hgt) return;
+  const f = SHOP_FRAMES[shopPreview.frame];
+  const scale = Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / f.rows);
+  const sw = Math.ceil(w / scale - 1e-6), sh = Math.ceil(hgt / scale - 1e-6);
+  scene.resize(sw, sh, Math.round((sw - SCENE_W) / 2), f.anchor === 'bottom' ? sh - SCENE_H : -f.anchor);
+  canvas.style.width = `${sw * scale}px`; canvas.style.height = `${sh * scale}px`;
+  canvas.style.left = `${Math.floor((w - sw * scale) / 2)}px`; canvas.style.top = '0px';
+}
+
+function drawShopScene(t: number): void {
+  const p = shopPreview;
+  if (!shopView || !p) return;
+  if (p.play && t >= shopPlayAt) {
+    shopView.scene.react('play', t, p.play);
+    shopPlayAt = t + 2600; // a play lasts 2.2 s: a short breath between, so the toy's nearly always there
+  }
+  // awake and on her own, whatever she's really up to: it's a fitting room
+  shopView.scene.draw({
+    ...burrowModel(now(), 'main'), burrow: inRoom(burrow, 'main'), decorating: false, selected: null,
+    mood: 'content', absent: false, guests: [], critter: null, guest: true,
+    room: { ...roomOf(burrow), ...p.room },
+  }, t);
+}
+
+/** The display's backdrop for a sprite: her walls and floor, so a piece is seen against them. */
+function shopBackdrop(kind: ShopBackdrop, art: Node): HTMLElement {
+  const c = roomColours(roomOf(burrow));
+  const el = h('div', { class: `shop-stage ${kind}` }, art);
+  el.style.setProperty('--wall', c.wall);
+  el.style.setProperty('--wall-d', c.wallD);
+  el.style.setProperty('--floor', c.floor);
+  el.style.setProperty('--floor-d', c.floorD);
+  return el;
+}
+
+/** Buying or saving up, for anything with a price: the button for its state. */
+function buyOrSave(it: ShopItem, buy: () => void): HTMLButtonElement[] {
+  if (it.state === 'buy') {
+    const b = h('button', { class: 'btn primary', type: 'button' }, 'Buy for ', priceTag(it.price));
+    b.addEventListener('click', buy);
+    return [b];
+  }
+  if (it.state === 'saving') {
+    const pinned = pet.goal === it.key;
+    return [button(pinned ? 'Stop saving for it' : 'Save up for it', pinned ? 'btn' : 'btn primary', () => { toggleGoal(it.key, it.name); shopSig = ''; renderShop(); })];
+  }
+  return [];
+}
+
+function decorItems(): ShopItem[] {
+  const n = now();
+  const event = shopEvent ? activeEvents(n, tz).find((e) => e.id === shopEvent) : undefined;
+  if (!event) shopEvent = null; // it ended while you were looking
+  const out: ShopItem[] = [];
+  for (const def of CATALOG) {
+    if (isOutdoor(def)) continue; // the meadow's, sold in the garden
+    if (event && !event.decor.includes(def.id) && event.gift?.id !== def.id) continue;
+    const mine = burrow.items.filter((i) => i.id === def.id);
+    const stored = mine.filter((i) => !i.placed);
+    // seasonal pieces are for sale during their event; once owned, they're yours
+    if (!mine.length && (def.giftOnly || (def.limited && !limitedAvailable(def.id, n, tz)))) continue;
+    const locked = lockedBy({ kind: 'decor', def, stored });
+    const canBuy = !def.giftOnly && !(def.limited && !limitedAvailable(def.id, n, tz));
+    const state: ShopItem['state'] = stored.length ? 'place' : mine.length ? 'owned' : locked ? 'locked' : def.price <= pet.clover ? 'buy' : 'saving';
+    const it: ShopItem = {
+      key: `decor:${def.id}`, name: def.name, price: def.price, state, locked: locked ?? undefined, limited: def.limited,
+      card: () => img(itemSprite(def.art), fitScale(itemSprite(def.art), 44)),
+      big: () => img(itemSprite(def.art), fitScale(itemSprite(def.art), 104), def.name),
+      backdrop: def.zone === 'hang' ? 'wall' : 'floor',
+      what: [def.zone === 'hang' ? 'For the wall' : 'For the floor', def.bed ? 'she sleeps on it' : '', def.glow ? 'it glows at night' : ''].filter(Boolean).join(', '),
+      section: state === 'place' ? 'In storage' : state === 'owned' ? 'In the burrow' : state === 'locked' ? 'Opens later' : 'For sale',
+      note: state === 'place' ? `${stored.length} in storage` : state === 'owned' ? (mine.length > 1 ? `${mine.length} in the burrow` : 'In the burrow') : undefined,
+      actions: () => {
+        const buy = () => buyDecor(def);
+        // out or not is up to you: put out what's stored, put away what's out
+        const out = mine.filter((i) => i.placed);
+        const more = canBuy && def.price <= pet.clover ? [buyAnother(def.price, buy)] : [];
+        if (state === 'place') {
+          const put = button('Put it out', 'btn primary', () => putOutPiece(stored[0]!));
+          return [put, ...(out.length ? [button('Put one away', 'btn', () => storePiece(out[0]!))] : []), ...more];
+        }
+        if (state === 'owned') {
+          return [button('Move it', 'btn', () => goTab('shop', { arrange: out[0]?.uid ?? true })), button('Put it away', 'btn', () => storePiece(out[0]!)), ...more];
+        }
+        return buyOrSave(it, buy);
+      },
+    };
+    out.push(it);
+  }
+  return out;
+}
+
+function buyAnother(price: number, buy: () => void): HTMLButtonElement {
+  const b = h('button', { class: 'btn', type: 'button', 'aria-label': `Buy another for ${price} clover` }, '+1 for ', priceTag(price));
+  b.addEventListener('click', buy);
+  return b;
+}
+
+/** Buy a piece: it waits in storage until you put it out (if you ever do). */
+function buyDecor(def: DecorDef): void {
+  const paid = spendClover(pet, def.price);
+  if (!paid) { play('nope'); toast(moreClover(def.price)); return; }
+  pet = paid;
+  if (pet.goal === `decor:${def.id}`) pet = { ...pet, goal: null };
+  savePet();
+  burrow.items.push({ uid: newUid(), id: def.id, x: 0, y: 0, flip: false, placed: false });
+  saveBurrow();
+  haptic('light');
+  play('clover');
+  toast(def.bed ? `The ${def.name.toLowerCase()} is yours. Put it out and she'll sleep on it.` : `The ${def.name.toLowerCase()} is yours. Put it out whenever you like.`);
+  note(`Got ${article(def.name)} for the burrow.`, def.art, `decor:${def.id}`);
+  render();
+}
+
+/** Put a stored piece out in the room you're in, and go and arrange it. */
+function putOutPiece(item: PlacedItem): void {
+  placeNew(item);
+  saveBurrow();
+  goal('decor');
+  play('place');
+  goTab('shop', { arrange: item.uid });
+}
+
+/** Take a placed piece back into storage, from the shop. */
+function storePiece(item: PlacedItem): void {
+  item.placed = false;
+  delete item.room;
+  saveBurrow();
+  play('flip');
+  toast('Put away. Put it out again any time.');
+  render();
+}
+
+const SURFACE_SECTION: Record<SurfaceDef['kind'], string> = { wall: 'Walls', floor: 'Floors', window: 'Windows' };
+
+function wallItems(): ShopItem[] {
+  const inUse = surfacesOf(burrow);
+  return [...SURFACES].sort((a, b) => ['wall', 'floor', 'window'].indexOf(a.kind) - ['wall', 'floor', 'window'].indexOf(b.kind) || a.price - b.price).map((def) => {
+    const owned = ownsSurface(burrow, def.id);
+    const locked = owned ? null : lockedBy({ kind: 'surface', def });
+    const state: ShopItem['state'] = inUse[def.kind] === def.id ? 'inuse' : owned ? 'owned' : locked ? 'locked' : def.price <= pet.clover ? 'buy' : 'saving';
+    const it: ShopItem = {
+      key: `surface:${def.id}`, name: def.name, price: def.price, state, locked: locked ?? undefined,
+      card: () => img(surfaceSprite(def), fitScale(surfaceSprite(def), 44)),
+      big: () => img(surfaceSprite(def), fitScale(surfaceSprite(def), 88), def.name),
+      preview: { room: { [def.kind]: def.id }, frame: def.kind === 'floor' ? 'floor' : 'wall', label: `${pet.name}'s burrow with the ${def.name.toLowerCase()}` },
+      what: def.kind === 'wall' ? 'For the burrow walls' : def.kind === 'floor' ? 'For the burrow floor' : 'For the window',
+      section: SURFACE_SECTION[def.kind],
+      note: state === 'inuse' ? 'In use' : state === 'owned' ? 'Owned' : undefined,
+      actions: () => {
+        if (state === 'inuse') return [];
+        if (state === 'owned') return [button('Use it', 'btn primary', () => { useSurface(burrow, def.id); saveBurrow(); play('flip'); toast(`The ${def.name.toLowerCase()} is up.`); render(); })];
+        return buyOrSave(it, () => {
+          const paid = spendClover(pet, def.price);
+          if (!paid) { play('nope'); toast(moreClover(def.price)); return; }
+          pet = paid;
+          if (pet.goal === it.key) pet = { ...pet, goal: null };
+          addSurface(burrow, def.id);
+          savePet();
+          saveBurrow();
+          play('clover');
+          haptic('success');
+          toast(`The ${def.name.toLowerCase()} is up. Switch back any time.`);
+          note(`Put up the ${def.name.toLowerCase()}.`, 'sparkle', `surface:${def.id}`);
+          render();
+        });
+      },
+    };
+    return it;
+  });
+}
+
+function wardrobeItems(): ShopItem[] {
+  const n = now();
+  const w = wardrobe(pet);
+  const bl = bondLevel(pet.bond).level;
+  const shown = OUTFITS.filter((o) => w.owned.includes(o.id) || (!o.giftOnly && (!o.limited || limitedAvailable(o.id, n, tz))));
+  // on her head, then round her neck; hers first in each
+  const order = (o: Outfit) => (o.slot === 'head' ? 0 : 2) + (w.owned.includes(o.id) ? 0 : 1);
+  return shown.sort((a, b) => order(a) - order(b) || a.price - b.price).map((o) => {
+    const owned = w.owned.includes(o.id);
+    const on = w[o.slot] === o.id;
+    const locked = !owned && o.bond && bl < o.bond ? `Opens at bond ${o.bond}. Your bond grows as you look after ${pet.name} each day (it's ${bl} now).` : null;
+    const state: ShopItem['state'] = on ? 'wearing' : owned ? 'owned' : locked ? 'locked' : o.price <= pet.clover ? 'buy' : 'saving';
+    const it: ShopItem = {
+      key: `outfit:${o.id}`, name: o.name, price: o.price, state, locked: locked ?? undefined, limited: o.limited,
+      card: () => h('span', { class: 'on-her' }, herIn(o.slot, o.id, 2)),
+      big: () => herIn(o.slot, o.id, 4, 'happy'),
+      backdrop: 'her',
+      what: o.slot === 'head' ? 'On her head' : 'Round her neck',
+      section: o.slot === 'head' ? 'On her head' : 'Round her neck',
+      note: on ? 'Wearing' : owned ? 'Hers' : undefined,
+      actions: () => {
+        if (on) return [button('Take it off', 'btn', () => { pet = wear(pet, o.slot, null); savePet(); play('flip'); render(); })];
+        if (owned) return [button('Put it on', 'btn primary', () => { pet = wear(pet, o.slot, o.id); savePet(); play('flip'); goal('dress'); render(); })];
+        return buyOrSave(it, () => {
+          const r = buyOutfit(pet, o.id);
+          if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? moreClover(o.price) : 'Not yet.'); return; }
+          if (pet.goal === it.key) r.state.goal = null;
+          // bought to wear: she puts it on
+          pet = wear(r.state, o.slot, o.id);
+          savePet();
+          play('clover');
+          haptic('success');
+          toast(`${pet.name} puts on the ${o.name.toLowerCase()}.`);
+          goal('dress');
+          note(`Got ${article(o.name)}.`, 'gift', `outfit:${o.id}`);
+          render();
+        });
+      },
+    };
+    return it;
+  });
+}
+
+function toyItems(): ShopItem[] {
+  return TOYS.map((t) => {
+    const owned = ownsToy(pet, t.id);
+    const locked = !owned && t.after && !ownsToy(pet, t.after) ? `Comes after the ${toyById(t.after)!.name.toLowerCase()}: get that one first.` : null;
+    const state: ShopItem['state'] = owned ? 'owned' : locked ? 'locked' : t.price <= pet.clover ? 'buy' : 'saving';
+    const art = TOY_ART[t.id] ?? 'sparkle';
+    const it: ShopItem = {
+      key: `toy:${t.id}`, name: t.name, price: t.price, state, locked: locked ?? undefined,
+      card: () => img(itemSprite(art), fitScale(itemSprite(art), 44)),
+      big: () => img(itemSprite(art), fitScale(itemSprite(art), 88), t.name),
+      preview: { play: art, frame: 'play', label: `${pet.name} playing with the ${t.name.toLowerCase()}` },
+      what: 'A toy for playtime, from Play at home',
+      section: owned ? 'Her toys' : locked ? 'Opens later' : 'For sale',
+      note: owned ? 'Hers' : undefined,
+      actions: () => {
+        if (owned) return [button('Play with it', 'btn primary', () => { goTab('burrow'); doAction('play', { toy: t.id }); })];
+        return buyOrSave(it, () => {
+          const r = buyToy(pet, t.id);
+          if (!r.ok) { play('nope'); toast(moreClover(t.price)); return; }
+          pet = r.state;
+          if (pet.goal === it.key) pet = { ...pet, goal: null };
+          savePet();
+          play('clover');
+          haptic('success');
+          toast(`A new ${t.name.toLowerCase()} for ${pet.name}! Play with it from Play.`);
+          note(`Got ${article(t.name)} for her toy box.`, art, `toy:${t.id}`);
+          render();
+        });
+      },
+    };
+    return it;
+  });
+}
+
+/**
+ * The display case with nothing picked, the category's own word: a few
+ * pieces for sale, her room, her as she's dressed, or her at play.
+ */
+function shopIntro(items: ShopItem[]): { big?: Node; backdrop?: ShopBackdrop; preview?: ShopPreview; name: string; what: string; actions: HTMLButtonElement[] } {
+  const event = shopEvent ? activeEvents(now(), tz).find((e) => e.id === shopEvent) : undefined;
+  const room: ShopPreview = { frame: 'wall', label: `${pet.name}'s burrow` };
+  switch (shopCat) {
+    case 'decor': {
+      // what's for sale, cheapest first, standing together
+      const arts = CATALOG.filter((d) => d.zone !== 'hang' && items.some((i) => i.key === `decor:${d.id}` && (i.state === 'buy' || i.state === 'saving')))
+        .sort((a, b) => a.price - b.price).slice(0, 3).map((d) => img(itemSprite(d.art), fitScale(itemSprite(d.art), 64), d.name));
+      const big = event ? img(itemSprite(EVENT_ART[event.id] ?? 'sparkle'), 4) : arts.length ? h('span', { class: 'shop-lineup' }, ...arts) : undefined;
+      return event
+        ? { big, backdrop: 'floor', name: `${event.name} decor`, what: 'Here for the season. Tap one to see it.', actions: [button('All decor', 'btn', () => { shopEvent = null; shopSig = ''; renderShop(); })] }
+        : { big, backdrop: 'floor', preview: big ? undefined : room, name: 'Decor for the burrow', what: 'Tap something to see it. What you buy waits in storage until you put it out.', actions: [button('Arrange the burrow', 'btn', () => goTab('shop', { arrange: true }))] };
+    }
+    case 'walls': return { preview: room, name: 'Walls, floors and windows', what: "Tap one to see it in her burrow. Switch back any time.", actions: [] };
+    case 'wardrobe': return { big: herIn(null, null, 4, 'happy'), backdrop: 'her', name: `${pet.name}'s wardrobe`, what: 'Tap something to try it on her.', actions: [] };
+    case 'toys': return { preview: { frame: 'play', label: pet.name }, name: 'Her toy box', what: 'Tap a toy to see her play with it. At home, play from Play.', actions: [] };
+  }
+}
+
+function renderShop(): void {
+  const s = shopUi;
+  if (!s || !pet) return;
+  const n = now();
+  const sig = [shopCat, shopSel, shopEvent, pet.clover, pet.goal, bondLevel(pet.bond).level, dressKey(dressOf(pet)), wardrobe(pet).owned.join(), (pet.toys ?? []).join(),
+    burrow.items.map((i) => `${i.id}${i.placed ? '+' : '-'}`).join(), JSON.stringify(burrow.surfaces ?? null), activeEvents(n, tz).map((e) => e.id).join()].join('|');
+  s.clover.textContent = String(pet.clover);
+  if (sig === shopSig) return;
+  shopSig = sig;
+  const goalOf = goalInfo(pet.goal);
+  s.sub.textContent = goalOf && !goalOf.owned ? `Saving for the ${goalOf.name.toLowerCase()}: ${Math.min(pet.clover, goalOf.price).toLocaleString()} of ${goalOf.price.toLocaleString()}` : 'Things for her and her burrow';
+  for (const c of SHOP_CATS) s.cats[c].setAttribute('aria-pressed', String(c === shopCat));
+
+  const items = shopCat === 'decor' ? decorItems() : shopCat === 'walls' ? wallItems() : shopCat === 'wardrobe' ? wardrobeItems() : toyItems();
+  const sel = items.find((i) => i.key === shopSel) ?? null;
+  if (!sel) shopSel = null;
+
+  // the display case: a live preview of her room, or the thing itself against her walls
+  const shown = sel
+    ? { big: sel.preview ? undefined : sel.big(), backdrop: sel.backdrop, preview: sel.preview, name: sel.name, what: sel.what, actions: sel.actions() }
+    : shopIntro(items);
+  const wasPlaying = shopPreview?.play;
+  shopPreview = shown.preview ?? null;
+  // a new toy: she starts playing with it straight away
+  if (shopPreview?.play !== wasPlaying) shopPlayAt = 0;
+  const stage = shopPreview ? shopStage() : shopBackdrop(shown.backdrop ?? 'floor', shown.big ?? h('span'));
+  if (shopPreview) shopView!.canvas.setAttribute('aria-label', shopPreview.label);
+  // tried on: a little hop
+  if (!shopPreview && shown.backdrop === 'her' && sel) stage.classList.add('hop');
+  const status = !sel ? null
+    : sel.state === 'locked' ? h('p', { class: 'shop-why' }, img(padlock(), 2), sel.locked ?? 'Not yet.')
+      : sel.state === 'saving' ? h('p', { class: 'shop-why' }, priceTag(sel.price), ` · ${(sel.price - pet.clover).toLocaleString()} more to go`)
+        : sel.state === 'buy' || !sel.note ? null : h('p', { class: 'shop-why owned', text: `✓ ${sel.note}` });
+  const focusKey = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('[data-key]')?.dataset.key
+    ?? (s.display.contains(document.activeElement) ? 'display' : null);
+  s.display.replaceChildren(
+    stage,
+    h('div', { class: 'shop-info' },
+      h('h2', { text: shown.name }),
+      h('p', { class: 'meta', text: shown.what }),
+      status,
+      shown.actions.length ? h('div', { class: 'shop-acts' }, ...shown.actions) : null));
+
+  // the cards, in sections, in the order they came
+  const sections = new Map<string, ShopItem[]>();
+  for (const it of items) sections.set(it.section, [...(sections.get(it.section) ?? []), it]);
+  const order = ['In storage', 'For sale', 'Her toys', 'In the burrow', 'Walls', 'Floors', 'Windows', 'On her head', 'Round her neck', 'Opens later'];
+  const kids: Node[] = [];
+  for (const name of [...sections.keys()].sort((a, b) => order.indexOf(a) - order.indexOf(b))) {
+    const list = sections.get(name)!;
+    // for sale: cheapest first
+    if (name === 'For sale' || name === 'Opens later') list.sort((a, b) => a.price - b.price);
+    kids.push(h('h3', { class: 'shop-section', text: name }), h('div', { class: 'shop-grid' }, ...list.map((it) => shopCard(it))));
+  }
+  if (!items.length) kids.push(h('p', { class: 'quiet', text: 'Nothing here just now.' }));
+  s.grid.replaceChildren(...kids);
+  fitShopScene();
+  if (focusKey === 'display') (s.display.querySelector('button') as HTMLButtonElement | null)?.focus({ preventScroll: true });
+  else if (focusKey) s.grid.querySelector<HTMLElement>(`[data-key="${focusKey}"]`)?.focus({ preventScroll: true });
+}
+
+function shopCard(it: ShopItem): HTMLButtonElement {
+  const on = it.key === shopSel;
+  const foot = it.state === 'locked' ? h('span', { class: 'pr locked' }, img(padlock(), 1), 'Locked')
+    : it.note ? h('span', { class: `pr ${it.state === 'place' ? '' : 'mine'}`.trim(), text: it.note })
+      : priceTag(it.price);
+  const label = `${it.name}. ${it.state === 'locked' ? 'Locked' : it.note ?? `${it.price} clover${it.state === 'saving' ? ', not enough yet' : ''}`}.`;
+  const b = h('button', { class: `shop-card ${it.state}`, type: 'button', 'aria-pressed': String(on), 'aria-label': label, 'data-key': it.key },
+    it.limited && it.state !== 'owned' && it.state !== 'wearing' ? h('span', { class: 'tag', text: 'Limited' }) : null,
+    pet.goal === it.key ? h('span', { class: 'tag goal', text: 'Goal' }) : null,
+    h('span', { class: 'art' }, it.card()),
+    h('span', { class: 'nm', text: it.name }),
+    foot);
+  b.addEventListener('click', () => {
+    shopSel = on ? null : it.key;
+    play('flip');
+    renderShop();
   });
   return b;
 }
@@ -1932,12 +2784,43 @@ function plotSprite(crop: CropId | null, st: 0 | 1 | 2 | 3): Sprite {
 // garden-scene.ts; what's where is garden.ts.
 
 const AREA_NAME: Record<AreaId, string> = { patch: 'Veg patch', yard: 'Yard', meadow: 'Meadow' };
-const PLOT_UNLOCK: Record<number, string> = {
-  1: 'Opens with the second plot, under Upgrades.',
-  2: 'Opens with the third plot, under Upgrades.',
-  3: 'Opens with the fourth plot: soil level 3, then under Upgrades.',
-  4: 'Opens with the fifth plot: soil level 5, then under Upgrades.',
-};
+const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
+
+/** Why bed `i` can't be bought yet: an earlier bed first, or richer soil. */
+function plotLockReason(i: number): string {
+  const n = plotCount(pet);
+  if (i > n) return `Dig the ${ORDINAL[n]} plot first: tap its sign.`;
+  const soil = plotUpgrade(i)?.requires?.soil ?? 0;
+  return soil > soilLevel(pet) ? `The ${ORDINAL[i]} plot needs richer soil, level ${soil}. It's under Upgrades.` : 'Not yet.';
+}
+
+/** The next bed's offer, from tapping its sign or the patch's chip. */
+function confirmPlot(i: number): void {
+  const u = plotUpgrade(i);
+  if (!u) return;
+  openSheet((close) => [
+    h('div', { class: 'event-art' }, img(itemSprite('sprout'), 4)),
+    h('div', { class: 'eyebrow', text: 'The veg patch' }),
+    h('h2', { text: `Dig a ${ORDINAL[i]} plot?` }),
+    h('p', { text: 'One more bed to grow strawberries, golden carrots or clover sprouts in.' }),
+    h('div', { class: 'actions-col' },
+      button(pet.clover >= u.price ? `Dig it for ${u.price} clover` : `${u.price} clover: ${u.price - pet.clover} more to go`, 'btn primary', () => {
+        const r = buyUpgrade(pet, u.id);
+        if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? moreClover(u.price) : plotLockReason(i)); return; }
+        pet = r.state;
+        savePet();
+        play('gift');
+        haptic('success');
+        toast(`The ${ORDINAL[i]} plot is dug. What shall we grow?`);
+        goal('upgrade');
+        close();
+        gardenScene?.burst('sparkle', 4, performance.now(), { x: PLOT_SPOTS[i]!.x, y: PLOT_SPOTS[i]!.y - 6 });
+        gardenSig = '';
+        renderGarden();
+      }),
+      button('Not now', 'btn', close)),
+  ]);
+}
 
 interface GardenUi {
   nodes: Node[];
@@ -1950,42 +2833,27 @@ interface GardenUi {
   left: HTMLButtonElement;
   right: HTMLButtonElement;
   dots: HTMLButtonElement[];
+  /** The big Collect button over the yard, while clover is waiting. */
+  claim: HTMLButtonElement;
   moodline: HTMLElement;
   acts: HTMLElement;
+  /** Send her foraging, in every area; it counts down while she's out. */
+  forage: HTMLButtonElement;
 }
 
+/** Which scene is drawn: the garden's while on the Garden tab, else the burrow's. */
 let room: 'burrow' | 'garden' = 'burrow';
 let area: AreaId = 'patch';
 let gardenUi: GardenUi | null = null;
 let gardenScene: GardenScene | null = null;
-let burrowNodes: Node[] = [];
 
-/** Into the garden, on the area last looked at. */
-function openGarden(): void {
-  if (away()) return;
-  if (decorating) exitDecorate();
-  closeFoodTray();
-  if (!gardenUi) gardenUi = buildGardenScreen();
-  burrowNodes = [...app.childNodes];
-  app.replaceChildren(...gardenUi.nodes);
-  room = 'garden';
-  gardenScene?.jumpTo(area);
-  layoutGarden();
-  renderGarden();
-}
+/** An area you have to pay to walk into, until you have: the meadow, behind its gate. */
+const gated = (a: AreaId): boolean => a === 'meadow' && !hasUpgrade(pet, 'meadow');
 
-/** Back to the burrow. */
-function leaveGarden(): void {
-  if (room !== 'garden') return;
-  if (arranging) stopArranging();
-  room = 'burrow';
-  app.replaceChildren(...burrowNodes);
-  layoutStage();
-  render();
-}
-
+/** Walk to an area; one still to pay for offers itself instead, and you walk in once it's open. */
 function goArea(a: AreaId): void {
   if (a === area) return;
+  if (gated(a)) { confirmMeadow(() => goArea(a)); return; }
   area = a;
   play('flip');
   renderGarden();
@@ -1995,13 +2863,10 @@ function buildGardenScreen(): GardenUi {
   const title = h('div', { class: 'name' });
   const sub = h('div', { class: 'sub' });
   const clover = h('span');
-  const toBurrow = h('button', { type: 'button', class: 'room-tab', text: 'Burrow' });
-  const toGarden = h('button', { type: 'button', class: 'room-tab', 'aria-pressed': 'true', text: 'Garden' });
-  toBurrow.addEventListener('click', () => leaveGarden());
   const canvas = h('canvas', { role: 'img', 'aria-label': 'The garden' });
   const chips = h('div', { class: 'float-chips' });
-  const left = h('button', { type: 'button', class: 'area-arrow left', text: '‹' });
-  const right = h('button', { type: 'button', class: 'area-arrow right', text: '›' });
+  const left = h('button', { type: 'button', class: 'area-arrow left' });
+  const right = h('button', { type: 'button', class: 'area-arrow right' });
   left.addEventListener('click', () => goArea(AREAS[Math.max(0, AREAS.indexOf(area) - 1)]!));
   right.addEventListener('click', () => goArea(AREAS[Math.min(AREAS.length - 1, AREAS.indexOf(area) + 1)]!));
   const dots = AREAS.map((a) => {
@@ -2009,24 +2874,47 @@ function buildGardenScreen(): GardenUi {
     b.addEventListener('click', () => goArea(a));
     return b;
   });
-  const stage = h('main', { class: 'stage garden-stage' }, canvas, chips, left, right, h('nav', { class: 'area-dots', 'aria-label': 'Areas of the garden' }, ...dots));
+  const claim = h('button', { type: 'button', class: 'yard-claim', hidden: true });
+  claim.addEventListener('click', () => collectYard(claim));
+  const stage = h('main', { class: 'stage garden-stage' }, canvas, chips, left, right, claim, h('nav', { class: 'area-dots', 'aria-label': 'Areas of the garden' }, ...dots));
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite' });
   const acts = h('div', { class: 'actions' });
   const header = h('header', { class: 'hud' },
     h('div', { class: 'hud-top' },
       h('div', { class: 'who' }, title, sub),
-      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)),
-    h('nav', { class: 'room-switch', 'aria-label': 'Rooms' }, toBurrow, toGarden));
+      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
   const panel = h('section', { class: 'panel' }, moodline, acts);
+  // its label turns into the countdown while she's out; tap it then to call her home
+  const forage = actButton('Forage', 'basket', () => openForage());
 
   gardenScene = new GardenScene(canvas);
   new ResizeObserver(() => layoutGarden()).observe(stage);
   wireGardenInput(canvas);
-  return { nodes: [header, stage, panel], title, sub, clover, stage, canvas, chips, left, right, dots, moodline, acts };
+  return { nodes: [header, stage, panel], title, sub, clover, stage, canvas, chips, left, right, dots, claim, moodline, acts, forage };
 }
 
 function layoutGarden(): void {
-  if (gardenUi && gardenScene && room === 'garden') fitScene(gardenUi.stage, gardenUi.canvas, gardenScene as unknown as Scene);
+  if (!gardenUi || !gardenScene || room !== 'garden') return;
+  gardenScale = fitGarden(gardenUi.stage, gardenUi.canvas, gardenScene);
+  // the arrows sit on the path, the way out of every area (the ground is on the canvas's floor)
+  const c = gardenUi.canvas;
+  const y = c.offsetTop + c.offsetHeight - (STRIP_H - GROUND.pathY - GROUND.pathH / 2) * gardenScale;
+  for (const b of [gardenUi.left, gardenUi.right]) b.style.top = `${Math.round(y)}px`;
+}
+
+let gardenScale = 1;
+/** fitScene for a garden: its canvas has a spare column on the right for the sub-pixel nudge. */
+function fitGarden(stageEl: HTMLElement, el: HTMLCanvasElement, gs: GardenScene): number {
+  const scale = fitScene(stageEl, el, gs as unknown as Scene);
+  el.style.width = `${el.width * scale}px`;
+  return scale;
+}
+
+/** Shift a garden canvas by the camera's fraction of a pixel, in screen pixels, so slides don't step. */
+function nudgeGarden(el: HTMLCanvasElement, gs: GardenScene, scale: number): void {
+  const x = -Math.round(gs.subX * scale * devicePixelRatio) / devicePixelRatio;
+  const t = x ? `translateX(${x}px)` : '';
+  if (el.style.transform !== t) el.style.transform = t;
 }
 
 function gardenModel(n: number): GardenModel {
@@ -2039,13 +2927,15 @@ function gardenModel(n: number): GardenModel {
 }
 
 function drawGardenFrame(t: number): void {
-  if (!gardenScene || !pet) return;
+  if (!gardenScene || !pet || !gardenUi) return;
   gardenScene.draw(gardenModel(now()), t);
+  nudgeGarden(gardenUi.canvas, gardenScene, gardenScale);
 }
 
-/** Swipe between areas; a short drag is a tap. */
+/** The garden follows a sideways drag and settles on an area when let go; a short drag is a tap. */
 function wireGardenInput(canvas: HTMLCanvasElement): void {
-  let start: { x: number; y: number } | null = null;
+  // `panning` once the drag is clearly sideways; `trail` is recent points, for the speed at release
+  let start: { x: number; y: number; panning: boolean; trail: { x: number; t: number }[] } | null = null;
   let drag: { item: PlacedItem; dx: number; dy: number } | null = null;
   const strip = (e: { clientX: number; clientY: number }) => {
     const r = canvas.getBoundingClientRect();
@@ -2061,10 +2951,25 @@ function wireGardenInput(canvas: HTMLCanvasElement): void {
       if (item) { drag = { item, dx: item.x - p.x, dy: item.y - p.y }; canvas.setPointerCapture(e.pointerId); }
       return;
     }
-    start = { x: e.clientX, y: e.clientY };
+    start = { x: e.clientX, y: e.clientY, panning: false, trail: [{ x: e.clientX, t: e.timeStamp }] };
     try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (start && gardenScene) {
+      const dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (!start.panning && Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+        // pick up from here, so the view doesn't leap the 8px
+        start.panning = true;
+        start.x = e.clientX;
+        gardenScene.grab();
+      }
+      if (start.panning) {
+        gardenScene.dragTo((e.clientX - start.x) / gardenScale);
+        start.trail.push({ x: e.clientX, t: e.timeStamp });
+        if (start.trail.length > 6) start.trail.shift();
+      }
+      return;
+    }
     if (!drag) return;
     const def = byId(drag.item.id);
     if (!def) return;
@@ -2074,16 +2979,25 @@ function wireGardenInput(canvas: HTMLCanvasElement): void {
   canvas.addEventListener('pointerup', (e) => {
     if (drag) { drag = null; saveBurrow(); return; }
     if (!start) return;
-    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    const s = start;
     start = null;
-    if (Math.abs(dx) > 24 && Math.abs(dx) > Math.abs(dy)) {
-      const i = AREAS.indexOf(area) + (dx < 0 ? 1 : -1);
-      if (i >= 0 && i < AREAS.length) goArea(AREAS[i]!);
+    if (s.panning && gardenScene) {
+      // the finger's speed over the last ~100ms, in scene px/ms
+      const recent = s.trail.filter((p) => e.timeStamp - p.t < 100);
+      const first = recent[0] ?? s.trail[s.trail.length - 1]!;
+      const dt = e.timeStamp - first.t;
+      const v = dt > 0 ? (e.clientX - first.x) / dt / gardenScale : 0;
+      const to = gardenScene.release(area, v, performance.now());
+      if (to !== area) goArea(to);
       return;
     }
     gardenTap(e);
   });
-  canvas.addEventListener('pointercancel', () => { start = null; if (drag) { drag = null; saveBurrow(); } });
+  canvas.addEventListener('pointercancel', () => {
+    if (start?.panning) gardenScene?.release(area, 0, performance.now());
+    start = null;
+    if (drag) { drag = null; saveBurrow(); }
+  });
   // Arranging by keyboard, as in Decorate: N and P pick a piece, arrows move it
   // (Shift for bigger steps), F flips it, Delete puts it away.
   canvas.addEventListener('keydown', (e) => {
@@ -2124,14 +3038,14 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
   const hit = hitTest(pet, x, y, n);
   if (!hit) {
     if (areaAt(x) !== 'meadow') return;
-    if (!hasUpgrade(pet, 'meadow')) { confirmMeadow(); return; }
+    if (gated('meadow')) { confirmMeadow(() => goArea('meadow')); return; }
     const piece = pieceAt(x, y);
     const def = piece ? byId(piece.id) : undefined;
     if (def) toast(def.boost ? `${def.name}: ${BOOST_LINE[def.boost].toLowerCase()}.` : `${def.name}.`);
     return;
   }
   if (hit.kind === 'plot') {
-    if (hit.state === 'locked') toast(PLOT_UNLOCK[hit.index] ?? 'Not yet.');
+    if (hit.state === 'locked') { if (plotOffer(pet, hit.index) === 'next') confirmPlot(hit.index); else toast(plotLockReason(hit.index)); }
     else if (hit.state === 'empty') openSeeds(hit.index);
     else if (hit.state === 'ready') pickPlot(hit.index);
     else {
@@ -2140,7 +3054,7 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
     }
   } else if (hit.kind === 'building') {
     if (hit.state === 'owned') {
-      if (stored(pet, n) >= 1) collectYard();
+      if (stored(pet, n) >= 1) collectYard(gardenUi?.claim.hidden ? undefined : gardenUi?.claim);
       else toast(`${BUILDINGS[hit.id].name}: makes ${Math.round(BUILDINGS[hit.id].perHour * 24)} clover a day.`);
     } else if (hit.state === 'free') confirmBuild(hit.id);
     else { const q = BUILDINGS[hit.id].requires!; toast(`${BUILDINGS[hit.id].name}s come after ${q.count} ${q.building === 'patch' ? 'clover patches' : 'beehives'}.`); }
@@ -2184,12 +3098,12 @@ function openSeeds(i: number): void {
       const s = itemSprite(CROP_ART[c]);
       const b = h('button', {
         class: 'seed', type: 'button',
-        'aria-label': `${info.name}. ${info.seedCost} clover. Ready in ${fmtDuration(growMs(pet, c))}. Gives ${yields(c)}.`,
+        'aria-label': `${info.name}. ${info.seedCost ? `${info.seedCost} clover` : 'Free'}. Ready in ${fmtDuration(growMs(pet, c))}. Gives ${yields(c)}.`,
       },
       img(s, fitScale(s, 26)),
       h('span', { class: 'nm', text: info.name }),
       h('span', { class: 'meta', text: `${fmtDuration(growMs(pet, c))} · ${yields(c)}` }),
-      h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(info.seedCost)));
+      info.seedCost ? h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(info.seedCost)) : h('span', { class: 'pr', text: 'Free' }));
       b.addEventListener('click', () => {
         const r = plant(pet, i, c, now());
         if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? 'Not enough clover for those seeds.' : 'That plot is busy.'); return; }
@@ -2215,10 +3129,9 @@ function openSeeds(i: number): void {
   });
 }
 
-/** "Makes 6 clover a day · pays for itself in about 14 days": what the next one of a kind is worth. */
+/** "Makes 6 clover a day": what the next one of a kind brings. (No payback: late in the yard it reads as "not worth it".) */
 function paysLine(id: BuildingId): string {
-  const p = payback(pet, id);
-  return `Makes ${Math.round(p.perDay)} clover a day · pays for itself in about ${p.days} ${p.days === 1 ? 'day' : 'days'}`;
+  return `Makes ${Math.round(payback(pet, id).perDay)} clover a day`;
 }
 
 /** Build the next of a kind, from its "+" spot. */
@@ -2270,20 +3183,20 @@ function confirmShed(): void {
   ]);
 }
 
-/** Upgrades and the yard's list: the old garden sheet, without the plots (they're in the garden now). */
-function openGardenUpgrades(): void {
+/** Upgrades and the yard's list, a tab each; it opens on the one for where you are. */
+function openGardenUpgrades(tab: 'garden' | 'yard' = area === 'yard' ? 'yard' : 'garden'): void {
   openLiveSheet((close, redraw) => {
-    const berries = pet.pantry?.berries ?? 0, golden = pet.pantry?.golden ?? 0;
-    const pantry = berries || golden
-      ? `In the pantry: ${[berries ? `${berries} ${berries === 1 ? 'strawberry' : 'strawberries'}` : '', golden ? `${golden} golden ${golden === 1 ? 'carrot' : 'carrots'}` : ''].filter(Boolean).join(' and ')}.`
-      : 'Grow strawberries and golden carrots for her, or clover sprouts to sell.';
     const redrawAll = () => { redraw(); renderGarden(); };
+    const tabs = (['garden', 'yard'] as const).map((t) => {
+      const b = h('button', { type: 'button', class: 'seg-tab', 'aria-pressed': String(t === tab), text: t === 'garden' ? 'Garden' : 'Yard' });
+      b.addEventListener('click', () => { if (tab !== t) { tab = t; play('flip'); redraw(); } });
+      return b;
+    });
     return [
       h('div', { class: 'eyebrow', text: 'The garden' }),
       h('h2', { text: 'Upgrades' }),
-      h('p', { class: 'note', text: pantry }),
-      gardenUpgrades(redrawAll),
-      yardSection(redrawAll),
+      h('nav', { class: 'seg', 'aria-label': 'Upgrades for' }, ...tabs),
+      tab === 'garden' ? gardenUpgrades(redrawAll) : yardSection(redrawAll),
       h('div', { class: 'actions-col' }, button('Done', 'btn primary', close)),
     ];
   });
@@ -2308,13 +3221,24 @@ function renderGarden(): void {
   const i = AREAS.indexOf(area);
   g.title.textContent = `${pet.name}'s garden`;
   g.sub.textContent = `${AREA_NAME[area]} · ${WEATHER_NAME[w.weather]}`;
-  g.clover.textContent = String(pet.clover);
+  if (!cloverCounting) g.clover.textContent = String(pet.clover);
   g.left.hidden = i === 0 || arranging;
   g.right.hidden = i === AREAS.length - 1 || arranging;
   const prev = AREAS[i - 1], next = AREAS[i + 1];
+  // the next area still to pay for: a padlock on its arrow, and the camera won't go past this one
+  const shut = !!next && gated(next);
+  if (gardenScene) gardenScene.reach = gated('meadow') ? 'yard' : 'meadow';
+  if (g.right.classList.contains('locked') !== shut) {
+    g.right.classList.toggle('locked', shut);
+    g.right.replaceChildren(...(shut ? [img(padlock(), 3)] : []));
+  }
   g.left.setAttribute('aria-label', prev ? `Walk to the ${AREA_NAME[prev].toLowerCase()}` : '');
-  g.right.setAttribute('aria-label', next ? `Walk to the ${AREA_NAME[next].toLowerCase()}` : '');
-  g.dots.forEach((d, j) => d.setAttribute('aria-current', String(j === i)));
+  g.right.setAttribute('aria-label', !next ? '' : shut ? `The ${AREA_NAME[next].toLowerCase()} is shut: open it for ${MEADOW.gate} clover` : `Walk to the ${AREA_NAME[next].toLowerCase()}`);
+  g.dots.forEach((d, j) => {
+    d.setAttribute('aria-current', String(j === i));
+    d.classList.toggle('locked', gated(AREAS[j]!));
+    d.setAttribute('aria-label', gated(AREAS[j]!) ? `${AREA_NAME[AREAS[j]!]} (shut)` : AREA_NAME[AREAS[j]!]);
+  });
 
   const ps = plots(pet);
   const ready = ps.filter((p) => p && p.readyAtMs <= n).length;
@@ -2343,20 +3267,43 @@ function renderGarden(): void {
   if (asleep) line = `${pet.name} is asleep in the burrow. ${line}`;
   else if (isOut(pet, n)) line = `${pet.name} is out foraging. ${line}`;
   if (!decorating) g.moodline.textContent = line;
+  // Forage counts down in place of its label while she's out
+  const outFor = isOut(pet, n) ? tripOf(pet)!.endsAtMs - n : 0;
+  const forageLabel = g.forage.querySelector('span');
+  const forageText = outFor ? fmtCountdown(outFor) : 'Forage';
+  if (forageLabel && forageLabel.textContent !== forageText) forageLabel.textContent = forageText;
+  g.forage.classList.toggle('counting', !!outFor);
+  g.forage.setAttribute('aria-label', outFor ? `Out foraging, home in ${fmtLong(outFor)}` : 'Forage');
 
   const sig = [area, ready, empty, inYard, asleep, pet.clover, chips.join(), arranging, gardenSel, hasUpgrade(pet, 'meadow'), meadowItems(burrow).length].join('|');
   if (sig === gardenSig) return;
   gardenSig = sig;
   g.chips.replaceChildren(...chips.map((c) => h('div', { class: 'tchip', text: c })));
-  // (the Burrow tab at the top goes back; Upgrades has the yard's buildings too)
+  // the next bed's price, where you can see it: tap for the offer, as on its sign
+  const nextBed = plotCount(pet);
+  const nextUp = area === 'patch' && !arranging && plotOffer(pet, nextBed) === 'next' ? plotUpgrade(nextBed) : undefined;
+  if (nextUp) {
+    const chip = h('button', { type: 'button', class: `tchip plot-offer${pet.clover >= nextUp.price ? ' ready' : ''}`, 'aria-label': `Dig the ${ORDINAL[nextBed]} plot for ${nextUp.price} clover` },
+      h('span', { text: `Plot ${nextBed + 1}` }), img(itemSprite('clover'), 1), h('span', { text: String(nextUp.price) }));
+    chip.addEventListener('click', () => confirmPlot(nextBed));
+    g.chips.append(chip);
+  }
+  const showClaim = area === 'yard' && inYard >= 1 && !arranging;
+  if (showClaim) {
+    g.claim.replaceChildren(img(itemSprite('clover'), 3), h('span', { class: 'lbl', text: 'Collect' }), h('span', { class: 'amt', text: `+${inYard}` }));
+    g.claim.setAttribute('aria-label', `Collect ${inYard} clover`);
+  }
+  if (!g.claim.classList.contains('popping')) g.claim.hidden = !showClaim;
+  // (Upgrades has the yard's buildings too; Forage goes at the end of every area's row but while arranging)
   const upgrades = actButton('Upgrades', 'leafy', () => openGardenUpgrades());
   const buttons = area === 'patch'
     ? [actButton('Pick', 'strawberry', () => pickAll(), { badge: ready ? String(ready) : undefined, off: !ready && "Nothing's ripe yet. Tap a plot to see how long." }),
       actButton('Plant', 'leafy', () => openSeeds(empty), { off: empty < 0 && 'Every plot is growing something.' }), upgrades]
     : area === 'yard'
-      ? [actButton('Collect', 'clover', () => { collectYard(); renderGarden(); }, { badge: inYard >= 1 ? String(inYard) : undefined, off: inYard < 1 && (perHour(pet) ? 'Nothing to collect yet. The yard fills up every hour.' : 'Build a clover patch first: tap a + in the yard.') }),
+      ? [actButton('Collect', 'clover', () => { collectYard(gardenUi?.claim.hidden ? undefined : gardenUi?.claim); renderGarden(); }, { badge: inYard >= 1 ? String(inYard) : undefined, off: inYard < 1 && (perHour(pet) ? 'Nothing to collect yet. The yard fills up every hour.' : 'Build a clover patch first: tap a + in the yard.') }),
         actButton('Build', 'shed', () => openGardenUpgrades())]
       : meadowButtons();
+  if (!arranging) buttons.push(g.forage);
   g.acts.style.gridTemplateColumns = `repeat(${buttons.length}, minmax(0, 1fr))`;
   g.acts.replaceChildren(...buttons);
   g.canvas.setAttribute('aria-label', area === 'patch'
@@ -2386,8 +3333,8 @@ function syncMeadow(): void {
   savePet();
 }
 
-/** The gate's offer. */
-function confirmMeadow(): void {
+/** The gate's offer; `then`, once it's open (walking in, when that's what you were doing). */
+function confirmMeadow(then?: () => void): void {
   openSheet((close) => [
     h('div', { class: 'event-art' }, img(itemSprite('sunflowers'), 4)),
     h('div', { class: 'eyebrow', text: 'The meadow' }),
@@ -2407,6 +3354,7 @@ function confirmMeadow(): void {
         close();
         gardenSig = '';
         renderGarden();
+        then?.();
       }),
       button('Not now', 'btn', close)),
   ]);
@@ -2565,84 +3513,43 @@ function meadowLine(): string {
 
 const TOY_ART: Record<string, ItemArt> = { ball: 'ball', yarn: 'yarn', box: 'box', tunnel: 'tunnel', swing: 'swing', ballpit: 'ballpit', maze: 'maze', kite: 'kite' };
 
-/** Play with her toys: no score, no limit. Toys she doesn't have yet can be bought here. */
-function openToys(): void {
-  openLiveSheet((close, redraw) => {
-    const toys = TOYS.map((t) => {
-      const owned = ownsToy(pet, t.id);
-      const locked = !owned && t.after && !ownsToy(pet, t.after) ? `After the ${toyById(t.after)!.name.toLowerCase()}` : null;
-      const key = `toy:${t.id}`;
-      const s = itemSprite(TOY_ART[t.id] ?? 'sparkle');
-      const b = h('button', {
-        class: 'wear' + (pet.goal === key ? ' pinned' : ''), type: 'button',
-        'aria-label': owned ? `Play with the ${t.name.toLowerCase()}` : locked ? `${t.name}. ${locked}.` : `${t.name}. ${t.price} clover.`,
-      },
-      pet.goal === key ? h('span', { class: 'tag goal', text: 'Goal' }) : null,
-      h('span', { class: 'art' }, img(s, fitScale(s, 40))),
-      h('span', { class: 'nm', text: t.name }),
-      owned ? h('span', { class: 'pr', text: 'Play' }) : locked ? h('span', { class: 'pr', text: locked })
-        : h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(t.price)));
-      b.addEventListener('click', () => {
-        if (owned) {
-          close();
-          doAction('play', { toy: t.id });
-          return;
-        }
-        if (pet.clover < t.price) { toggleGoal(key, t.name); redraw(); return; }
-        const r = buyToy(pet, t.id);
-        if (!r.ok) { play('nope'); toast('Not enough clover yet.'); return; }
-        pet = r.state;
-        savePet();
-        play('clover');
-        haptic('success');
-        toast(`A new ${t.name.toLowerCase()} for ${pet.name}!`);
-        note(`Got ${article(t.name)} for her toy box.`, TOY_ART[t.id] ?? 'gift', `toy:${t.id}`);
-        redraw();
-      });
-      if (locked) setOff(b, `${locked}: you'll need that one first.`);
+/** Foraging: send her out for a few hours, or call her home. */
+function openForage(): void {
+  openSheet((close) => {
+    const n = now();
+    const t = tripOf(pet);
+    if (t && isOut(pet, n)) {
+      const hours = Math.floor((n - t.startedAtMs) / HOUR_MS);
+      return [
+        h('div', { class: 'eyebrow', text: 'Forage' }),
+        h('h2', { text: `${pet.name} is out foraging` }),
+        h('p', { text: `She's home in ${fmtDuration(t.endsAtMs - n)}. ${hours
+          ? `Call her back now and she brings what she found in the ${hours === 1 ? 'first hour' : `${hours} whole hours`} she's been out.`
+          : "She's only just left: call her back now and she comes home empty-handed."}` }),
+        h('div', { class: 'actions-col' },
+          button('Let her explore', 'btn primary', close),
+          button('Call her home', 'btn', () => { close(); doAction('recall'); })),
+      ];
+    }
+    const why = away() ? `${pet.name} is on holiday.`
+      : isAsleep(pet, n) ? "She's asleep. Let her wake up first."
+        : pet.needs.energy < FORAGE.minEnergy ? "She's too tired to go out. Let her nap first." : null;
+    const trips = FORAGE.hours.map((hrs) => {
+      const b = h('button', { class: 'seed', type: 'button' }, img(itemSprite('basket'), 2),
+        h('span', { class: 'nm', text: `${hrs} hours` }),
+        h('span', { class: 'meta', text: hrs === 2 ? 'A quick look round' : hrs === 4 ? 'A good wander' : 'A full basket' }));
+      b.addEventListener('click', () => { close(); doAction('forage', { hours: hrs }); });
+      if (why) setOff(b, why);
       return b;
     });
     return [
-      h('div', { class: 'eyebrow', text: 'Play' }),
-      h('h2', { text: `Play with ${pet.name}` }),
-      h('div', { class: 'toys' }, ...toys),
-      h('p', { class: 'note', text: 'Playing cheers her up and counts as care. Tap a toy you can\'t afford yet to save up for it.' }),
-      ...forageSection(close),
+      h('div', { class: 'eyebrow', text: 'Forage' }),
+      h('h2', { text: `Send ${pet.name} foraging` }),
+      h('div', { class: 'gift-kinds' }, ...trips),
+      h('p', { class: 'note', text: 'She comes home with clover, strawberries, finds for the shelf, and now and then a golden carrot: the longer she\'s out, the fuller her basket. Nobody can feed or clean her while she\'s away, so she\'ll come back hungry.' }),
       h('div', { class: 'actions-col' }, button('Close', 'btn', close)),
     ];
   });
-}
-
-/** Foraging, in the Play sheet: send her out, or call her home. */
-function forageSection(close: () => void): Node[] {
-  const n = now();
-  const t = tripOf(pet);
-  if (t && isOut(pet, n)) {
-    const hours = Math.floor((n - t.startedAtMs) / HOUR_MS);
-    return [
-      h('h3', { class: 'gift-sub', text: 'Out foraging' }),
-      h('p', { text: `${pet.name} is home in ${fmtDuration(t.endsAtMs - n)}. ${hours
-        ? `Call her back now and she brings what she found in the ${hours === 1 ? 'first hour' : `${hours} whole hours`} she's been out.`
-        : "She's only just left: call her back now and she comes home empty-handed."}` }),
-      h('div', { class: 'actions-col' }, button('Call her home', 'btn', () => { close(); doAction('recall'); })),
-    ];
-  }
-  const why = away() ? `${pet.name} is on holiday.`
-    : isAsleep(pet, n) ? "She's asleep. Let her wake up first."
-      : pet.needs.energy < FORAGE.minEnergy ? "She's too tired to go out. Let her nap first." : null;
-  const trips = FORAGE.hours.map((hrs) => {
-    const b = h('button', { class: 'seed', type: 'button' }, img(itemSprite('basket'), 2),
-      h('span', { class: 'nm', text: `${hrs} hours` }),
-      h('span', { class: 'meta', text: hrs === 2 ? 'A quick look round' : hrs === 4 ? 'A good wander' : 'A full basket' }));
-    b.addEventListener('click', () => { close(); doAction('forage', { hours: hrs }); });
-    if (why) setOff(b, why);
-    return b;
-  });
-  return [
-    h('h3', { class: 'gift-sub', text: 'Go foraging' }),
-    h('div', { class: 'gift-kinds' }, ...trips),
-    h('p', { class: 'note', text: 'She comes home with clover, strawberries, finds for the shelf, and now and then a golden carrot: the longer she\'s out, the fuller her basket. Nobody can feed or clean her while she\'s away, so she\'ll come back hungry.' }),
-  ];
 }
 
 // ------------------------------------------------------------------ garden upgrades and the yard
@@ -2658,20 +3565,74 @@ function moreClover(price: number): string {
   return `${price - pet.clover} more clover to go.`;
 }
 
-/** A row in a shop list: name and what it does, then a price button, "Owned" or its condition. */
-function shopRow(name: string, what: string, state: { price: number } | { owned: string } | { locked: string }, onBuy: () => void, art?: ItemArt): HTMLElement {
+/** Extras for a shop row: its art, a progress line of pips, a key other rows can point to, and what a locked row waits on. */
+interface RowOpts { art?: ItemArt; pips?: [number, number]; key?: string; need?: { text: string; key: string } }
+
+let lockSprite: Sprite | null = null;
+const padlock = (): Sprite => (lockSprite ??= toSprite(drawPadlock()));
+
+/**
+ * A row in a shop list: name and what it does, then its state. Buyable: a
+ * price button, filled when you can afford it; saving up: the price, off, and
+ * how far along you are; locked: dashed, with a padlock and what it waits on
+ * (a link to that row when there is one); owned: quiet, with a tick. Rows
+ * carry a rank for `arrangeRows`.
+ */
+function shopRow(name: string, what: string, state: { price: number } | { owned: string } | { locked: string }, onBuy: () => void, artOrOpts?: ItemArt | RowOpts): HTMLElement {
+  const opts: RowOpts = typeof artOrOpts === 'string' ? { art: artOrOpts } : artOrOpts ?? {};
   let right: HTMLElement;
+  let kind: 'buy' | 'saving' | 'locked' | 'owned';
+  let save: HTMLElement | null = null;
   if ('price' in state) {
-    right = h('button', { class: 'btn small', type: 'button', 'aria-label': `${name}. Buy for ${state.price} clover.` },
+    kind = pet.clover >= state.price ? 'buy' : 'saving';
+    right = h('button', { class: `btn small${kind === 'buy' ? ' primary' : ''}`, type: 'button', 'aria-label': `${name}. Buy for ${state.price} clover.` },
       img(itemSprite('clover'), 1), String(state.price));
     right.addEventListener('click', onBuy);
-    if (pet.clover < state.price) setOff(right as HTMLButtonElement, moreClover(state.price));
+    if (kind === 'saving') {
+      setOff(right as HTMLButtonElement, moreClover(state.price));
+      const pct = Math.max(2, Math.min(100, Math.round((pet.clover / state.price) * 100)));
+      save = h('span', { class: 'save-line' }, h('span', { class: 'save-bar', 'aria-hidden': 'true' }, h('i', { style: `width:${pct}%` })),
+        h('span', { text: `${state.price - pet.clover} to go` }));
+    }
+  } else if ('owned' in state) {
+    kind = 'owned';
+    right = h('span', { class: 'owned-tick', text: `✓ ${state.owned}` });
   } else {
-    right = pill('owned' in state ? state.owned : state.locked, 'soft');
+    kind = 'locked';
+    const need = opts.need;
+    if (need) {
+      right = h('button', { type: 'button', class: 'need-link' }, img(padlock(), 2), h('span', { text: `${need.text} →` }));
+      right.addEventListener('click', () => {
+        const to = document.querySelector<HTMLElement>(`.shop-row[data-row="${need.key}"]`);
+        if (!to) { toast(`${need.text}.`); return; }
+        to.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        to.classList.remove('flash');
+        void to.offsetWidth; // restart the flash
+        to.classList.add('flash');
+        to.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+      });
+    } else right = h('span', { class: 'pill soft lock-pill' }, img(padlock(), 2), h('span', { text: state.locked }));
   }
+  const art = opts.art;
   const icon = art ? h('span', { class: 'ico' }, img(itemSprite(art), fitScale(itemSprite(art), 28))) : null;
-  return h('div', { class: 'shop-row' }, icon,
-    h('span', { class: 'txt' }, h('span', { class: 'nm', text: name }), h('span', { class: 'sub', text: what })), right);
+  const pips = opts.pips ? h('span', { class: 'pips', 'aria-label': `${opts.pips[0]} of ${opts.pips[1]}` },
+    ...Array.from({ length: opts.pips[1] }, (_, i) => h('i', { class: i < opts.pips![0] ? 'on' : '' }))) : null;
+  // a locked row's condition goes under its text, where it has room to say itself
+  const locked = kind === 'locked';
+  const row = h('div', { class: `shop-row ${kind}` }, icon,
+    h('span', { class: 'txt' }, h('span', { class: 'nm' }, h('span', { text: name }), pips), h('span', { class: 'sub', text: what }), save, locked ? right : null),
+    locked ? null : right);
+  row.dataset.rank = String({ buy: 0, saving: 1, locked: 2, owned: 3 }[kind]);
+  if (opts.key) row.dataset.row = opts.key;
+  return row;
+}
+
+/** Shop rows in the order you'd act on them: buyable, saving up, locked, then what's owned under its own heading. */
+function arrangeRows(rows: HTMLElement[]): HTMLElement[] {
+  const sorted = rows.map((r, i) => ({ r, i })).sort((a, b) => Number(a.r.dataset.rank) - Number(b.r.dataset.rank) || a.i - b.i).map((x) => x.r);
+  const first = sorted.findIndex((r) => r.dataset.rank === '3');
+  if (first > 0) sorted.splice(first, 0, h('h4', { class: 'owned-head', text: 'Owned' }));
+  return sorted;
 }
 
 function gardenUpgrades(redraw: () => void): HTMLElement {
@@ -2686,27 +3647,37 @@ function gardenUpgrades(redraw: () => void): HTMLElement {
     goal('upgrade');
     redraw();
   };
-  const rows = UPGRADES.map((u) => {
-    const need = u.requires;
-    const short: Record<string, string> = { plot2: 'plot 2', plot3: 'plot 3', plot4: 'plot 4', can: 'the can' };
-    const cond = [need?.upgrade && !hasUpgrade(pet, need.upgrade) ? `After ${short[need.upgrade]}` : '',
-      need?.soil && soilLevel(pet) < need.soil ? `Soil ${need.soil}` : ''].filter(Boolean).join(' + ');
-    const state = hasUpgrade(pet, u.id) ? { owned: 'Owned' } : !upgradeUnlocked(pet, u) ? { locked: cond } : { price: u.price };
-    return shopRow(u.name, u.what, state, buy(u.id, u.name));
-  });
+  const rows: HTMLElement[] = [];
+  // the plots, as one row: the next one for sale, or what it waits on
+  const n = plotCount(pet), max = PLOT_SPOTS.length;
+  const next = plotUpgrade(n);
+  if (!next) rows.push(shopRow('Garden plots', 'Every bed is dug.', { owned: 'All five' }, () => undefined, { art: 'sprout', pips: [n, max] }));
+  else {
+    const soil = next.requires?.soil ?? 0;
+    const state = plotOffer(pet, n) === 'next' ? { price: next.price } : { locked: `Soil level ${soil}` };
+    rows.push(shopRow('Garden plots', `The ${ORDINAL[n]} bed: one more to grow in.`, state, buy(next.id, `The ${ORDINAL[n]} plot is dug`),
+      { art: 'sprout', pips: [n, max], key: 'plots', need: soil > soilLevel(pet) ? { text: `Needs soil level ${soil}`, key: 'soil' } : undefined }));
+  }
   const lvl = soilLevel(pet);
   if (soilMaxed(pet)) {
-    rows.push(shopRow(`Richer soil (level ${lvl})`, `As rich as it gets: sprouts give ${sproutClover(pet)} clover, strawberries come ${cropYield(pet, 'berry')} at a time and golden carrots in twos.`, { owned: 'Top level' }, () => undefined));
+    rows.push(shopRow('Richer soil', `As rich as it gets: sprouts give ${sproutClover(pet)} clover, strawberries come ${cropYield(pet, 'berry')} at a time and golden carrots in twos.`,
+      { owned: 'Top level' }, () => undefined, { art: 'mound', pips: [lvl, SOIL.maxLevel], key: 'soil' }));
   } else {
     // what the next level adds: always sprouts, and sometimes more strawberries or golden carrots
     const more = [`sprouts give ${sproutClover(pet) + SOIL.perLevel} clover, not ${sproutClover(pet)}`];
     if (cropYield(pet, 'berry', lvl + 1) > cropYield(pet, 'berry')) more.push(`strawberries come ${cropYield(pet, 'berry', lvl + 1)} at a time`);
     if (cropYield(pet, 'golden', lvl + 1) > cropYield(pet, 'golden')) more.push('golden carrots come in twos');
     const list = more.length > 1 ? `${more.slice(0, -1).join(', ')} and ${more[more.length - 1]}` : more[0]!;
-    rows.push(shopRow(`Richer soil (level ${lvl + 1} of ${SOIL.maxLevel})`, `${list[0]!.toUpperCase()}${list.slice(1)}.`,
-      { price: soilPrice(pet) }, buy('soil', `Soil level ${lvl + 1}`)));
+    rows.push(shopRow('Richer soil', `Level ${lvl + 1}: ${list}.`,
+      { price: soilPrice(pet) }, buy('soil', `Soil level ${lvl + 1}`), { art: 'mound', pips: [lvl, SOIL.maxLevel], key: 'soil' }));
   }
-  return h('div', { class: 'shop-list' }, h('h3', { text: 'Garden upgrades' }), ...rows);
+  for (const u of UPGRADES) {
+    if (u.id.startsWith('plot')) continue;
+    const owned = hasUpgrade(pet, u.id);
+    const state = owned ? { owned: 'Owned' } : !upgradeUnlocked(pet, u) ? { locked: 'Not yet' } : { price: u.price };
+    rows.push(shopRow(u.name, u.what, state, buy(u.id, u.name), { art: u.id === 'can' ? 'can' : 'sunflowers', key: u.id }));
+  }
+  return h('div', { class: 'shop-list' }, ...arrangeRows(rows));
 }
 
 function yardSection(redraw: () => void): HTMLElement {
@@ -2722,18 +3693,21 @@ function yardSection(redraw: () => void): HTMLElement {
     note(`Built ${article(BUILDINGS[id].name)} in the yard.`, 'clover', `yard:${id}`);
     redraw();
   };
+  const plural = (id: BuildingId) => (id === 'patch' ? 'clover patches' : id === 'hive' ? 'beehives' : 'mushroom logs');
   const rows = BUILDING_IDS.map((id) => {
     const b = BUILDINGS[id];
     const have = countOf(pet, id);
-    const what = have >= b.max ? `${have} of ${b.max}` : `${have} of ${b.max} · ${paysLine(id)}`;
+    const q = b.requires;
     const state = have >= b.max ? { owned: 'Full' }
-      : !buildingUnlocked(pet, id) ? { locked: `After ${b.requires!.count} ${b.requires!.building === 'patch' ? 'patches' : 'hives'}` }
+      : !buildingUnlocked(pet, id) ? { locked: `After ${q!.count} ${plural(q!.building)}` }
         : { price: nextPrice(pet, id) };
-    return shopRow(b.name, what, state, buyB(id), id);
+    return shopRow(b.name, have >= b.max ? 'All built.' : paysLine(id), state, buyB(id),
+      { art: id, pips: [have, b.max], key: id, need: q && !buildingUnlocked(pet, id) ? { text: `Needs ${q.count} ${plural(q.building)}`, key: q.building } : undefined });
   });
   const shed = shedPrice(pet);
+  const shedLocked = countOf(pet, SHED_REQUIRES.building) < SHED_REQUIRES.count;
   rows.push(shopRow('Yard shed', `Storage holds ${storageHours(pet)} hours now${shed ? `; the next shed makes it ${storageHours(pet) + 12}` : ''}.`,
-    shed === null ? { owned: 'Owned' } : countOf(pet, SHED_REQUIRES.building) < SHED_REQUIRES.count ? { locked: 'After 3 patches' } : { price: shed },
+    shed === null ? { owned: 'Owned' } : shedLocked ? { locked: `After ${SHED_REQUIRES.count} ${plural(SHED_REQUIRES.building)}` } : { price: shed },
     () => {
       const r = buyShed(pet, now());
       if (!r.ok) { play('nope'); toast('Not enough clover yet.'); return; }
@@ -2742,29 +3716,80 @@ function yardSection(redraw: () => void): HTMLElement {
       play('place');
       toast('The shed holds more clover now.');
       redraw();
-    }, 'shed'));
+    }, { art: 'shed', key: 'shed', need: shed !== null && shedLocked ? { text: `Needs ${SHED_REQUIRES.count} ${plural(SHED_REQUIRES.building)}`, key: SHED_REQUIRES.building } : undefined }));
   const inYard = Math.floor(stored(pet, n));
   const collectBtn = button(inYard ? `Collect ${inYard} clover` : 'Nothing to collect yet', 'btn primary', () => { collectYard(); redraw(); });
   collectBtn.disabled = inYard < 1;
   const rateLine = perHour(pet)
     ? `Makes ${Math.round(perHour(pet) * 24)} clover a day. Holds ${Math.round(capacity(pet))}.`
     : 'Build a clover patch and it makes clover every hour, even while you’re away.';
-  return h('div', { class: 'shop-list' }, h('h3', { text: 'The yard' }), h('p', { class: 'note', text: rateLine }), perHour(pet) ? collectBtn : null, ...rows);
+  return h('div', { class: 'shop-list' }, h('p', { class: 'note', text: rateLine }), perHour(pet) ? collectBtn : null, ...arrangeRows(rows));
 }
 
-function collectYard(): void {
+/**
+ * Collect the yard's clover (only from the garden). With `from`, the big
+ * Collect button: it pops, and clovers fly from it into the clover counter,
+ * which counts up as they land.
+ */
+function collectYard(from?: HTMLElement): void {
+  const before = pet.clover;
   const r = collect(pet, now());
   if (r.clover < 1) return;
   pet = r.state;
   savePet();
   play('clover');
-  haptic('light');
-  // it rises from the yard if you're in the garden, and over the clover chip in the burrow
-  if (room === 'garden') gardenScene?.burst('clover', 4, performance.now(), { x: areaX('yard') + AREA_W / 2, y: 60 });
-  else scene?.burst('clover', 4, performance.now(), { x: 80, y: 14 });
+  haptic('success');
+  gardenScene?.burst('clover', 6, performance.now(), { x: areaX('yard') + AREA_W / 2, y: 60 });
+  const counter = gardenUi?.clover;
+  if (from && counter && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    from.classList.add('popping');
+    window.setTimeout(() => { from.classList.remove('popping'); gardenSig = ''; renderGarden(); }, 420);
+    flyClover(from, counter.parentElement ?? counter, before, pet.clover);
+  }
   toast(`+${r.clover} clover from the yard.`);
   goal('yard');
   render();
+  renderGarden();
+}
+
+/** Held while the counter counts up, so a render doesn't jump it to the end. */
+let cloverCounting = false;
+
+/** Clovers fly from `from` to the counter `to`; each one that lands counts it up a step, from `a` to `b`. */
+function flyClover(from: HTMLElement, to: HTMLElement, a: number, b: number): void {
+  const counter = gardenUi?.clover;
+  if (!counter) return;
+  const f = from.getBoundingClientRect(), t = to.getBoundingClientRect();
+  const n = Math.min(10, Math.max(4, Math.round((b - a) / 10)));
+  cloverCounting = true;
+  counter.textContent = String(a);
+  let landed = 0;
+  for (let i = 0; i < n; i++) {
+    const el = img(itemSprite('clover'), 3);
+    el.className = 'px fly-clover';
+    const x0 = f.left + f.width / 2 + (Math.random() - 0.5) * f.width * 0.6;
+    const y0 = f.top + f.height / 2;
+    el.style.left = `${x0}px`;
+    el.style.top = `${y0}px`;
+    document.body.append(el);
+    const dx = t.left + t.width / 2 - x0, dy = t.top + t.height / 2 - y0;
+    // up and out a little first, then a swoop into the counter
+    const lift = { x: (Math.random() - 0.5) * 80, y: -40 - Math.random() * 50 };
+    const anim = el.animate([
+      { transform: 'translate(-50%, -50%) scale(.6)', opacity: 0 },
+      { transform: `translate(calc(-50% + ${lift.x}px), calc(-50% + ${lift.y}px)) scale(1.2)`, opacity: 1, offset: 0.3 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.5)`, opacity: 0.9 },
+    ], { duration: 720, delay: i * 55, easing: 'cubic-bezier(.45, 0, .7, 1)', fill: 'backwards' });
+    anim.onfinish = () => {
+      el.remove();
+      landed++;
+      counter.textContent = String(landed === n ? b : Math.round(a + ((b - a) * landed) / n));
+      to.classList.remove('bump');
+      void to.offsetWidth;
+      to.classList.add('bump');
+      if (landed === n) { cloverCounting = false; renderGarden(); }
+    };
+  }
 }
 
 // ------------------------------------------------------------------ getting started
@@ -2781,45 +3806,184 @@ function nudge(el: HTMLElement): void {
 
 /** Where to do each goal, for its "Show me" in Getting started. None: nowhere to point. */
 function goalShortcut(g: StarterGoal): (() => void) | null {
-  const inGarden = (a: AreaId) => () => { openGarden(); goArea(a); };
+  const inGarden = (a: AreaId) => () => { goTab('garden'); goArea(a); };
+  const onBurrow = (el: () => HTMLElement) => () => { goTab('burrow'); nudge(el()); };
   switch (g) {
-    case 'feed': return () => nudge(ui.acts.feed);
-    case 'nap': return () => nudge(ui.acts.nap);
-    case 'bake': return () => nudge(ui.bake);
-    case 'streak3': return () => nudge(ui.gift);
-    case 'bed': case 'decor': case 'decor3': return () => enterDecorate();
-    case 'dress': return () => openWardrobe();
-    case 'toy': return () => openToys();
+    case 'feed': return onBurrow(() => ui.acts.feed);
+    case 'nap': return onBurrow(() => ui.acts.nap);
+    // Bake is at the foot of the Feed tray
+    case 'bake': return () => {
+      goTab('burrow');
+      if (tray?.kind !== 'feed') toggleTray('feed');
+      const b = tray?.el.querySelector<HTMLElement>('.bake-btn');
+      if (b) nudge(b);
+    };
+    case 'streak3': return onBurrow(() => ui.gift);
+    case 'bed': case 'decor': case 'decor3': return () => openShop({ cat: 'decor' });
+    case 'dress': return () => openShop({ cat: 'wardrobe' });
+    case 'toy': return onBurrow(() => ui.acts.play);
     case 'harvest': return inGarden('patch');
     case 'yard': return inGarden('yard');
     case 'meadow': return inGarden('meadow');
-    case 'upgrade': return () => { openGarden(); openGardenUpgrades(); };
-    case 'friend': return OR.user && OR.capabilities.has('showcase.friends') ? () => openFriends() : null;
+    case 'upgrade': return () => { goTab('garden'); openGardenUpgrades('garden'); };
+    case 'friend': return () => goTab('friends');
     case 'bond3': return null;
   }
 }
 
+/** A goal that can't be done yet, or is part way: a word on why, or how far. */
+function goalHint(g: StarterGoal): string | null {
+  switch (g) {
+    case 'nap': return isAsleep(pet, now()) || pet.needs.energy < CARE.napBelowEnergy ? null : "She isn't tired yet";
+    case 'streak3': return `${Math.min(pet.gift.streak, 3)} of 3`;
+    case 'decor3': return `${Math.min(pet.starter?.counts.decor ?? 0, 3)} of 3`;
+    case 'bond3': return `Bond ${Math.min(bondLevel(pet.bond).level, 3)} of 3`;
+    default: return null;
+  }
+}
+
+/** The prize for a step, as pictures: clover, and the patch for step one. */
+function prize(step: StarterStep, scale = 2): HTMLElement {
+  return h('div', { class: 'prize-art' },
+    h('span', {}, img(itemSprite('clover'), scale), `+${step.clover}`),
+    step.patch ? h('span', {}, img(itemSprite('lucky'), scale), 'Clover patch') : null);
+}
+
+/**
+ * Getting started as cards that slide sideways, one per step: claimed ones
+ * behind, the open one in front, locked ones ahead (their goals shown, so
+ * anything done early is done knowingly). Claiming slides to the next card.
+ */
 function openStarter(): void {
-  openLiveSheet((close) => {
-    const steps = starterView(pet).map(({ step, done, paid }) =>
-      h('div', { class: 'starter-day' + (paid ? ' paid' : '') },
-        h('h3', { text: `Step ${step.step} · +${step.clover} clover${step.patch ? ' and a clover patch' : ''}${paid ? ' · done' : ''}` }),
+  let slideFrom: number | null = null;
+  openLiveSheet((close, redraw) => {
+    const view = starterView(pet);
+    const openAt = Math.max(0, view.findIndex((v) => v.status === 'open'));
+    const cards = view.map(({ step, done, status }) => {
+      const ready = status === 'open' && done.every(Boolean);
+      let foot: Node;
+      if (status === 'claimed') foot = h('div', { class: 'starter-foot', text: '✓ Claimed' });
+      else if (status === 'locked') foot = h('div', { class: 'starter-foot', text: `Opens after step ${step.step - 1}` });
+      else {
+        const claim = button(ready ? 'Claim' : `${done.filter(Boolean).length} of ${done.length} done`, 'btn primary', () => {
+          slideFrom = openAt;
+          claimStep();
+          redraw();
+        });
+        if (!ready) setOff(claim, 'Finish every goal in this step first.');
+        foot = claim;
+      }
+      return h('section', { class: `starter-card ${status}${ready ? ' ready' : ''}`, 'aria-label': `Step ${step.step} of ${STARTER_STEPS.length}` },
+        h('div', { class: 'starter-head' }, h('h3', { text: `Step ${step.step}` }), prize(step)),
         h('ul', {}, ...step.goals.map((g, i) => {
-          const go = done[i] || paid ? null : goalShortcut(g);
-          return h('li', { class: done[i] ? 'done' : '' }, h('span', { text: `${done[i] ? '✓' : '○'} ${GOAL_TEXT[g]}` }),
+          const hint = done[i] || status === 'claimed' ? null : goalHint(g);
+          const go = done[i] || status !== 'open' ? null : goalShortcut(g);
+          return h('li', { class: done[i] || status === 'claimed' ? 'done' : '' },
+            h('span', {}, `${done[i] || status === 'claimed' ? '✓' : '○'} ${GOAL_TEXT[g]}`, hint ? h('span', { class: 'hint', text: ` · ${hint}` }) : null),
             go ? button('Show me', 'btn small', () => { close(); go(); }) : null);
-        }))));
-    const waiting = starterWaiting(pet);
-    const next = starterDone(pet) ? null : h('p', { class: 'note', text: waiting
-      ? `Step ${starterStep(pet)} opens next time you drop by (tomorrow or later). Anything you do before then still counts.`
-      : `A new step opens each time you drop by on another day, whenever that is. Anything you do early still counts.` });
-    const shown = waiting ? starterStep(pet) - 1 : starterStep(pet);
+        })),
+        foot);
+    });
+    const track = h('div', { class: 'starter-track' }, ...cards);
+    const dots = view.map(({ step, status }, i) => {
+      const d = h('button', { class: `starter-dot ${status}`, type: 'button', 'aria-label': `Step ${step.step}` }, h('span'));
+      d.addEventListener('click', () => slideTo(i, true));
+      return d;
+    });
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const pitch = () => Math.max(1, (cards[1] ?? cards[0]!).offsetLeft - cards[0]!.offsetLeft);
+    // Slides are animated here rather than with scrollTo's 'smooth': snap is off
+    // while it runs (a snap turning back on mid-slide jumps straight to the
+    // card), and a drag's release speed carries into it.
+    let anim = 0;
+    /** Slide to card i. `v` is the drag's release speed in px/ms; without one it's a plain ease-out. */
+    const slideTo = (i: number, animate: boolean, v?: number) => {
+      cancelAnimationFrame(anim);
+      const from = track.scrollLeft;
+      const d = cards[i]!.offsetLeft - cards[0]!.offsetLeft - from;
+      if (!animate || !smooth || Math.abs(d) < 1) { track.scrollLeft = from + d; track.classList.remove('free'); return; }
+      track.classList.add('free');
+      const ms = 340;
+      // ease-out cubic d·(1-u³) starts at speed 3d; the k·u² term swaps that for the release speed
+      const s0 = v === undefined ? 3 * d : Math.max(-6 * Math.abs(d), Math.min(6 * Math.abs(d), v * ms));
+      const t0 = performance.now();
+      const step = (t: number) => {
+        const k = Math.min(1, (t - t0) / ms);
+        const u = 1 - k;
+        track.scrollLeft = from + d * (1 - u * u * u) + (s0 - 3 * d) * k * u * u;
+        if (k < 1) anim = requestAnimationFrame(step);
+        else track.classList.remove('free');
+      };
+      anim = requestAnimationFrame(step);
+    };
+    const markDot = () => {
+      const at = Math.round(track.scrollLeft / pitch());
+      dots.forEach((d, i) => d.setAttribute('aria-current', String(i === at)));
+    };
+    track.addEventListener('scroll', markDot, { passive: true });
+    // touch swipes natively; a mouse drags the track too, then settles on the nearest card
+    // Recent pointer positions, for the speed at release.
+    let drag: { x: number; left: number; moved: boolean; trail: { x: number; t: number }[] } | null = null;
+    track.addEventListener('pointerdown', (e) => {
+      // a touch mid-slide takes over from it
+      cancelAnimationFrame(anim);
+      if (e.pointerType !== 'mouse') { track.classList.remove('free'); return; }
+      if (e.button !== 0) return;
+      drag = { x: e.clientX, left: track.scrollLeft, moved: false, trail: [{ x: e.clientX, t: e.timeStamp }] };
+    });
+    track.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (!drag.moved) {
+        if (Math.abs(e.clientX - drag.x) < 6) return;
+        // pick up from here, so the track doesn't leap the 6px
+        drag.moved = true;
+        drag.x = e.clientX;
+        cancelAnimationFrame(anim);
+        drag.left = track.scrollLeft;
+        track.setPointerCapture(e.pointerId);
+        track.classList.add('dragging', 'free');
+      }
+      e.preventDefault();
+      track.scrollLeft = drag.left - (e.clientX - drag.x);
+      drag.trail.push({ x: e.clientX, t: e.timeStamp });
+      if (drag.trail.length > 6) drag.trail.shift();
+    });
+    const endDrag = (e: PointerEvent) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      if (!d.moved) return;
+      track.classList.remove('dragging');
+      // speed over the last ~100ms, in scroll px/ms (dragging left scrolls right)
+      const recent = d.trail.filter((p) => e.timeStamp - p.t < 100);
+      const first = recent[0] ?? d.trail[d.trail.length - 1]!;
+      const dt = e.timeStamp - first.t;
+      const v = dt > 0 ? -(e.clientX - first.x) / dt : 0;
+      // a flick goes on to the next card that way; slower, it settles on the nearest
+      const from = Math.round(d.left / pitch());
+      const to = Math.abs(v) >= 0.3 ? from + Math.sign(v) : Math.max(from - 1, Math.min(from + 1, Math.round(track.scrollLeft / pitch())));
+      slideTo(Math.max(0, Math.min(cards.length - 1, to)), true, v);
+      // the drag ended over a button: don't let it count as a tap
+      // (the click comes straight after pointerup, so the guard only lives that long)
+      const eat = (c: Event) => { c.stopPropagation(); c.preventDefault(); };
+      track.addEventListener('click', eat, { capture: true, once: true });
+      window.setTimeout(() => track.removeEventListener('click', eat, { capture: true }), 0);
+    };
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+    // once it's on screen: start on the open card, or slide there from the one just claimed
+    requestAnimationFrame(() => {
+      if (slideFrom !== null) { slideTo(slideFrom, false); slideTo(openAt, true); slideFrom = null; }
+      else slideTo(openAt, false);
+      markDot();
+    });
     const out: Node[] = [
-      h('div', { class: 'eyebrow', text: `Getting started · step ${shown} of ${STARTER_STEPS.length}` }),
-      h('h2', { text: `Settling in with ${pet.name}` }),
-      ...steps,
+      h('div', { class: 'eyebrow', text: `Getting started · step ${starterStep(pet)} of ${STARTER_STEPS.length}` }),
+      h('h2', { text: starterDone(pet) ? `All settled in with ${pet.name}!` : `Settling in with ${pet.name}` }),
+      track,
+      h('div', { class: 'starter-dots' }, ...dots),
     ];
-    if (next) out.push(next);
+    if (!starterDone(pet)) out.push(h('p', { class: 'note', text: 'Claim a step and the next one slides in. Anything you do early still counts.' }));
     out.push(h('div', { class: 'actions-col' }, button('Close', 'btn', close)));
     return out;
   });
@@ -2849,59 +4013,139 @@ function openRate(): void {
   });
 }
 
-// ------------------------------------------------------------------ more: profile and the rest
+// ------------------------------------------------------------------ her page: her things and the settings
 
-function openMore(): void {
-  openSheet((close) => {
-    const trait = traitOf(pet.petId);
-    const info = TRAIT_INFO[trait];
-    const bl = bondLevel(pet.bond).level;
-    const found = COLLECTIBLES.filter((c) => (pet.collection?.[c.id] ?? 0) > 0).length;
-    const profile = h('div', { class: 'profile' },
-      h('div', { class: 'profile-art' }, img(rabbitSprite(pet.coat, 'content', 0, dressOf(pet)), 3, pet.name)),
-      h('div', { class: 'profile-text' },
-        h('h2', { text: pet.name }),
-        h('div', { class: 'pills' }, pill(info.name)),
-        h('p', { text: info.blurb }),
-        h('p', { class: 'meta', text: `${pet.daysVisited} ${pet.daysVisited === 1 ? 'day' : 'days'} together · Bond ${bl} · Since ${fmtDate(pet.bornAtMs)}` })));
+/** A row in a page's menu: an icon, a name and a line, and optionally something on the right. */
+function menuRow(label: string, sub: string, art: ItemArt | Node | null, onClick: () => void, right?: Node): HTMLButtonElement {
+  const icon = typeof art === 'string' ? img(itemSprite(art), fitScale(itemSprite(art), 26)) : art;
+  const b = h('button', { class: 'menu-row', type: 'button' },
+    icon ? h('span', { class: 'ico' }, icon) : null,
+    h('span', { class: 'txt' }, h('span', { class: 'nm', text: label }), h('span', { class: 'sub', text: sub })),
+    right ?? h('span', { class: 'go', 'aria-hidden': 'true', text: '›' }));
+  b.addEventListener('click', onClick);
+  return b;
+}
 
-    const row = (label: string, sub: string, art: ItemArt | null, onClick: () => void) => {
-      const b = h('button', { class: 'menu-row', type: 'button' },
-        art ? h('span', { class: 'ico' }, img(itemSprite(art), fitScale(itemSprite(art), 26))) : h('span', { class: 'ico' }),
-        h('span', { class: 'txt' }, h('span', { class: 'nm', text: label }), h('span', { class: 'sub', text: sub })));
-      b.addEventListener('click', onClick);
-      return b;
-    };
-    const w = wardrobe(pet);
-    const rows: HTMLElement[] = [
-      row('Wardrobe', w.owned.length ? `${w.owned.length} of ${OUTFITS.length} outfits` : 'Bows, hats and scarves', 'bow', () => { close(); openWardrobe(); }),
-      row('Collection', `${found} of ${COLLECTIBLES.length} found · ${CRITTERS.filter((c) => pet.critters?.seen[c.id]).length} visitors met`, 'marble', () => { close(); openCollection(); }),
-      row('Clover rate', `+${Math.round((rate(pet).total - 1) * 100)}% from her bond, collection and friends`, 'clover', () => { close(); openRate(); }),
-      ...(EXTRA_ROOMS.some((r) => !roomsOf(burrow).includes(r)) ? [row('Dig a new room', `More space for decor, from ${ROOMS[EXTRA_ROOMS.find((r) => !roomsOf(burrow).includes(r))!].price.toLocaleString()} clover`, 'shed', () => { close(); openDig(); })] : []),
-      row('Journal', journal.entries.length ? `${journal.entries.length} ${journal.entries.length === 1 ? 'entry' : 'entries'}` : 'Your story together', 'book', () => { close(); openJournal(); }),
-      row(away() ? 'On holiday' : 'Going away?', away() ? `Until ${fmtDate(pet.vacationUntilMs!)}` : 'Pause her needs for a trip', 'suitcase', () => { close(); openVacation(); }),
-      row('Share', `Tell a friend about ${pet.name}`, 'heart', () => { close(); void shareCard(); }),
-    ];
-    if (OR.user && OR.capabilities.has('showcase.friends')) {
-      rows.splice(3, 0, row('Friends', `Visit their burrows, send a gift · visits pay you ${visitPay(pet)} clover`, 'gift', () => { close(); openFriends(); }),
-        row('Guest book', guestbookLine(), 'book', () => { close(); openGuestbook(); }));
-    }
-    if (OR.capabilities.has('notifications.schedule')) {
-      const on = settings.reminders === 'on';
-      const r = row(`Reminders: ${on ? 'on' : 'off'}`, on ? 'Nudges when she wakes, treats, the garden and gifts' : 'Off. Tap to turn on.', 'moon', () => {
-        settings.reminders = on ? 'off' : 'on';
-        saveSettings();
-        toast(settings.reminders === 'on' ? "Reminders on. We'll nudge you now and then." : 'Reminders off.');
-        queueReconcile();
-        close();
-        openMore();
-      });
-      r.setAttribute('aria-pressed', String(on));
-      rows.splice(4, 0, r);
-    }
-    rows.push(row('Start over', `Say goodbye to ${pet.name} and adopt a new rabbit`, null, () => { close(); confirmStartOver(); }));
-    return [profile, h('div', { class: 'menu' }, ...rows), h('div', { class: 'actions-col' }, button('Close', 'btn', close))];
-  });
+/** A menu row that's an on/off switch. */
+function switchRow(label: string, sub: string, art: ItemArt | Node, on: boolean, onClick: () => void): HTMLButtonElement {
+  const b = menuRow(label, sub, art, onClick, h('span', { class: `switch${on ? ' on' : ''}`, 'aria-hidden': 'true' }));
+  b.setAttribute('aria-pressed', String(on));
+  return b;
+}
+
+/** A section of a page: a small heading (with a note on the right, if any), then its contents. */
+function pageSection(title: string, aside: string | null, ...kids: Child[]): HTMLElement {
+  return h('section', { class: 'page-section' },
+    h('div', { class: 'section-head' }, h('h3', { text: title }), aside ? h('span', { text: aside }) : null),
+    ...kids);
+}
+
+/** Rebuild a page's body in place, keeping focus on the same button where it can. */
+function fillPage(kids: Node[]): void {
+  const body = ui.page.body;
+  const before = [...body.querySelectorAll('button')];
+  const at = before.indexOf(document.activeElement as HTMLButtonElement);
+  body.replaceChildren(...kids);
+  if (at >= 0) {
+    const after = [...body.querySelectorAll('button')];
+    (after[Math.min(at, after.length - 1)] as HTMLButtonElement | undefined)?.focus({ preventScroll: true });
+  }
+}
+
+let herSig = '';
+
+/** What a bond level brings: its boost to the clover rate, and what reaching it pays and opens up. */
+function bondPerks(level: number): { rate: number; bonus: number; unlocks: string[] } {
+  const rate = RATE.bondEarly * Math.min(level - 1, 6) + RATE.bondLate * Math.max(0, level - 7);
+  const unlocks = [
+    ...CATALOG.filter((d) => d.bond === level && !d.giftOnly && !d.limited && !d.welcome).map((d) => d.name),
+    ...SURFACES.filter((d) => d.bond === level).map((d) => d.name),
+    ...OUTFITS.filter((o) => o.bond === level && !o.giftOnly).map((o) => o.name),
+  ].map((n) => n.toLowerCase());
+  return { rate, bonus: BOND_LEVEL_CLOVER[level] ?? 0, unlocks };
+}
+
+/** "a, b and c" */
+function listOf(xs: string[]): string {
+  return xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs[0] ?? '';
+}
+
+/** Her page: her portrait and bond, her wardrobe, shelf and journal, and the settings. */
+function renderHerPage(): void {
+  const n = now();
+  const w = wardrobe(pet);
+  const bl = bondLevel(pet.bond);
+  const found = COLLECTIBLES.filter((c) => (pet.collection?.[c.id] ?? 0) > 0).length;
+  const met = CRITTERS.filter((c) => pet.critters?.seen[c.id]).length;
+  const pct = Math.round((rate(pet).total - 1) * 100);
+  const reminders = OR.capabilities.has('notifications.schedule') ? settings.reminders === 'on' : null;
+  const sound = settings.sound !== false;
+  const holiday = away();
+  const sig = [pet.name, pet.coat, dressKey(dressOf(pet)), pet.daysVisited, bl.level, bl.into, w.owned.length, found, met, pct,
+    journal.entries.length, reminders, sound, holiday ? pet.vacationUntilMs : 0, isOut(pet, n)].join('|');
+  if (sig === herSig) return;
+  herSig = sig;
+
+  ui.page.title.textContent = pet.name;
+  ui.page.action.replaceChildren();
+  ui.page.sub.textContent = `${pet.daysVisited} ${pet.daysVisited === 1 ? 'day' : 'days'} together · since ${fmtDate(pet.bornAtMs)}`;
+
+  const bondPct = Math.max(2, Math.min(100, Math.round((bl.into / bl.span) * 100)));
+  // what she has from it now, and what the next level brings
+  const now_ = bondPerks(bl.level), next = bondPerks(bl.level + 1);
+  const brings = [
+    `+${Math.round((next.rate - now_.rate) * 100)}% more clover`,
+    ...(next.bonus ? [`a ${next.bonus} clover bonus`] : []),
+    ...(next.unlocks.length ? [`the ${listOf(next.unlocks)} in the shop`] : []),
+  ];
+  const nextLine = `Level ${bl.level + 1} (${bondPct}% there) brings ${listOf(brings)}.`;
+  const profile = h('section', { class: 'her-card' },
+    h('div', { class: 'profile-art' }, img(rabbitSprite(pet.coat, 'happy', 0, dressOf(pet)), 3, `${pet.name} in her outfit`)),
+    h('div', { class: 'her-bond' },
+      h('span', { class: 'eyebrow', text: 'Your bond' }),
+      h('span', { class: 'bond-level', text: `Level ${bl.level}` }),
+      h('span', { class: 'bond-bar', role: 'meter', 'aria-label': `Bond, on the way to level ${bl.level + 1}`, 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': bondPct },
+        h('span', { style: `width:${bondPct}%` })),
+      h('span', { class: 'perk', text: now_.rate ? `+${Math.round(now_.rate * 100)}% clover from care, gifts, finds and friends` : 'Look after her each day and it grows' }),
+      h('span', { class: 'meta', text: nextLine })));
+
+  const tile = (label: string, sub: string, art: ItemArt, onClick: () => void) => {
+    const s = itemSprite(art);
+    const b = h('button', { class: 'tile', type: 'button' },
+      h('span', { class: 'ico' }, img(s, fitScale(s, 34))), h('span', { class: 'nm', text: label }), h('span', { class: 'sub', text: sub }));
+    b.addEventListener('click', onClick);
+    return b;
+  };
+  const things = h('div', { class: 'tiles' },
+    tile('Wardrobe', w.owned.length ? `${w.owned.length} of ${OUTFITS.length} outfits` : 'Bows, hats and scarves', 'bow', () => openShop({ cat: 'wardrobe' })),
+    tile('Collection', `${found} of ${COLLECTIBLES.length} found`, 'marble', () => openCollection()),
+    tile('Journal', journal.entries.length ? `${journal.entries.length} ${journal.entries.length === 1 ? 'entry' : 'entries'}` : 'Your story', 'book', () => openJournal()));
+
+  const speaker = h('span', { class: 'svg-ico' });
+  speaker.innerHTML = sound ? SPEAKER_ON : SPEAKER_OFF;
+  const settingsRows: HTMLElement[] = [switchRow('Sound', sound ? 'On' : 'Off', speaker, sound, () => toggleSound())];
+  if (reminders !== null) {
+    settingsRows.push(switchRow('Reminders', reminders ? 'Nudges when she wakes, treats, the garden and gifts' : 'Off', 'moon', reminders, () => {
+      settings.reminders = reminders ? 'off' : 'on';
+      saveSettings();
+      toast(settings.reminders === 'on' ? "Reminders on. We'll nudge you now and then." : 'Reminders off.');
+      queueReconcile();
+      render();
+    }));
+  }
+  settingsRows.push(
+    menuRow(holiday ? 'On holiday' : 'Going away?', holiday ? `Until ${fmtDate(pet.vacationUntilMs!)}. Bring her home early` : 'Pause her needs for a trip', 'suitcase', () => openVacation()),
+    menuRow('Share', `Tell a friend about ${pet.name}`, 'heart', () => void shareCard()),
+    menuRow('Start over', `Say goodbye to ${pet.name} and adopt a new rabbit`, null, () => confirmStartOver()),
+  );
+  settingsRows[settingsRows.length - 1]!.classList.add('danger');
+
+  fillPage([
+    profile,
+    pageSection('Her things', `${met} of ${CRITTERS.length} visitors met`, things,
+      menuRow('Clover rate', `+${pct}% clover, from her bond, finds and best friends`, 'clover', () => openRate())),
+    pageSection('Settings', null, h('div', { class: 'menu' }, ...settingsRows)),
+  ]);
 }
 
 // ------------------------------------------------------------------ starting over
@@ -2942,7 +4186,7 @@ async function startOver(): Promise<void> {
 
 /** Tear down the burrow screen and show adoption, with no rabbit loaded. */
 function leaveForAdoption(): void {
-  closeFoodTray();
+  closeTray();
   decorating = false;
   scene = null;
   pet = undefined as unknown as PetState;
@@ -2950,69 +4194,6 @@ function leaveForAdoption(): void {
   burrow = starterBurrow();
   journal = emptyJournal();
   renderAdopt();
-}
-
-// ------------------------------------------------------------------ wardrobe
-
-function openWardrobe(): void {
-  openLiveSheet((close, redraw) => {
-    const n = now();
-    const w = wardrobe(pet);
-    const section = (slot: Slot, title: string) => {
-      const items = OUTFITS.filter((o) => o.slot === slot && (w.owned.includes(o.id) || (!o.giftOnly && (!o.limited || limitedAvailable(o.id, n, tz)))));
-      const none = h('button', { class: 'wear', type: 'button', 'aria-pressed': String(!w[slot]) },
-        h('span', { class: 'art' }, img(rabbitSprite(pet.coat, 'content', 0, { ...dressOf(pet), [slot]: null }), 2)),
-        h('span', { class: 'nm', text: 'Nothing' }), h('span', { class: 'pr', text: ' ' }));
-      none.addEventListener('click', () => { pet = wear(pet, slot, null); savePet(); play('flip'); redraw(); });
-      const buttons = items.map((o) => {
-        const owned = w.owned.includes(o.id);
-        const on = w[slot] === o.id;
-        const locked = !owned && o.bond && bondLevel(pet.bond).level < o.bond ? `Bond ${o.bond}` : null;
-        const key = `outfit:${o.id}`;
-        const b = h('button', {
-          class: 'wear' + (pet.goal === key ? ' pinned' : ''), type: 'button', 'aria-pressed': String(on),
-          'aria-label': `${o.name}. ${owned ? (on ? 'Wearing.' : 'Owned. Put it on.') : locked ? `${locked}.` : `${o.price} clover.`}`,
-        },
-        o.limited && !owned ? h('span', { class: 'tag', text: 'Limited' }) : null,
-        pet.goal === key ? h('span', { class: 'tag goal', text: 'Goal' }) : null,
-        h('span', { class: 'art' }, img(rabbitSprite(pet.coat, 'content', 0, { ...dressOf(pet), [slot]: o.id }), 2)),
-        h('span', { class: 'nm', text: o.name }),
-        owned ? h('span', { class: 'pr', text: on ? 'Wearing' : 'Owned' }) : locked ? h('span', { class: 'pr', text: locked })
-          : h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(o.price)));
-        b.addEventListener('click', () => {
-          if (owned) {
-            pet = wear(pet, slot, on ? null : o.id);
-            savePet();
-            play('flip');
-            if (!on) goal('dress');
-          } else {
-            if (pet.clover < o.price) { toggleGoal(key, o.name); redraw(); return; }
-            const r = buyOutfit(pet, o.id);
-            if (!r.ok) { play('nope'); toast('Not enough clover yet.'); return; }
-            if (pet.goal === key) r.state.goal = null;
-            pet = r.state;
-            savePet();
-            play('clover');
-            haptic('success');
-            toast(`${pet.name} tries on the ${o.name.toLowerCase()}.`);
-            goal('dress');
-            note(`Got ${article(o.name)}.`, 'gift', `outfit:${o.id}`);
-          }
-          redraw();
-        });
-        if (locked) setOff(b, `Opens at ${locked.toLowerCase()}.`);
-        return b;
-      });
-      return h('div', { class: 'wear-section' }, h('div', { class: 'eyebrow', text: title }), h('div', { class: 'wear-row' }, none, ...buttons));
-    };
-    return [
-      h('div', { class: 'wear-preview' }, img(rabbitSprite(pet.coat, 'happy', 0, dressOf(pet)), 4, `${pet.name} in her outfit`)),
-      h('h2', { text: 'Wardrobe' }),
-      section('head', 'On her head'),
-      section('neck', 'Round her neck'),
-      h('div', { class: 'actions-col' }, button('Done', 'btn primary', close)),
-    ];
-  });
 }
 
 // ------------------------------------------------------------------ collection
@@ -3115,7 +4296,7 @@ function openVacation(): void {
       h('h2', { text: `Send ${pet.name} on holiday` }),
       h('p', { text: "While she's away her needs pause, so she won't miss you. She won't find things or earn clover, and reminders stop, except one when she's home." }),
       h('div', { class: 'choice-row' }, ...choices),
-      h('p', { class: 'note', text: 'You can bring her home early any time from More.' }),
+      h('p', { class: 'note', text: `You can bring her home early any time from ${pet.name}'s page, in the tab bar.` }),
       h('div', { class: 'actions-col' }, button('Not now', 'btn', close)),
     ];
   });
@@ -3136,8 +4317,7 @@ function openEvent(id: string): void {
     h('p', { text: e.blurb }),
     ...raffleSection(e, redraw),
     h('div', { class: 'actions-col' },
-      e.decor.length ? button('See the decor', e.raffle ? 'btn' : 'btn primary', () => { close(); enterDecorate(); }) : null,
-      e.outfits.length || e.gift ? button('Open the wardrobe', e.decor.length ? 'btn' : 'btn primary', () => { close(); openWardrobe(); }) : null,
+      e.decor.length ? button('See the decor', e.raffle ? 'btn' : 'btn primary', () => { close(); openShop({ cat: 'decor', event: e.id }); }) : null,
       button('Close', 'btn', close)),
   ]);
 }
@@ -3153,38 +4333,107 @@ function raffleSection(e: SeasonalEvent, redraw: () => void): Node[] {
   const bought = ticketsBought(pet, e.id);
   const left = RAFFLE.guaranteeBy - bought;
   const ticket = h('button', { class: 'btn primary', type: 'button' }, img(itemSprite('clover'), 1), ` Buy a ticket (${RAFFLE.ticket})`);
-  ticket.addEventListener('click', () => {
-    const r = drawTicket(pet, e);
-    if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? moreClover(RAFFLE.ticket) : 'The raffle is closed.'); return; }
-    pet = r.state;
-    savePet();
-    const d = r.draw;
-    if (d.kind === 'prize') {
-      play('gift');
-      haptic('success');
-      toast(`You won the ${prize.name.toLowerCase()}!`);
-      note(`Won the ${prize.name.toLowerCase()} in the ${e.name} raffle.`, 'gift', `raffle:${e.id}`);
-    } else if (d.kind === 'find') {
-      const c = COLLECTIBLES.find((x) => x.id === d.id);
-      play('find');
-      toast(`Not the prize, but ${c ? article(c.name) : 'a find'} for the shelf!`);
-      if (c) note(`Found ${article(c.name)} for the shelf, in the ${e.name} raffle.`, c.id, `find:${c.id}`);
-    } else {
-      play('clover');
-      toast(`Not the prize this time. ${d.amount} clover back.`);
-    }
-    render();
-    redraw();
-  });
+  ticket.addEventListener('click', () => buyTicket(e, redraw));
   if (pet.clover < RAFFLE.ticket) setOff(ticket, moreClover(RAFFLE.ticket));
   const out: (Node | null)[] = [
     h('h3', { class: 'gift-sub', text: 'Festival raffle' }),
     preview,
-    h('p', { text: `This year's prize is the ${prize.name.toLowerCase()}, and you can only win it. Each ticket has a 1 in ${Math.round(1 / RAFFLE.odds)} chance, and ${left === 1 ? 'your next ticket wins it for sure' : `you'll have it within ${left} more tickets at most`}. Any other ticket brings a ${e.name} find you're missing, or ${RAFFLE.refund} clover back.` }),
+    h('p', { text: `This year's prize is the ${prize.name.toLowerCase()}, and you can only win it. Each ticket has a 1 in ${Math.round(1 / RAFFLE.odds)} chance, and ${left === 1 ? 'your next ticket wins it for sure' : `you'll have it within ${left} more tickets at most`}.` }),
+    rafflePips(e, bought),
     h('div', { class: 'actions-col' }, ticket),
     bought ? h('p', { class: 'note', text: `${bought} ${bought === 1 ? 'ticket' : 'tickets'} so far. They carry over to next year until you win.` }) : null,
   ];
   return out.filter((x): x is Node => x !== null);
+}
+
+/** One pip per ticket up to the one that always wins, filled for those bought. */
+function rafflePips(e: SeasonalEvent, bought: number, fresh = false): HTMLElement {
+  const pips = Array.from({ length: RAFFLE.guaranteeBy }, (_, i) =>
+    h('span', { class: `pip${i < bought ? ' on' : ''}${fresh && i === bought - 1 ? ' fresh' : ''}${i === RAFFLE.guaranteeBy - 1 ? ' last' : ''}` }));
+  return h('div', { class: `raffle-pips ev-${e.id}`, role: 'img', 'aria-label': `${Math.min(bought, RAFFLE.guaranteeBy)} of ${RAFFLE.guaranteeBy} tickets; the ${RAFFLE.guaranteeBy}th always wins` }, ...pips);
+}
+
+/** How long the box shakes before it opens (tap to skip). */
+const DRAW_SHAKE_MS = 1500;
+
+/**
+ * Buy a ticket and open it, gacha style: the box shakes (glowing gold halfway
+ * through if it's the prize), then bursts open. The draw is made and saved
+ * before any of it plays, so closing early changes nothing.
+ */
+function buyTicket(e: SeasonalEvent, redrawEvent: () => void): void {
+  const prize = e.raffle ? outfitById(e.raffle) : undefined;
+  const r = drawTicket(pet, e);
+  if (!prize || !r.ok) { play('nope'); toast(!r.ok && r.reason === 'broke' ? moreClover(RAFFLE.ticket) : 'The raffle is closed.'); return; }
+  pet = r.state;
+  savePet();
+  render();
+  redrawEvent();
+  const won = r.draw.kind === 'prize';
+  const bought = ticketsBought(pet, e.id);
+  if (won) note(`Won the ${prize.name.toLowerCase()} in the ${e.name} raffle.`, 'gift', `raffle:${e.id}`);
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  openSheet((close) => {
+    let timer = 0;
+    const box = h('button', { class: 'draw-box', type: 'button', 'aria-label': 'Open it' }, img(itemSprite('gift'), 7));
+    const stage = h('div', { class: 'draw-stage' }, h('div', { class: 'draw-rays' }), box);
+    const title = h('h2', { text: 'Festival raffle' });
+    const line = h('p', { class: 'draw-line', 'aria-live': 'polite', text: `Ticket ${bought}…` });
+    const pips = rafflePips(e, bought - 1);
+    const actions = h('div', { class: 'actions-col' });
+    const wrap = h('div', { class: 'draw' }, stage, title, line, pips, actions);
+
+    const reveal = () => {
+      window.clearTimeout(timer);
+      if (!wrap.isConnected || wrap.dataset.phase === 'open') return;
+      wrap.dataset.phase = 'open';
+      box.remove();
+      if (won) {
+        wrap.dataset.won = '';
+        stage.append(h('div', { class: 'draw-result' }, img(rabbitSprite(pet.coat, 'happy', 0, { ...dressOf(pet), [prize.slot]: prize.id }), 4, `${pet.name} in the ${prize.name.toLowerCase()}`)));
+        // sparkles fly out all round
+        for (let i = 0; i < 12; i++) {
+          const s = h('span', { class: 'draw-spark' }, img(itemSprite('sparkle'), 2 + (i % 2)));
+          s.style.setProperty('--a', `${i * 30 + (i % 3) * 7}deg`);
+          s.style.setProperty('--d', `${90 + (i % 4) * 22}px`);
+          stage.append(s);
+        }
+        title.textContent = 'You won!';
+        line.textContent = `The ${prize.name.toLowerCase()} is hers. It's in her wardrobe.`;
+        pips.replaceWith(rafflePips(e, RAFFLE.guaranteeBy));
+        play('fanfare');
+        haptic('success');
+        actions.append(
+          button('Put it on', 'btn primary', () => { pet = wear(pet, prize.slot, prize.id); savePet(); play('flip'); goal('dress'); close(); }),
+          button('Later', 'btn', close));
+      } else {
+        stage.append(h('div', { class: 'draw-result miss' }, img(itemSprite(EVENT_ART[e.id] ?? 'sparkle'), 5)));
+        const left = RAFFLE.guaranteeBy - bought;
+        title.textContent = 'Not this time';
+        line.textContent = left === 1 ? 'Your next ticket wins it for sure!' : `It's yours within ${left} more tickets.`;
+        pips.replaceWith(rafflePips(e, bought, true));
+        play('puff');
+        const again = h('button', { class: 'btn primary', type: 'button' }, img(itemSprite('clover'), 1), ` Another ticket (${RAFFLE.ticket})`);
+        again.addEventListener('click', () => { if (pet.clover < RAFFLE.ticket) { play('nope'); toast(moreClover(RAFFLE.ticket)); return; } close(); buyTicket(e, redrawEvent); });
+        if (pet.clover < RAFFLE.ticket) setOff(again, moreClover(RAFFLE.ticket));
+        actions.append(again, button('Done', 'btn', close));
+      }
+      (actions.querySelector('button') as HTMLButtonElement | null)?.focus();
+    };
+
+    box.addEventListener('click', reveal);
+    if (still) {
+      queueMicrotask(reveal);
+    } else {
+      wrap.dataset.phase = 'shake';
+      play('drumroll');
+      // the tell: a winning box turns gold partway through
+      if (won) window.setTimeout(() => { if (wrap.dataset.phase === 'shake') wrap.dataset.gold = ''; }, DRAW_SHAKE_MS * 0.55);
+      timer = window.setTimeout(reveal, DRAW_SHAKE_MS);
+    }
+    return [wrap];
+  }, { kind: 'draw' });
 }
 
 /**
@@ -3248,7 +4497,11 @@ function handOutEventGifts(): void {
         h('div', { class: 'eyebrow', text: e.name }),
         h('h2', { text: `A gift: ${article(d.name)}` }),
         h('p', { text: 'It\'s waiting in the Shop, with your things. Place it wherever you like.' }),
-        h('div', { class: 'actions-col' }, button('Place it', 'btn primary', () => { close(); enterDecorate(); }), button('Later', 'btn', close)),
+        h('div', { class: 'actions-col' }, button('Place it', 'btn primary', () => {
+          close();
+          const it = burrow.items.find((i) => i.uid === uid && !i.placed);
+          if (it) putOutPiece(it); else goTab('shop', { arrange: true });
+        }), button('Later', 'btn', close)),
       ], { queue: true });
     }
   }
@@ -3317,6 +4570,7 @@ async function checkInbox(): Promise<void> {
           note(`Finished the ${set.name.toLowerCase()} set, with help from ${g.from.username}.`, 'sparkle', `set:${set.id}`);
         }
       }
+      if (opened) payLumps(settleLumps(pet));
       if (opened) { savePet(); play('gift'); haptic('success'); toast(`${opened === 1 ? 'Gift opened.' : `${opened} gifts opened.`}${clover ? ` +${clover} clover.` : ''}`); }
       render();
       close();
@@ -3340,10 +4594,40 @@ interface Friend { uuid: string; username: string; data: ShowcaseData }
 
 // ------------------------------------------------------------------ visits: friends' rabbits in her burrow
 
-let visitGuests: { visit: VisitIn; data: ShowcaseData }[] = [];
+/** Today's guests and their turns in the burrow (guests.ts). */
+let visitTurns: GuestTurn[] = [];
+/** Who was in last tick, to say when someone arrives or goes home; null until the first look. */
+let guestsSeen: string[] | null = null;
 
-function guestModels(): { coat: Coat; dress: Dress }[] {
-  return visitGuests.slice(0, 2).map(({ data: d }) => ({ coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears } }));
+/** The guests drawn now: those whose turn it is, in the main room only (she brings friends to the burrow proper). */
+function guestModelsHere(): GuestTurn[] {
+  return burrowRoom === 'main' ? guestsHere(visitTurns, now()) : [];
+}
+
+function guestModels(): { id: string; coat: Coat; dress: Dress }[] {
+  return guestModelsHere().map(({ visit, data: d }) => ({ id: visit.from.uuid, coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears } }));
+}
+
+/**
+ * A guest waiting their turn hops in, and one whose hour is up hops home,
+ * each with a line, while the game is open. The first look after loading is
+ * silent: the visit toast has already said who came.
+ */
+function noticeGuests(): void {
+  const n = now();
+  const ids = guestsHere(visitTurns, n).map((g) => g.visit.from.uuid);
+  const before = guestsSeen;
+  guestsSeen = ids;
+  if (!before) return;
+  const byId = new Map(visitTurns.map((g) => [g.visit.from.uuid, g]));
+  const left = before.map((id) => byId.get(id)).filter((g): g is GuestTurn => !!g && !ids.includes(g.visit.from.uuid) && g.untilMs <= n);
+  // in after waiting a turn (not just now seen)
+  const came = ids.map((id) => byId.get(id)).filter((g): g is GuestTurn => !!g && !before.includes(g.visit.from.uuid)
+    && g.fromMs > (g.visit.seenAt ? Date.parse(g.visit.seenAt) : n) + 1000);
+  const names = (gs: GuestTurn[]) => gs.map((g) => g.data.name).join(' and ');
+  // one line for a changeover: "Maple and Bun hopped home, and Pip hopped in."
+  const parts = [left.length ? `${names(left)} waved goodbye and hopped home` : '', came.length ? `${names(came)} hopped in to visit` : ''].filter(Boolean);
+  if (parts.length) toast(`${parts.join(', and ')}.`, came.length ? () => play('pet') : undefined);
 }
 
 /**
@@ -3362,6 +4646,7 @@ async function checkVisits(): Promise<void> {
     if (fresh.length) {
       const paid = applyVisits(pet, fresh, now(), tz);
       pet = paid.state;
+      payLumps(settleLumps(pet));
       savePet();
       for (const v of fresh) note(`${v.from.username} came to visit.`, 'heart', `visitfrom:${v.from.uuid}`);
       window.setTimeout(() => {
@@ -3371,7 +4656,9 @@ async function checkVisits(): Promise<void> {
     }
   }
   signGuestbookFrom(visits);
-  visitGuests = guestsToShow(visits, now(), tz);
+  visitTurns = guestTurns(visits, now(), tz);
+  // who came in with this look goes without saying (the toast above names them)
+  guestsSeen = guestsHere(visitTurns, now()).map((g) => g.visit.from.uuid);
   render();
 }
 
@@ -3395,23 +4682,18 @@ function guestbookLine(): string {
 }
 
 function openGuestbook(): void {
-  const book = journal.guestbook ?? [];
-  openSheet((close) => [
-    h('div', { class: 'eyebrow', text: 'Guest book' }),
-    h('h2', { text: `${pet.name}'s visitors` }),
-    book.length
-      ? h('ul', { class: 'guestbook' }, ...book.map((g) => {
-        const did = visitInfo(g.care)?.did;
-        const note = g.note && Object.prototype.hasOwnProperty.call(GUEST_NOTES, g.note) ? noteText(g.note as GuestNote, pet.name) : null;
-        return h('li', {},
-          h('span', { class: 'txt' },
-            h('span', { class: 'nm', text: `${g.rabbit} (${g.from})` }),
-            h('span', { class: 'meta', text: `${fmtDate(g.atMs)}${did ? ` · ${did}` : ''}` }),
-            note ? h('span', { class: 'quote', text: `“${note}”` }) : null));
-      }))
-      : h('p', { text: 'No visitors yet. When friends visit, they sign here, and some leave a note.' }),
-    h('div', { class: 'actions-col' }, button('Close', 'btn', close)),
-  ]);
+  showFriends('book');
+}
+
+/** One signature in the guest book: who, when, what they did, and their note. */
+function guestbookEntry(g: NonNullable<Journal['guestbook']>[number]): HTMLElement {
+  const did = visitInfo(g.care)?.did;
+  const note = g.note && Object.prototype.hasOwnProperty.call(GUEST_NOTES, g.note) ? noteText(g.note as GuestNote, pet.name) : null;
+  return h('li', {},
+    h('span', { class: 'txt' },
+      h('span', { class: 'nm', text: `${g.rabbit} (${g.from})` }),
+      h('span', { class: 'meta', text: `${fmtDate(g.atMs)}${did ? ` · ${did}` : ''}` }),
+      note ? h('span', { class: 'quote', text: `“${note}”` }) : null));
 }
 
 function visitLine(v: VisitIn, name: string): string {
@@ -3421,61 +4703,11 @@ function visitLine(v: VisitIn, name: string): string {
 }
 
 function greetGuest(i: number): void {
-  const g = visitGuests[i];
+  const g = guestModelsHere()[i];
   if (!g || !scene) return;
   scene.cheerGuest(i, performance.now());
   play('pet');
   ui.moodline.textContent = visitLine(g.visit, g.data.name);
-}
-
-function openVisitors(): void {
-  openSheet((close) => [
-    h('div', { class: 'eyebrow', text: 'Visiting today' }),
-    h('h2', { text: visitGuests.length === 1 ? `${visitGuests[0]!.data.name} is visiting` : `${visitGuests.length} friends visited` }),
-    h('ul', {}, ...visitGuests.map(({ visit, data }) => h('li', {},
-      h('span', { class: 'ico' }, img(rabbitSprite(data.coat, 'content', 0, { head: data.head, neck: data.neck, ears: data.ears }), 1, data.name)),
-      h('span', { class: 'txt' }, h('span', { class: 'nm', text: data.name }), h('span', { class: 'meta', text: visitLine(visit, data.name) }))))),
-    h('p', { class: 'note', text: 'Friends who visit stay until tomorrow at 5am. Visit them back from More → Friends.' }),
-    h('div', { class: 'actions-col' }, button('Close', 'btn', close)),
-  ]);
-}
-
-function openFriends(): void {
-  let friends: Friend[] | null = null;
-  let sent = new Set<string>();
-  openLiveSheet((close, redraw) => {
-    if (!friends) {
-      void Promise.all([OR.showcase.friends({ limit: 100 }).catch(() => []), OR.gifts.sentToday().catch(() => [])]).then(([rows, s]) => {
-        friends = rows.flatMap((r) => {
-          const data = readShowcase(r.data);
-          return data ? [{ uuid: r.uuid, username: r.username, data }] : [];
-        });
-        sent = new Set(s);
-        redraw();
-      });
-      return [h('div', { class: 'eyebrow', text: 'Friends' }), h('h2', { text: 'Friends’ burrows' }), h('p', { text: 'Knocking on doors…' })];
-    }
-    const list = friends.length
-      ? h('ul', { class: 'friends' }, ...friends.map((f) => {
-        const d = f.data;
-        const visit = button('Visit', 'btn', () => { close(); visitFriend(f); });
-        const gift = button(sent.has(f.uuid) ? 'Sent' : 'Gift', sent.has(f.uuid) ? 'btn' : 'btn primary', () => sendGift(f, () => { sent.add(f.uuid); redraw(); }));
-        gift.disabled = sent.has(f.uuid);
-        gift.setAttribute('aria-label', sent.has(f.uuid) ? `Already sent ${f.username} a gift today` : `Send ${f.username} a gift`);
-        return h('li', {},
-          h('span', { class: 'ico big' }, img(rabbitSprite(d.coat, 'content', 0, { head: d.head, neck: d.neck, ears: d.ears }), 1, d.name)),
-          h('span', { class: 'txt' }, h('span', { class: 'nm', text: `${d.name}` }), h('span', { class: 'sub', text: `${f.username} · ${d.daysVisited} ${d.daysVisited === 1 ? 'day' : 'days'} · Bond ${d.bondLevel}` })),
-          h('span', { class: 'btns' }, visit, gift));
-      }))
-      : h('p', { text: "None of the people you follow have a rabbit yet. Share Rabbit Pets and they can visit you too." });
-    return [
-      h('div', { class: 'eyebrow', text: 'Friends' }),
-      h('h2', { text: 'Friends’ burrows' }),
-      list,
-      h('p', { class: 'note', text: 'Friends are people you follow or who follow you. Send each one a gift a day; you get a clover for every gift you send.' }),
-      h('div', { class: 'actions-col' }, friends.length ? null : button('Share', 'btn primary', () => { close(); void shareCard(); }), button('Close', 'btn', close)),
-    ];
-  });
 }
 
 function sendGift(f: Friend, done: () => void): void {
@@ -3498,6 +4730,7 @@ function sendGift(f: Friend, done: () => void): void {
       }
       const reward = rewardGiftSent(after(pet), f.uuid, now(), tz);
       pet = reward.state;
+      payLumps(settleLumps(pet));
       savePet();
       play('gift');
       haptic('success');
@@ -3543,35 +4776,80 @@ function sendGift(f: Friend, done: () => void): void {
 }
 
 /** A friend's burrow, read-only: their room, their rabbit, pottering about. */
-function visitFriend(f: Friend): void {
+/** `onLeave`: after coming back home, as the Friends page does to see what changed. */
+function visitFriend(f: Friend, onLeave?: () => void): void {
   const d = f.data;
   const prevFocus = document.activeElement as HTMLElement | null;
   const canvas = h('canvas', { role: 'img', 'aria-label': `${d.name}'s burrow` });
   const stage = h('div', { class: 'stage' }, canvas);
-  const back = button('Back home', 'btn', () => leave());
-  const gift = button('Send a gift', 'btn primary', () => sendGift(f, () => { gift.disabled = true; gift.textContent = 'Gift sent'; }));
-  void OR.gifts.sentToday().then((s) => { if (s.includes(f.uuid)) { gift.disabled = true; gift.textContent = 'Gift sent'; } }).catch(() => undefined);
+  const back = button('Back', 'btn', () => leave());
+  back.setAttribute('aria-label', 'Back home');
   const holiday = !!d.vacationUntilMs && d.vacationUntilMs > now();
-  const moodline = h('p', { class: 'moodline', 'aria-live': 'polite', text: holiday ? `${d.name} is away on holiday.` : `${d.name} is ${TRAIT_INFO[d.trait].name.toLowerCase()}, and happy to have a visitor. Pick something to do for her.` });
-  // one act of care per friend a day: it shows up in their burrow as you, and pays you a little
+  const needs = friendNeeds(d, now());
+  const hint = holiday ? null : careHint(needs);
+  const moodline = h('p', { class: 'moodline', 'aria-live': 'polite', text: holiday ? `${d.name} is away on holiday.`
+    : hint ? `${d.name}'s ${hint.word}. Pick something to do for her.` : `${d.name} is happy to have a visitor. Pick something to do for her.` });
+  // How she is, from their snapshot: the one place a visitor sees it.
+  const NEED_LABEL: Record<NeedKey, string> = { happy: 'Joy', clean: 'Clean', hunger: 'Food', energy: 'Rest' };
+  const meters = holiday ? null : h('div', { class: 'visit-needs', role: 'group', 'aria-label': `How ${d.name} is` },
+    ...(['happy', 'clean', 'hunger', 'energy'] as NeedKey[]).map((k) => {
+      const v = Math.round(needs[k]);
+      const low = !!hint && VISIT_INFO[hint.kind].need === k;
+      return h('div', { class: low ? 'low' : '', role: 'meter', 'aria-label': NEED_LABEL[k], 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': v },
+        h('span', { text: NEED_LABEL[k] }), h('s', {}, h('u', { style: `width:${Math.max(3, v)}%` })));
+    }));
+
+  // One act of care per friend a day: pick one (the one that helps most is
+  // picked to start with), maybe a note for her guest book, then drop by. It
+  // shows up in their burrow as you, and pays you a little.
   const canVisit = OR.capabilities.has('visits.record');
+  let pick: VisitKind = hint?.kind ?? 'pat';
+  let pickedNote: GuestNote | null = null;
+  const NEED_WORD: Record<VisitKind, string> = { pat: '+ joy', snack: '+ food', brush: '+ clean' };
   const care = VISIT_KINDS.map((k) => {
     const info = VISIT_INFO[k];
-    const b = h('button', { class: 'act', type: 'button' }, img(itemSprite(info.art as ItemArt), 3), h('span', { text: info.label }));
-    b.addEventListener('click', () => void doVisit(k));
+    const b = h('button', { class: 'act', type: 'button', 'aria-pressed': String(k === pick) },
+      hint?.kind === k ? h('span', { class: 'helps', text: 'Helps most' }) : null,
+      img(itemSprite(info.art as ItemArt), 3), h('span', { text: info.label }), h('small', { text: NEED_WORD[k] }));
+    b.addEventListener('click', () => { pick = k; play('flip'); sync(); });
     return b;
   });
-  // an optional note for her guest book, picked from a list
-  const noteSelect = h('select', { id: 'visit-note', class: 'note-select' },
-    h('option', { value: '', text: 'No note' }),
-    ...(Object.keys(GUEST_NOTES) as GuestNote[]).map((n) => h('option', { value: n, text: noteText(n, d.name) })));
-  const noteField = h('label', { class: 'note-field', for: 'visit-note' }, h('span', { text: 'Leave a note in her guest book' }), noteSelect);
-  const visited = (text = 'Visited today') => { for (const b of care) { b.disabled = true; } noteSelect.disabled = true; const l = care[0]?.querySelector('span'); if (l) l.textContent = text; };
-  if (canVisit) void OR.visits.sentToday().then((s) => { if (s.includes(f.uuid)) visited(); }).catch(() => undefined);
-  async function doVisit(k: VisitKind): Promise<void> {
-    for (const b of care) b.disabled = true;
+  const chips = (Object.keys(GUEST_NOTES) as GuestNote[]).map((n) => {
+    const b = h('button', { class: 'note-chip', type: 'button', 'aria-pressed': 'false', text: noteText(n, d.name) });
+    b.addEventListener('click', () => { pickedNote = pickedNote === n ? null : n; sync(); });
+    return b;
+  });
+  const DO: Record<VisitKind, (name: string) => string> = { pat: (n) => `Pat ${n}`, snack: (n) => `Feed ${n}`, brush: (n) => `Brush ${n}` };
+  const go = h('button', { class: 'btn primary grow', type: 'button' });
+  go.addEventListener('click', () => void doVisit());
+  let done = false;
+  function sync(): void {
+    care.forEach((b, i) => b.setAttribute('aria-pressed', String(VISIT_KINDS[i] === pick)));
+    chips.forEach((b, i) => b.setAttribute('aria-pressed', String((Object.keys(GUEST_NOTES) as GuestNote[])[i] === pickedNote)));
+    if (done) return;
+    go.textContent = `${DO[pick](d.name)}${paidVisitsLeft() ? ` · +${visitPay(pet)} clover` : ''}`;
+  }
+  sync();
+  const careBox = h('div', { class: 'visit-pick' },
+    h('div', { class: 'pick-label', text: `Do something for ${d.name}` }),
+    h('div', { class: 'actions visit-care', role: 'group', 'aria-label': 'Care' }, ...care),
+    h('div', { class: 'pick-label' }, 'Sign her guest book · ', h('em', { text: 'optional' })),
+    h('div', { class: 'note-chips', role: 'group', 'aria-label': 'A note for her guest book' }, ...chips));
+  const visited = (line = `You've visited ${d.name} today.`) => {
+    done = true;
+    for (const b of [...care, ...chips]) b.disabled = true;
+    careBox.hidden = true;
+    go.disabled = true;
+    go.textContent = 'Visited today';
+    moodline.textContent = line;
+  };
+  if (canVisit) void OR.visits.sentToday().then((s) => { if (s.includes(f.uuid) && !done) visited(); }).catch(() => undefined);
+  async function doVisit(): Promise<void> {
+    if (done) return;
+    const k = pick;
+    go.disabled = true;
     try {
-      await OR.visits.record({ toUserUuid: f.uuid, kind: visitKind(k, (noteSelect.value || null) as GuestNote | null) });
+      await OR.visits.record({ toUserUuid: f.uuid, kind: visitKind(k, pickedNote) });
     } catch (e) {
       const c = errCode(e);
       play('nope');
@@ -3579,22 +4857,31 @@ function visitFriend(f: Friend): void {
         : c === 'visits/too-many' ? "That's all the visits for today. More tomorrow."
           : c === 'visits/not-connected' ? `You and ${f.username} aren't connected any more.`
             : "Couldn't do that just now.");
-      if (c === 'visits/already-visited-today') visited(); else for (const b of care) b.disabled = false;
+      if (c === 'visits/already-visited-today') visited(); else go.disabled = false;
       return;
     }
     const r = rewardVisit(pet, f.uuid, now(), tz);
     pet = r.state;
+    payLumps(settleLumps(pet));
     savePet();
     sc.react('happy', performance.now());
     play('pet');
     haptic('success');
-    moodline.textContent = VISIT_INFO[k].line(d.name);
-    toast(`${f.username} will see your rabbit in their burrow${noteSelect.value ? ', and your note' : ''}.${r.clover ? ` +${r.clover} clover.` : ''}`);
+    const noted = pickedNote;
+    visited(`${VISIT_INFO[k].line(d.name)} ${f.username} will see your rabbit in their burrow${noted ? ', and your note' : ''}.`);
+    if (r.clover) toast(`+${r.clover} clover.`);
     note(`Visited ${d.name} and ${VISIT_INFO[k].did}.`, 'heart', `visitcare:${f.uuid}`);
     goal('friend');
-    visited();
     render();
   }
+
+  // A gift is a follow-up to the visit, not a rival to it: say when a spare would fill a gap on their shelf.
+  const giftBtn = button('Gift', 'btn small', () => sendGift(f, () => giftSent()));
+  const wanted = spareFinds(pet).find((c) => (d.missing ?? []).includes(c.id));
+  const giftLine = h('span', { class: 'sub', text: wanted ? `${d.name} hasn't found ${article(wanted.name).toLowerCase()} yet. You have ${pet.collection?.[wanted.id] ?? 0}.` : 'One gift a friend a day.' });
+  const giftRow = h('div', { class: 'also-gift' }, img(itemSprite('strawberry'), 2), h('span', { class: 'txt' }, h('b', { text: 'Also send a gift?' }), giftLine), giftBtn);
+  const giftSent = () => { giftBtn.disabled = true; giftBtn.textContent = 'Sent'; giftLine.textContent = `You sent ${f.username} a gift today.`; };
+  void OR.gifts.sentToday().then((s) => { if (s.includes(f.uuid)) giftSent(); }).catch(() => undefined);
   // Their garden, for friends on a version that shares it: the same garden
   // scene, drawn from a stand-in pet, showing only what they've built.
   const gardenPet = friendGardenPet(d);
@@ -3603,7 +4890,7 @@ function visitFriend(f: Friend): void {
   // their rooms (the first, and any they've dug out) and their garden, as tabs
   let view: RoomId | 'garden' = 'main';
   let garea: AreaId = 'patch';
-  const views: (RoomId | 'garden')[] = ['main', ...EXTRA_ROOMS.filter((r) => d.rooms?.[r]), ...(gscene ? ['garden' as const] : [])];
+  const views: (RoomId | 'garden')[] = ['main', ...(ROOMS_OPEN ? EXTRA_ROOMS.filter((r) => d.rooms?.[r]) : []), ...(gscene ? ['garden' as const] : [])];
   const viewName = (v: RoomId | 'garden') => (v === 'garden' ? 'Garden' : ROOMS[v].name);
   const title = h('div', { class: 'name', text: `${d.name}'s burrow` });
   const areaTabs = h('div', { class: 'room-tabs visit-areas', role: 'group', 'aria-label': 'Areas of the garden', hidden: true },
@@ -3621,6 +4908,7 @@ function visitFriend(f: Friend): void {
         canvas.hidden = v === 'garden';
         gcanvas.hidden = v !== 'garden';
         areaTabs.hidden = v !== 'garden';
+        if (meters) meters.hidden = v === 'garden';
         title.textContent = v === 'garden' ? `${d.name}'s garden` : v === 'main' ? `${d.name}'s burrow` : `${d.name}'s ${ROOMS[v].name.toLowerCase()}`;
         canvas.setAttribute('aria-label', title.textContent);
         fit();
@@ -3628,6 +4916,7 @@ function visitFriend(f: Friend): void {
       return b;
     }));
   stage.append(gcanvas);
+  if (meters) stage.append(meters);
   const wrap = h('div', { class: 'visit', role: 'dialog', 'aria-modal': 'true', 'aria-label': `Visiting ${d.name}` },
     h('header', { class: 'visit-top' },
       h('div', { class: 'who' }, title, h('div', { class: 'sub', text: `${f.username} · ${d.daysVisited} days · Bond ${d.bondLevel}` }))),
@@ -3636,9 +4925,9 @@ function visitFriend(f: Friend): void {
       moodline,
       views.length > 1 ? viewTabs : null,
       areaTabs,
-      canVisit && !holiday ? h('div', { class: 'actions visit-care' }, ...care) : null,
-      canVisit && !holiday ? noteField : null,
-      h('div', { class: 'row2' }, back, gift)));
+      canVisit && !holiday ? careBox : null,
+      h('div', { class: 'row2' }, back, canVisit && !holiday ? go : null),
+      giftRow));
   document.body.append(wrap);
   visitingFriend = true;
   app.inert = true;
@@ -3647,14 +4936,15 @@ function visitFriend(f: Friend): void {
     ({ v: 2, rev: 0, items: items.map((it, i) => ({ uid: `g${i}`, id: it.id, x: it.x, y: it.y, flip: it.flip, placed: true })) });
   const guestRooms: Partial<Record<RoomId, BurrowState>> = { main: roomBurrow(d.items) };
   for (const r of EXTRA_ROOMS) if (d.rooms?.[r]) guestRooms[r] = roomBurrow(d.rooms[r]!);
-  const fit = () => (view === 'garden' && gscene ? fitScene(stage, gcanvas, gscene as unknown as Scene) : fitScene(stage, canvas, sc));
+  let gscale = 1;
+  const fit = () => { if (view === 'garden' && gscene) gscale = fitGarden(stage, gcanvas, gscene); else fitScene(stage, canvas, sc); };
   const ro = new ResizeObserver(fit);
   ro.observe(stage);
   fit();
   let raf = 0, lastT = 0;
   const loop = (t: number) => {
     raf = requestAnimationFrame(loop);
-    if (t - lastT < 66) return;
+    if (t - lastT < 66 && !(view === 'garden' && gscene?.moving)) return;
     lastT = t;
     const n = now();
     const w = today(n);
@@ -3665,12 +4955,13 @@ function visitFriend(f: Friend): void {
         coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears }, asleep, absent: holiday, meadowOpen: !!d.garden?.meadow,
         items: (d.garden?.meadow ?? []).map((it, i) => ({ uid: `m${i}`, ...it, placed: true })), selected: null, guest: true,
       }, t);
+      nudgeGarden(gcanvas, gscene, gscale);
       return;
     }
     const r = view === 'garden' ? 'main' : view;
     sc.draw({ coat: d.coat, night: isNight(n, tz), mood: asleep ? 'asleep' : 'content', burrow: guestRooms[r] ?? guestRooms.main!, decorating: false, selected: null,
       dress: { head: d.head, neck: d.neck, ears: d.ears }, season: w.season, weather: w.weather, guest: true, absent: holiday,
-      room: { wall: d.wall ?? 'plainwall', floor: d.floor ?? 'plainfloor', window: d.window ?? 'roundwindow', ...(r !== 'main' ? { variant: r } : {}) }, moon: moonPhase(n) }, t);
+      room: { wall: d.wall ?? 'plainwall', floor: d.floor ?? 'plainfloor', window: d.window ?? 'roundwindow', ...(r !== 'main' ? { variant: r } : {}) }, moon: moonPhase(n), time: clockTime(n) }, t);
   };
   raf = requestAnimationFrame(loop);
   canvas.addEventListener('click', (e) => {
@@ -3692,22 +4983,509 @@ function visitFriend(f: Friend): void {
     visitingFriend = false;
     app.inert = sheetStack.length > 0;
     prevFocus?.focus();
+    onLeave?.();
+  }
+}
+
+// ------------------------------------------------------------------ the friends page
+
+/** Friends' burrows, and who you've gifted and visited today. `friends` is null until the first answer. */
+interface FriendsCache { at: number; friends: Friend[] | null; failed: boolean; giftSent: Set<string>; visited: Set<string> }
+let friendsCache: FriendsCache | null = null;
+let friendsSig = '';
+
+/** Whether this host lets her have friends (it doesn't signed out, or in preview). */
+function socialOn(): boolean {
+  return !!OR.user && OR.capabilities.has('showcase.friends');
+}
+
+/** Knock on friends' doors: on opening the tab, at most once a minute unless `force`d. */
+function loadFriends(force = false): void {
+  if (!socialOn()) return;
+  if (!force && friendsCache && !friendsCache.failed && Date.now() - friendsCache.at < 60_000) return;
+  const c: FriendsCache = friendsCache ?? { at: 0, friends: null, failed: false, giftSent: new Set(), visited: new Set() };
+  c.at = Date.now();
+  c.failed = false;
+  friendsCache = c;
+  void Promise.all([
+    OR.showcase.friends({ limit: 100 }).catch(() => null),
+    OR.gifts.sentToday().catch(() => null),
+    OR.capabilities.has('visits.record') ? OR.visits.sentToday().catch(() => null) : Promise.resolve(null),
+  ]).then(([rows, gifts, visits]) => {
+    if (friendsCache !== c) return; // started over meanwhile
+    if (rows) {
+      c.friends = rows.flatMap((r) => {
+        const data = readShowcase(r.data);
+        return data ? [{ uuid: r.uuid, username: r.username, data }] : [];
+      });
+    } else if (!c.friends) c.failed = true;
+    if (gifts) c.giftSent = new Set(gifts);
+    if (visits) c.visited = new Set(visits);
+    friendsSig = '';
+    render();
+  });
+}
+
+/** Of the visits you make, how many more today pay you clover. */
+function paidVisitsLeft(): number {
+  const t = pet.friendToday;
+  const used = t && t.day === dayKey(now(), tz, DAY_ROLLOVER_HOUR) ? t.counts.visit ?? 0 : 0;
+  return Math.max(0, FRIEND_CLOVER.paidPerDay - used);
+}
+
+/** A friend's rabbit, face on, for a list. */
+function friendFace(d: ShowcaseData): HTMLElement {
+  return h('span', { class: 'ico big' }, img(rabbitSprite(d.coat, 'content', 0, { head: d.head, neck: d.neck, ears: d.ears }), 1, d.name));
+}
+
+/** Friends' rabbits' faces, overlapping, for a line of who's over. The last `faded` are waiting, and fainter. */
+function faceStack(ds: ShowcaseData[], faded = 0): HTMLElement {
+  return h('span', { class: 'face-stack', 'aria-hidden': 'true' }, ...ds.map((d, i) =>
+    h('span', { class: i >= ds.length - faded ? 'face faded' : 'face' }, img(rabbitSprite(d.coat, 'content', 0, { head: d.head, neck: d.neck, ears: d.ears }), 1))));
+}
+
+/** How close you are: ten hearts to best friends (a day of visiting or gifting each way is a point). */
+function friendHearts(points: number): HTMLElement {
+  const best = FRIEND_CLOVER.bestFriendPoints;
+  const full = Math.min(10, Math.floor((points / best) * 10));
+  const text = points >= best ? 'Best friends' : `${points} of ${best} days`;
+  return h('span', { class: 'friend-bond', role: 'img', 'aria-label': points >= best ? 'Best friends' : `Friendship: ${points} of ${best} days to best friends` },
+    h('span', { class: 'hearts' }, ...Array.from({ length: 10 }, (_, i) => h('i', { class: i < full ? 'f' : '' }))),
+    h('span', { text }));
+}
+
+/** A rabbit's face in a door of the lane, or an empty plot when there's no `d`. */
+interface LaneDoor { d?: ShowcaseData; label: string; lit?: boolean; parcel?: boolean; best?: boolean; badge?: string; aria: string; onClick: () => void }
+function lane(doors: LaneDoor[], cls = ''): HTMLElement {
+  return h('div', { class: `lane ${cls}`.trim() },
+    h('div', { class: 'lane-doors', role: 'list' }, ...doors.map((o) => {
+      const b = h('button', { class: o.d ? 'door' : 'door plot', type: 'button', 'aria-label': o.aria },
+        o.badge ? h('span', { class: 'door-badge', text: o.badge }) : o.best ? h('span', { class: 'door-heart' }) : null,
+        o.d ? h('span', { class: o.lit ? 'door-lamp on' : 'door-lamp' }) : null,
+        o.parcel ? h('span', { class: 'door-parcel' }) : null,
+        h('span', { class: 'arch' }, o.d ? img(rabbitSprite(o.d.coat, 'content', 0, { head: o.d.head, neck: o.d.neck, ears: o.d.ears }), 1) : h('span', { text: '+' })),
+        h('span', { class: 'plate', text: o.label }));
+      b.addEventListener('click', o.onClick);
+      return h('div', { role: 'listitem' }, b);
+    })));
+}
+
+/** Why have friends: what they bring, with the real numbers. */
+function friendPerks(): HTMLElement {
+  const other = COATS.filter((c) => c !== pet.coat)[1]!;
+  const pay = visitPay(pet);
+  const bonuses = Object.entries(FRIEND_MILESTONES);
+  const [firstN, firstC] = bonuses[0]!;
+  const [lastN, lastC] = bonuses[bonuses.length - 1]!;
+  const art = (a: ItemArt) => img(itemSprite(a), fitScale(itemSprite(a), 28));
+  const rows: [Node, string, string][] = [
+    [img(rabbitSprite(other, 'happy'), 1), 'Guests in your burrow', `Their rabbit hops in and plays with ${pet.name} for about an hour.`],
+    [art('carrot'), `Help looking after ${pet.name}`, 'Friends can pat, feed or brush her when they visit.'],
+    [art('clover'), 'Clover both ways', `${pay} clover when you visit a friend, and ${pay} when one visits you. The first ${FRIEND_CLOVER.paidPerDay} of each a day pay.`],
+    [art('heart'), 'Best friends boost everything', `Visit back and forth for ${FRIEND_CLOVER.bestFriendPoints} days: +${Math.round(RATE.bestFriend * 100)}% clover from care, finds and her daily gift, for each of up to ${FRIEND_CLOVER.maxBestFriends}.`],
+    [art('gift'), 'Friend bonuses', `${Number(firstC).toLocaleString()} clover when you and ${firstN} friends have visited each other, up to ${Number(lastC).toLocaleString()} at ${lastN}.`],
+    [art('strawberry'), 'Swap spare finds', 'Send finds you have two of to friends who are still missing them.'],
+  ];
+  return h('ul', { class: 'list perks' }, ...rows.map(([icon, nm, sub]) =>
+    h('li', {}, h('span', { class: 'ico' }, icon), h('span', { class: 'txt' }, h('span', { class: 'nm', text: nm }), h('span', { class: 'sub', text: sub })))));
+}
+
+/** Her door with empty plots either side, and an invite. For the Friends tab with no friends yet. */
+function friendsHero(action: HTMLButtonElement, text: string): HTMLElement {
+  const me: ShowcaseData = { v: 1, name: pet.name, coat: pet.coat, ears: earsOf(pet), needs: pet.needs, simAtMs: pet.simAtMs, napEndsAtMs: null, vacationUntilMs: null,
+    daysVisited: pet.daysVisited, bondLevel: 1, head: dressOf(pet).head ?? null, neck: dressOf(pet).neck ?? null, items: [] };
+  const plot = { label: 'FREE', aria: 'An empty plot. Invite a friend', onClick: () => openInvite() };
+  return h('div', { class: 'friends-hero' },
+    lane([plot, { d: me, label: pet.name.toUpperCase().slice(0, 8), lit: true, aria: `${pet.name}'s burrow`, onClick: () => goTab('burrow') }, plot], 'small'),
+    h('div', { class: 'txt' }, h('h2', { text: `${pet.name} would love some company` }), h('p', { text }), action));
+}
+
+/** The next friend bonus, with the friend bonuses laid out as a ladder. */
+function milestoneLadder(): HTMLElement {
+  const have = mutualFriends(pet);
+  return h('div', { class: 'ladder', role: 'list', 'aria-label': `Friend bonuses. You have ${have} friends who've visited you back.` },
+    ...Object.entries(FRIEND_MILESTONES).map(([n, c]) => h('div', { role: 'listitem', class: Number(n) <= have ? 'got' : '' },
+      h('b', { text: n }), `+${c.toLocaleString()}`)));
+}
+
+/** Invite a friend: what they'll get, how people become friends here, the friend bonuses, then share. */
+function openInvite(): void {
+  openSheet((close) => [
+    h('div', { class: 'eyebrow', text: 'Invite a friend' }),
+    h('h2', { text: `Share ${pet.name} with a friend` }),
+    h('div', { class: 'invite-card' },
+      h('span', { class: 'art' }, img(rabbitSprite(pet.coat, 'happy', 0, dressOf(pet)), 2, pet.name)),
+      h('span', { class: 'txt' }, h('b', { text: `Come visit ${pet.name}!` }), h('span', { text: shareText() }))),
+    h('p', { class: 'note', text: 'Anyone you follow on OddsRabbit, or who follows you, shows up in Friends as soon as they have a rabbit.' }),
+    h('h3', { class: 'gift-sub', text: 'Friend bonuses' }),
+    milestoneLadder(),
+    h('p', { class: 'meta', text: `For friends you've visited who've visited you too. You have ${mutualFriends(pet)}.` }),
+    h('div', { class: 'actions-col' },
+      button('Share invite', 'btn primary', () => { close(); void shareCard(); }),
+      button('Not now', 'btn', close)),
+  ]);
+}
+
+/** How friends work: what they bring and the few rules. */
+function openFriendRules(): void {
+  openSheet((close) => [
+    closeX(close),
+    h('h2', { text: 'How friends work' }),
+    h('p', { text: `Friends are people you follow on OddsRabbit, or who follow you, once they have a rabbit. Visit each one and send them a gift once a day.` }),
+    friendPerks(),
+    h('h3', { class: 'gift-sub', text: 'Friend bonuses' }),
+    milestoneLadder(),
+    h('div', { class: 'actions-col' }, button('Invite a friend', 'btn primary', () => { close(); openInvite(); }), button('Done', 'btn', close)),
+  ]);
+}
+
+/** Today's visitors in full: who's in, who's at the door waiting a turn, who's hopped home. */
+function openVisitors(): void {
+  openSheet((close) => {
+    const n = now();
+    const here = guestsHere(visitTurns, n);
+    const rank = (t: GuestTurn) => (here.includes(t) ? 0 : t.fromMs > n ? 1 : 2);
+    const turns = [...visitTurns].sort((a, b) => rank(a) - rank(b) || a.fromMs - b.fromMs);
+    const when = (t: GuestTurn) => (here.includes(t) ? 'Here now' : t.fromMs > n ? `At the door, in ${fmtLong(t.fromMs - n)}` : 'Hopped home');
+    return [
+      closeX(close),
+      h('h2', { text: 'Visitors today' }),
+      h('ul', { class: 'list' }, ...turns.map((t) => {
+        const hi = here.includes(t) ? button('Say hi', 'btn small', () => { close(); sayHi(t); }) : null;
+        const did = visitInfo(t.visit.kind)?.did;
+        return h('li', { class: here.includes(t) ? 'here' : '' }, friendFace(t.data),
+          h('span', { class: 'txt' },
+            h('span', { class: 'nm', text: t.data.name }),
+            h('span', { class: 'sub', text: `${t.visit.from.username} · ${when(t)}${did ? ` · ${did}` : ''}` })),
+          hi);
+      })),
+      h('p', { class: 'note', text: 'Two friends can be over at once, for about an hour each; the rest wait at the door for a turn. Everyone signs the guest book.' }),
+    ];
+  });
+}
+
+/** Over to the burrow to say hello to a guest who's in. */
+function sayHi(t: GuestTurn): void {
+  goTab('burrow');
+  if (burrowRoom !== 'main') goRoom('main');
+  const i = guestModelsHere().findIndex((g) => g.visit.visitUuid === t.visit.visitUuid);
+  if (i >= 0) greetGuest(i);
+}
+
+/** Names as a sentence: "Pip", "Pip and Bun", "Pip, Bun and Maple". */
+function names(ns: string[]): string {
+  return ns.length <= 1 ? ns.join('') : `${ns.slice(0, -1).join(', ')} and ${ns[ns.length - 1]}`;
+}
+
+/** The Friends page's three views: today at a glance, everyone, and the guest book. */
+type FriendsView = 'today' | 'all' | 'book';
+let friendsView: FriendsView = 'today';
+/** Signatures newer than this showed as New when the guest book was opened (settings.guestbookSeenMs keeps up). */
+let bookNewSince = 0;
+/** Full cards on Today: the friends most worth visiting now; everyone's under Friends. */
+const TODAY_CARDS = 6;
+/** Past this many friends, the Friends view gets a search. */
+const SEARCH_FROM = 15;
+
+/** Guest book signatures since you last looked at it. */
+function unreadGuestbook(): number {
+  const seen = settings.guestbookSeenMs ?? 0;
+  return (journal.guestbook ?? []).filter((g) => g.atMs > seen).length;
+}
+
+/** Switch the Friends page's view (and onto the Friends tab, if it isn't showing). */
+function showFriends(v: FriendsView): void {
+  if (v === 'book') {
+    // what's new stays marked New while you read it; next time it isn't
+    bookNewSince = settings.guestbookSeenMs ?? 0;
+    const newest = (journal.guestbook ?? [])[0]?.atMs ?? 0;
+    if (newest > (settings.guestbookSeenMs ?? 0)) { settings.guestbookSeenMs = newest; saveSettings(); }
+  }
+  friendsView = v;
+  friendsSig = '';
+  if (tab !== 'friends') goTab('friends');
+  else { ui.page.body.scrollTop = 0; render(); }
+}
+
+/**
+ * The Friends page, in three views under a switch: Today (who's over, or your
+ * friends' doors; the ones to visit now; anything new in the guest book),
+ * Friends (everyone, as a list to search), and the Guest book.
+ */
+function renderFriendsPage(): void {
+  const n = now();
+  const here = guestsHere(visitTurns, n);
+  const waiting = visitTurns.filter((t) => t.fromMs > n).sort((a, b) => a.fromMs - b.fromMs);
+  const c = friendsCache;
+  const book = journal.guestbook ?? [];
+  const unread = unreadGuestbook();
+  const day = dayKey(n, tz, DAY_ROLLOVER_HOUR);
+  const points = (uuid: string) => pet.friends?.[uuid]?.points ?? 0;
+  const cameBy = (uuid: string) => pet.friends?.[uuid]?.in === day || visitTurns.some((t) => t.visit.from.uuid === uuid);
+  const sig = [
+    friendsView, unread,
+    visitTurns.map((t) => `${t.visit.visitUuid}:${here.includes(t) ? 'h' : t.fromMs > n ? 'w' : 'g'}`).join(),
+    waiting.length ? Math.floor(n / 60_000) : 0,
+    // their needs wear down: look again every ten minutes
+    Math.floor(n / 600_000), day,
+    c ? `${c.friends?.map((f) => `${f.uuid}:${points(f.uuid)}:${cameBy(f.uuid)}`).join() ?? 'loading'}|${c.failed}|${[...c.giftSent].join()}|${[...c.visited].join()}` : 'none',
+    book.length, paidVisitsLeft(), visitPay(pet), hasUpgrade(pet, 'meadow'), socialOn(), mutualFriends(pet), pet.name, pet.coat, dressKey(dressOf(pet)),
+  ].join('|');
+  if (sig === friendsSig) return;
+  friendsSig = sig;
+
+  const canShare = OR.capabilities.has('actions.share');
+  const invite = button('Invite', 'btn small primary', () => openInvite());
+  invite.prepend(img(itemSprite('heart'), 2));
+  ui.page.action.replaceChildren(...(canShare ? [invite] : []));
+  ui.page.title.textContent = 'Friends';
+  const friends = c?.friends ?? null;
+  const toVisit = friends ? friends.filter((f) => !c!.visited.has(f.uuid)).length : 0;
+  const subs = [here.length ? `${here.length} over` : null, friends?.length ? (toVisit ? `${toVisit} to visit` : 'All visited today') : null].filter(Boolean);
+  ui.page.sub.textContent = subs.length ? subs.join(' · ') : socialOn() ? `${pet.name}'s friends` : `${pet.name}'s visitors`;
+
+  // everyone, in the order to visit them: anyone who came by first, then the closest
+  const best = FRIEND_CLOVER.bestFriendPoints;
+  const info = (friends ?? []).map((f) => {
+    const visited = c!.visited.has(f.uuid);
+    return { f, visited, sent: c!.giftSent.has(f.uuid), came: cameBy(f.uuid), p: points(f.uuid), rank: friendRank({ visitedYou: cameBy(f.uuid), visited }) };
+  }).sort((a, b) => a.rank - b.rank || b.p - a.p || a.f.data.name.localeCompare(b.f.data.name));
+  type Info = (typeof info)[number];
+  const gift = (x: Info) => {
+    const g = button(x.sent ? 'Gift sent' : 'Gift', x.sent ? 'btn small ghost' : 'btn small', () => sendGift(x.f, () => { c!.giftSent.add(x.f.uuid); friendsSig = ''; render(); }));
+    if (!x.sent) g.prepend(img(itemSprite('strawberry'), 2));
+    g.disabled = x.sent;
+    g.setAttribute('aria-label', x.sent ? `Already sent ${x.f.username} a gift today` : `Send ${x.f.username} a gift`);
+    return g;
+  };
+  const visitBtn = (x: Info, label: string, cls: string) => {
+    const b = button(label, cls, () => visitFriend(x.f, () => loadFriends(true)));
+    b.setAttribute('aria-label', `${label} ${x.f.data.name}`);
+    return b;
+  };
+
+  // the switch, pinned to the top of the page as it scrolls
+  const seg = (v: FriendsView, label: string, badge?: number) => {
+    const b = h('button', { type: 'button', class: 'seg-tab', 'aria-pressed': String(friendsView === v) }, label,
+      badge ? h('span', { class: 'seg-badge', 'aria-label': `${badge} new`, text: badge > 9 ? '9+' : String(badge) }) : null);
+    b.addEventListener('click', () => { if (friendsView !== v) { play('flip'); showFriends(v); } });
+    return b;
+  };
+  const kids: Node[] = [h('nav', { class: 'seg friends-seg', 'aria-label': 'Friends' },
+    seg('today', 'Today'), seg('all', friends?.length ? `Friends · ${friends.length}` : 'Friends'), seg('book', 'Guest book', unread))];
+
+  if (friendsView === 'today') kids.push(...friendsToday());
+  else if (friendsView === 'all') kids.push(...friendsAll());
+  else kids.push(...guestbookView());
+  fillPage(kids);
+
+  /** Today: who's over (or your friends' doors), anything new in the guest book, and who to visit now. */
+  function friendsToday(): Node[] {
+    const out: Node[] = [];
+    // Friends over or at the door: her burrow, live, with them in it. Otherwise
+    // (the burrow is on Home already) your friends' doors, to go and visit.
+    if (visitTurns.some((t) => here.includes(t) || t.fromMs > n)) out.push(porchCard());
+    else if (socialOn() && info.length) {
+      const doors = [...info].sort((a, b) => a.rank - b.rank || Number(b.p >= best) - Number(a.p >= best) || b.p - a.p).slice(0, 8);
+      out.push(lane([...doors.map((x): LaneDoor => {
+        const d = x.f.data;
+        const asleep = !!d.napEndsAtMs && d.napEndsAtMs > n;
+        return { d, label: d.name.toUpperCase().slice(0, 8), lit: x.visited, parcel: x.sent, best: x.p >= best,
+          badge: x.rank === 0 ? 'Visit back' : asleep ? 'zzz' : undefined,
+          aria: `Visit ${d.name}${x.visited ? ', visited today' : ''}${x.sent ? ', gift sent' : ''}${x.p >= best ? ', best friends' : ''}`,
+          onClick: () => visitFriend(x.f, () => loadFriends(true)) };
+      }), ...(canShare ? [{ label: 'INVITE', aria: 'Invite a friend', onClick: () => openInvite() }] : [])]));
+    }
+
+    // new in the guest book: say so, with the newest note, right where you'll see it
+    if (unread) {
+      const fresh = book.slice(0, unread);
+      const noted = fresh.find((g) => g.note && Object.prototype.hasOwnProperty.call(GUEST_NOTES, g.note));
+      const b = h('button', { class: 'book-news', type: 'button' },
+        h('span', { class: 'ico' }, img(itemSprite('book'), 3)),
+        h('span', { class: 'txt' },
+          h('b', { text: unread === 1 ? `${fresh[0]!.rabbit} signed the guest book` : `${unread} new in the guest book` }),
+          noted ? h('span', { class: 'quote' }, h('q', { text: noteText(noted.note as GuestNote, pet.name) }), ` ${noted.rabbit}`)
+            : h('span', { text: names([...new Set(fresh.map((g) => g.rabbit))].slice(0, 3)) })),
+        h('span', { class: 'go', 'aria-hidden': 'true', text: '›' }));
+      b.addEventListener('click', () => showFriends('book'));
+      out.push(b);
+    }
+
+    if (!socialOn()) {
+      const go = OR.user ? null
+        : button('Sign in to have friends over', 'btn primary', () => void OR.actions.requestSignIn(`Sign in so friends can visit ${pet.name}`).catch(() => undefined));
+      out.push(go ? friendsHero(go, `Friends' rabbits can visit ${pet.name}, and she can visit theirs.`)
+        : h('p', { class: 'quiet', text: "Visiting friends' burrows isn't available here yet." }));
+      out.push(pageSection('Why have friends', null, friendPerks()));
+      return out;
+    }
+    if (!c || (!friends && !c.failed)) { out.push(h('p', { class: 'quiet', text: 'Knocking on doors…' })); return out; }
+    if (!friends) {
+      out.push(h('div', { class: 'quiet-box' }, h('p', { text: "Couldn't reach your friends just now." }), button('Try again', 'btn small', () => { loadFriends(true); render(); })));
+      return out;
+    }
+    if (!friends.length) {
+      out.push(friendsHero(button('Invite a friend', 'btn primary', () => openInvite()), 'Invite someone and their rabbit can visit yours, and yours can visit theirs.'));
+      out.push(pageSection('Why have friends', null, friendPerks()));
+      return out;
+    }
+
+    // your visits today, in one line: the first few pay clover
+    const left = paidVisitsLeft();
+    const used = FRIEND_CLOVER.paidPerDay - left;
+    const sent = c.giftSent.size;
+    out.push(h('div', { class: 'today-line' },
+      h('span', { class: 'pips', 'aria-hidden': 'true' }, ...Array.from({ length: FRIEND_CLOVER.paidPerDay }, (_, i) => h('i', { class: i < used ? 'f' : '' }))),
+      h('span', { text: `${used} of ${FRIEND_CLOVER.paidPerDay} visits today · ${left ? `${visitPay(pet)} clover each` : 'more clover tomorrow'}${sent ? ` · ${sent} ${sent === 1 ? 'gift' : 'gifts'} sent` : ''}` })));
+
+    // the few most worth visiting now, as full cards; the rest are a tap away
+    const open = info.filter((x) => x.rank < 2);
+    const top = open.slice(0, TODAY_CARDS);
+    const more = open.length - top.length;
+    const head = h('div', { class: 'section-head' }, h('h3', { text: 'To visit' }), button('How friends work', 'link-btn', () => openFriendRules()));
+    out.push(h('section', { class: 'page-section' }, head,
+      top.length ? h('ul', { class: 'list friends-cards' }, ...top.map((x) => friendCard(x)))
+        : h('p', { class: 'quiet', text: `You've visited everyone today. ${pet.name}'s friends will be glad of it.` }),
+      more > 0 ? button(`See all ${info.length} friends`, 'btn small', () => showFriends('all')) : null));
+
+    // room for more: until there are five
+    if (canShare && friends.length < 5) {
+      const next = nextFriendMilestone(pet);
+      out.push(h('div', { class: 'invite-slot' },
+        h('span', { class: 'slot', 'aria-hidden': 'true', text: '+' }),
+        h('span', { class: 'txt' },
+          h('b', { text: 'Room for more friends' }),
+          h('span', { text: next
+            ? `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} so far. Visit back and forth with ${next.friends} for a ${next.clover.toLocaleString()} clover bonus.`
+            : `${friends.length} ${friends.length === 1 ? 'friend' : 'friends'} so far. More friends, more visitors.` })),
+        button('Invite a friend', 'btn small primary', () => openInvite())));
+    }
+
+    // the meadow's welcome pieces make every visit pay more
+    if (hasUpgrade(pet, 'meadow') && nextWelcome(pet)) {
+      out.push(h('div', { class: 'menu' }, menuRow('Welcome friends', `Put something out in the meadow and every visit pays ${WELCOME.step} more clover`, 'welcomemat', () => {
+        goTab('garden');
+        if (tab !== 'garden') return;
+        goArea('meadow');
+        openMeadowShop();
+      })));
+    }
+    return out;
+  }
+
+  /** A friend worth visiting now, in full: how they are, how close you are, visit and gift. */
+  function friendCard(x: Info): HTMLElement {
+    const d = x.f.data;
+    const holiday = !!d.vacationUntilMs && d.vacationUntilMs > n;
+    const asleep = !!d.napEndsAtMs && d.napEndsAtMs > n;
+    const hint = holiday ? null : careHint(friendNeeds(d, n));
+    const flag = x.came ? h('span', { class: 'flag back', text: 'Visited you today' })
+      : x.p >= best ? h('span', { class: 'flag best', text: 'Best friends' })
+        : best - x.p <= 5 ? h('span', { class: 'flag best', text: `${best - x.p} ${best - x.p === 1 ? 'day' : 'days'} to best friends` })
+          : holiday ? h('span', { class: 'flag', text: 'On holiday' })
+            : asleep ? h('span', { class: 'flag', text: 'Napping' }) : null;
+    return h('li', { class: 'fcard', 'data-friend': x.f.uuid },
+      h('span', { class: 'hd' }, friendFace(d),
+        h('span', { class: 'txt' },
+          h('span', { class: 'nm' }, d.name, h('span', { class: 'user', text: ` ${x.f.username}` })),
+          flag)),
+      hint ? h('span', { class: 'hint' }, img(itemSprite(VISIT_INFO[hint.kind].art as ItemArt), 2), `${d.name}'s ${hint.word}. ${hint.kind === 'snack' ? 'A snack' : hint.kind === 'pat' ? 'A pat' : 'A brush'} would help most.`) : null,
+      friendHearts(x.p),
+      h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', 'btn small primary'), gift(x)));
+  }
+
+  /** Everyone, a row each, to search when there are lots. */
+  function friendsAll(): Node[] {
+    if (!socialOn()) return [h('p', { class: 'quiet', text: OR.user ? "Visiting friends' burrows isn't available here yet." : "Friends' burrows open once you're signed in to OddsRabbit." })];
+    if (!c || (!friends && !c.failed)) return [h('p', { class: 'quiet', text: 'Knocking on doors…' })];
+    if (!friends) return [h('div', { class: 'quiet-box' }, h('p', { text: "Couldn't reach your friends just now." }), button('Try again', 'btn small', () => { loadFriends(true); render(); }))];
+    if (!friends.length) return [friendsHero(button('Invite a friend', 'btn primary', () => openInvite()), 'Invite someone and their rabbit can visit yours, and yours can visit theirs.')];
+    const rows = info.map((x) => {
+      const d = x.f.data;
+      const status = x.visited ? (x.sent ? 'Visited · gift sent' : 'Visited today') : x.came ? 'Visited you today' : x.p >= best ? 'Best friends' : `${x.p}/${best} to best friends`;
+      const li = h('li', { class: `frow${x.visited ? ' done' : ''}`, 'data-find': `${d.name} ${x.f.username}`.toLowerCase() }, friendFace(d),
+        h('span', { class: 'txt' },
+          h('span', { class: 'nm', text: d.name }),
+          h('span', { class: 'st' }, h('span', { class: 'user', text: `${x.f.username} · ` }), h('span', { class: x.came && !x.visited ? 'back' : x.p >= best ? 'best' : '', text: status }))),
+        h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', x.visited ? 'btn small ghost' : 'btn small primary'), x.sent ? null : gift(x)));
+      return li;
+    });
+    const list = h('ul', { class: 'list friends-rows' }, ...rows);
+    const none = h('p', { class: 'quiet', hidden: true, text: 'No friends by that name.' });
+    const out: Node[] = [];
+    if (info.length > SEARCH_FROM) {
+      // filters in place, so typing never loses its place
+      const search = h('input', { id: 'friend-search', class: 'search', type: 'search', placeholder: 'Find a friend', autocomplete: 'off', 'aria-label': 'Find a friend' });
+      search.addEventListener('input', () => {
+        const q = search.value.trim().toLowerCase();
+        let shown = 0;
+        for (const r of rows) { r.hidden = !!q && !r.dataset.find!.includes(q); if (!r.hidden) shown++; }
+        none.hidden = shown > 0;
+      });
+      out.push(search);
+    }
+    out.push(h('section', { class: 'page-section' },
+      h('div', { class: 'section-head' }, h('h3', { text: 'Your friends' }), button('How friends work', 'link-btn', () => openFriendRules())),
+      list, none,
+      // the platform shares the 100 who've played most recently
+      info.length >= 100 ? h('p', { class: 'meta', text: 'Showing the 100 friends who played most recently.' }) : null));
+    if (canShare) out.push(h('div', { class: 'menu' }, menuRow('Invite a friend', `Tell a friend about ${pet.name}`, 'heart', () => openInvite())));
+    return out;
+  }
+
+  /** The guest book, every signature, the new ones marked. */
+  function guestbookView(): Node[] {
+    if (!book.length) {
+      return [h('div', { class: 'quiet-box' },
+        h('p', { text: 'No signatures yet. When friends visit, they sign here, and some leave a note.' }),
+        canShare ? button('Invite a friend', 'btn small primary', () => openInvite()) : null)];
+    }
+    return [h('section', { class: 'page-section' },
+      h('div', { class: 'section-head' }, h('h3', { text: `${pet.name}'s visitors` }), h('span', { text: `${book.length} ${book.length === 1 ? 'visit' : 'visits'}` })),
+      h('ul', { class: 'list guestbook' }, ...book.map((g) => {
+        const li = guestbookEntry(g);
+        if (g.atMs > bookNewSince) { li.classList.add('new'); li.prepend(h('span', { class: 'tag', text: 'New' })); }
+        return li;
+      })))];
+  }
+
+  /** Her burrow, live, with whoever's over or at the door. */
+  function porchCard(): HTMLElement {
+    const gone = visitTurns.length - here.length - waiting.length;
+    const title = here.length ? `${names(here.map((t) => t.data.name))} ${here.length === 1 ? 'is' : 'are'} over`
+      : `${names(waiting.map((t) => t.data.name))} ${waiting.length === 1 ? 'is' : 'are'} at the door`;
+    const line = here.length && waiting.length ? `${names(waiting.map((t) => t.data.name))} ${waiting.length === 1 ? 'is' : 'are'} at the door, next in ${fmtLong(waiting[0]!.fromMs - n)}`
+      : !here.length ? `Next one in ${fmtLong(waiting[0]!.fromMs - n)}`
+        : gone ? `${gone} hopped home`
+          : `${names(here.map((t) => `${t.data.name} ${visitInfo(t.visit.kind)?.did ?? 'came to visit'}`))}.`;
+    const btns: HTMLButtonElement[] = [button('Who came', 'btn small', () => openVisitors())];
+    if (here.length) btns.push(button('Say hi', 'btn small primary', () => sayHi(here[0]!)));
+    return h('div', { class: 'at-place' },
+      porchStage(),
+      h('div', { class: 'body' },
+        h('span', { class: 'txt' }, h('b', { text: title }), h('small', { text: line })),
+        h('span', { class: 'row' },
+          faceStack([...here, ...waiting].map((t) => t.data), waiting.length),
+          h('span', { class: 'btns' }, ...btns))));
   }
 }
 
 // ------------------------------------------------------------------ share
 
-async function shareCard(): Promise<void> {
+/** What sharing her says: how she is, and an ask to come and visit. */
+function shareText(): string {
   const m = mood(pet, now(), tz);
   const feeling: Record<Mood, string> = {
     content: 'feeling cozy', peckish: 'hoping for a carrot', lonely: 'waiting for a cuddle', sleepy: 'getting sleepy',
     dusty: 'a little dusty', grumpy: 'a bit grumpy', asleep: 'fast asleep',
   };
+  return `${pet.name} and I have spent ${pet.daysVisited} ${pet.daysVisited === 1 ? 'day' : 'days'} together, and she's ${feeling[m]} right now. Adopt a rabbit in Rabbit Pets on OddsRabbit and come visit us!`;
+}
+
+async function shareCard(): Promise<void> {
   try {
-    await OR.actions.share({
-      title: 'Rabbit Pets',
-      text: `${pet.name} and I have spent ${pet.daysVisited} ${pet.daysVisited === 1 ? 'day' : 'days'} together. She's ${feeling[m]} right now.`,
-    });
+    await OR.actions.share({ title: `Come visit ${pet.name} in Rabbit Pets`, text: shareText() });
     goal('friend');
   } catch {
     toast("Couldn't open sharing here.");

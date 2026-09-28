@@ -9,7 +9,8 @@
 export type SoundName =
   | 'feed' | 'pet' | 'clean' | 'nap' | 'wake'
   | 'gift' | 'clover' | 'place' | 'flip' | 'nope'
-  | 'play' | 'harvest' | 'find' | 'bake' | 'ding';
+  | 'play' | 'harvest' | 'find' | 'bake' | 'ding'
+  | 'drumroll' | 'fanfare' | 'puff';
 
 type Ctx = AudioContext;
 const AudioCtor: (new () => Ctx) | undefined =
@@ -166,6 +167,23 @@ export function play(name: SoundName): void {
       break;
     case 'nope': // a gentle low bump, never a buzzer
       tone(c, { type: 'triangle', from: 220, to: 180, dur: 0.14, vol: 0.25 });
+      break;
+    case 'drumroll': { // the raffle box rattling, faster and higher as it goes
+      let at = 0;
+      for (let i = 0; i < 14; i++) {
+        noise(c, { at, dur: 0.05, filter: 'bandpass', from: 900 + i * 60, q: 4, vol: 0.28 });
+        at += 0.13 - i * 0.006;
+      }
+      break;
+    }
+    case 'fanfare': // it's the prize: a bright little arpeggio, and a shimmer
+      [784, 988, 1175, 1568].forEach((f, i) => tone(c, { type: 'triangle', from: f, at: i * 0.08, dur: 0.22, vol: 0.24 }));
+      tone(c, { type: 'triangle', from: 1568, at: 0.32, dur: 0.6, vol: 0.2, vibrato: 12 });
+      [2093, 2637, 3136].forEach((f, i) => tone(c, { type: 'sine', from: f, at: 0.4 + i * 0.07, dur: 0.35, vol: 0.08 }));
+      break;
+    case 'puff': // the box pops open on a miss: soft, not sad
+      noise(c, { dur: 0.2, filter: 'lowpass', from: 1800, to: 400, vol: 0.25 });
+      tone(c, { type: 'sine', from: 660, to: 520, at: 0.06, dur: 0.18, vol: 0.14 });
       break;
   }
 }

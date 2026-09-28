@@ -158,7 +158,23 @@ export const FRIEND_CLOVER = {
   kept: 40,
 } as const;
 
+/**
+ * Friend milestones: a lump sum, once each, for this many friends you've
+ * visited and who've visited you (economy.ts settleLumps).
+ */
+export const FRIEND_MILESTONES: Record<number, number> = { 3: 250, 5: 500, 10: 1_000, 20: 2_000 };
+
 /** A friend's visit with care (docs/rabbit-pets-visits.md §2). */
+/**
+ * Friends' rabbits in her burrow (docs/rabbit-pets-visits.md §1): each stays
+ * this long from when she first sees the visit, this many at once; the rest
+ * wait their turn.
+ */
+export const GUESTS = {
+  stayMs: HOUR_MS,
+  atOnce: 2,
+} as const;
+
 export const VISIT_CARE = {
   /** How much one act of care raises the need. */
   boost: 8,
@@ -174,6 +190,8 @@ export const VISIT_CARE = {
  * each of `berryAt`, and golden carrots come in twos from `goldenAt`.
  */
 export const SOIL = { basePrice: 600, growth: 1.8, perLevel: 2, maxLevel: 5, berryAt: [2, 4], goldenAt: 5 } as const;
+/** Strawberries per harvest before soil. Their seeds are free: a berry only saves the 3 clover the tray charges, so they need to come in numbers to rival sprouts. */
+export const BERRY_HARVEST = 3;
 /** Sprouts: seed cost and base clover per harvest, before soil. */
 export const SPROUT_CLOVER = 6;
 /** The watering can makes crops grow this much faster. */
@@ -224,7 +242,7 @@ export const FORAGE = {
  * the ticket that always wins it, and the clover back when a ticket brings
  * neither the prize nor a find.
  */
-export const RAFFLE = { ticket: 100, odds: 0.1, guaranteeBy: 10, refund: 40 } as const;
+export const RAFFLE = { ticket: 100, odds: 0.1, guaranteeBy: 10 } as const;
 
 /**
  * The welcome line (social.ts): five pieces for the meadow, bought in order.

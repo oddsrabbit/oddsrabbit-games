@@ -4,7 +4,7 @@
 
 import { dayKey, isNewDay, localHour } from './localtime';
 import { roll } from './rng';
-import { activeEvents, SHY_WARM_BOND, TRAIT_MODS, traitOf } from './world';
+import { activeEvents } from './world';
 import { onVacation, pickFind, ownsToy, type Plot } from './extras';
 import { conditionsAt, critterAt, leavesKeepsake, stayMs, visitClover } from './wildlife';
 import { hoursOut, isOut, trip, tripLoot, unpack, type Loot } from './forage';
@@ -255,10 +255,9 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
     if (onVacation(state, t)) continue;
 
     const rates = asleep ? DECAY_ASLEEP : DECAY_AWAKE;
-    const mods = TRAIT_MODS[traitOf(state.petId)];
     const per = STEP_MS / 3_600_000;
-    state.needs.hunger = clamp(state.needs.hunger - rates.hunger * mods.hungerDecay * per);
-    state.needs.happy = clamp(state.needs.happy - rates.happy * mods.happyDecay * per);
+    state.needs.hunger = clamp(state.needs.hunger - rates.hunger * per);
+    state.needs.happy = clamp(state.needs.happy - rates.happy * per);
     state.needs.energy = clamp(state.needs.energy - rates.energy * per);
     state.needs.clean = clamp(state.needs.clean - rates.clean * per);
 
@@ -334,8 +333,7 @@ export type FoodReaction = 'loves' | 'happy' | 'okay';
 export function foodReaction(petId: string, meal: number, food: FoodId): FoodReaction {
   const r = roll(petId, meal, `meal:${food}`);
   const odds = FOOD_REACTIONS[food];
-  // a greedy rabbit loves her food a little more often
-  if (r < odds.loves + TRAIT_MODS[traitOf(petId)].lovesBonus) return 'loves';
+  if (r < odds.loves) return 'loves';
   if (r >= 1 - odds.okay) return 'okay';
   return 'happy';
 }
@@ -413,10 +411,7 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
       return { ok: true, state, ...careReward(state, nowMs, tz), reaction };
     }
     case 'pet': {
-      const trait = traitOf(state.petId);
-      // a shy rabbit's petting penalty fades once she trusts you
-      const bonus = trait === 'shy' && bondLevel(state.bond).level >= SHY_WARM_BOND ? 0 : TRAIT_MODS[trait].petBonus;
-      n.happy = clamp(n.happy + (asleep ? CARE.petAsleep.happy : Math.max(1, CARE.pet.happy + bonus)));
+      n.happy = clamp(n.happy + (asleep ? CARE.petAsleep.happy : CARE.pet.happy));
       const r = n.happy >= 100 && !asleep ? NO_REWARD : careReward(state, nowMs, tz);
       return { ok: true, state, ...r, note: asleep ? 'gently' : undefined };
     }

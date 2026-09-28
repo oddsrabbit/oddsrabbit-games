@@ -1,6 +1,6 @@
 # Rabbit Pets: friends' visits that leave something behind
 
-Status: **built 2026‑09‑25**, not yet deployed. Game side in `rabbit-pets/` (`social.ts` `applyVisits`/`rewardVisit`/`guestsToShow`, guests in `render.ts`, care buttons on a friend's burrow). Platform: `visits.*` and `counts` in apps-sdk, both hosts and the backend (migration `20260925_003_create_app_visits.sql`, not yet run). After deploy, press "Bump cache version" for rabbit-pets so its `social.visitLines` reach the stored manifest; until then every push reads "{username} came to visit." Extends friends [F1] in
+Status: **built 2026‑09‑25**, not yet deployed. Game side in `rabbit-pets/` (`social.ts` `applyVisits`/`rewardVisit`/`guestsToShow`, turns in `guests.ts`, guests in `render.ts`, care buttons on a friend's burrow). Platform: `visits.*` and `counts` in apps-sdk, both hosts and the backend (migration `20260925_003_create_app_visits.sql`, not yet run). After deploy, press "Bump cache version" for rabbit-pets so its `social.visitLines` reach the stored manifest; until then every push reads "{username} came to visit." Extends friends [F1] in
 [`rabbit-pets.md`](./rabbit-pets.md). Covers new `visits.*` bridge verbs
 (apps-sdk, both hosts, the WordPress backend) and the game changes in
 `rabbit-pets/`.
@@ -28,7 +28,7 @@ Status: **built 2026‑09‑25**, not yet deployed. Game side in `rabbit-pets/` 
 ## 1. What the player sees
 
 **Visiting** (the visitor's side). Friends' burrows open as today, from
-More → Friends → Visit. The bottom panel gains three care buttons next to
+Friends tab → Visit. The bottom panel gains three care buttons next to
 "Send a gift":
 
 | Care | Art | Moodline after | Host's rabbit gets |
@@ -47,19 +47,28 @@ nothing.
 
 - **A push**, if their Game reminders setting allows it, plus a bell entry:
   "sam came by and left a snack." Tapping it opens the game.
-- **Guests in the burrow.** On open, the game draws up to **two** visiting
-  rabbits on the rug next to her, drawn in their coats and outfits.
-  They potter about like she does; while she sleeps they doze. Tapping one shows
-  "Clover (sam) brought a snack" in the moodline.
-- **More than two visitors** shows a small "+3 visitors" chip over the stage
-  that opens a list: who came, when, and what they did.
+- **Guests in the burrow.** Visiting rabbits hop in from the edge of the
+  room, drawn in their coats and outfits, and potter between free spots on
+  the floor: beside a piece of decor, never in front of one, and not on top
+  of her or each other (in a full room, in front of a piece will do). While
+  she sleeps they doze. Tapping one shows "Clover (sam) brought a snack" in
+  the moodline. They're in the main room only, not the nook or the loft.
+- **Two at a time, taking turns.** At most **two** guests are in at once. The
+  rest wait for a place, first seen first in, and when one hops home the next
+  hops in. While the game is open that's one line: "Maple waved goodbye and
+  hopped home, and Pip hopped in to visit." The "N visiting" chip counts
+  who's in now and opens the list of today's visitors: who's here now, who's
+  coming by and in how long, and who's hopped home, with what each did.
 - **The payout** lands on open, with one toast: "3 friends visited. +12 clover."
   Each visit adds a journal line the first time per friend ("Clover visited
   for the first time").
-- **How long guests stay.** A guest stays until the next 05:00 local
-  rollover after the host has **seen** them. A visit the host hasn't seen yet
-  stays up to 7 days, so a friend who drops by on a day you miss is still
-  there when you come back.
+- **How long guests stay.** About **an hour** (`GUESTS.stayMs`) from when
+  the host first **sees** the visit, or from when a place opens if two are
+  already in (`guests.ts guestTurns`). Worked out from the visit's `seenAt`,
+  so it's the same on every open and every device. A visit the host hasn't
+  seen yet waits up to 7 days, so a friend who drops by on a day you miss is
+  there when you come back. Only visits seen since today's 05:00 rollover
+  take a turn; the guest book keeps everyone.
 
 ## 2. Numbers
 
@@ -173,12 +182,15 @@ Visit = {
     the per-day caps.
   - `guestsToShow(visits, now, tz)`: unseen visits, plus ones seen since
     today's rollover, newest first, one per friend.
+- **`guests.ts`** (pure, tested): `guestTurns` gives each of those a turn
+  (`GUESTS` in `tuning.ts`: an hour each, two at once), and `guestsHere` who's
+  in at a moment.
 - **`sim.ts`**: `PetState.visitsToday: { day, care, clover }` counts toward
   the caps. It lives in `v1:pet` so it syncs with everything else.
-- **`render.ts`**: draw up to two extra rabbits. The rabbit drawing already
-  takes coat and dress, so this is two more calls with a smaller wander
-  area and the `guest` flag (no need icons). Guests layer by depth with
-  decor, like she does.
+- **`render.ts`**: draws the guests in now, each keyed by the friend's id so
+  it keeps its place: it hops in from the nearer edge, then wanders between
+  free spots (`guestSpot`) every 6 to 14 seconds, and turns to face her when
+  it stops.
 - **`main.ts`**:
   - On boot and on resume: `visits.inbox`, then draw guests, then
     `visits.seen` for the unseen ones and pay out on the resolve, then one

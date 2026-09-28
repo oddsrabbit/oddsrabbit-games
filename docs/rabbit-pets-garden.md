@@ -9,15 +9,16 @@ directions it was chosen from.
 
 **Decisions already taken** (2026‑09‑25):
 
-- **The garden is a room, not a sheet.** A Burrow | Garden switch in the
-  header moves between the two. The garden has the burrow's layout: scene
+- **The garden is a room, not a sheet.** The Garden tab in the tab bar
+  moves to it (it began as a Burrow | Garden switch in the header). The garden has the burrow's layout: scene
   on top, a panel of buttons below.
 - **It's one long strip, three screens wide:** the veg patch, the yard and
   the meadow, left to right. Each area fills the screen at the burrow's
   scale. You move between areas with the edge arrows, the dots or a swipe.
 - **Everything you own is on show.** Each plot, patch, hive and log has its
-  own spot. Spots you haven't built yet show as a dashed "+", and locked
-  plots show a signpost saying what opens them.
+  own spot. Spots you haven't built yet show as a dashed "+", plots
+  included: the next plot for sale carries its price, and later ones are
+  faint, with a padlock.
 - **The meadow is for outdoor decor that helps the yard.** Pieces are
   placed and dragged the way the burrow's decor is, and six of them make
   one kind of yard building produce more (§6.5).
@@ -26,20 +27,35 @@ directions it was chosen from.
 
 ## 1. What the player sees
 
-**Getting there.** The Garden tool in the burrow's second row opens it. In
-the garden, the Burrow | Garden switch sits where the burrow has its needs
-bars, and a Burrow button is in every area's panel. (Built this way rather
-than a switch in both headers: the burrow's header has no room for one
-without losing the needs bars.) The garden opens on the area you last
-looked at, the veg patch the first time.
+**Getting there.** The Garden tab in the tab bar along the bottom opens it,
+and the Home tab goes back. When she's hopped in after you, she turns to
+look back into the area rather than at the edge she hopped to. (It began as a Burrow | Garden switch in the
+garden's header; the tab bar replaced it.) The garden opens on the area you
+last looked at, the veg patch the first time. Forage is at the end of every
+area's row of buttons, counting down while she's out.
 
-**The veg patch** (area 1). Three beds up front, two behind. A locked bed
-shows a signpost ("Opens with plot 4 · soil level 3"). Tap a bed to plant,
-tap a ripe crop to pick, tap a growing one to see how long is left. Panel:
+**The veg patch** (area 1). Seen from above, in 3/4 like Stardew Valley,
+as is the yard; only the meadow is still side-on (September 2026): a treeline and fence
+along the top, grass filling the view, and five fields in a grid of three
+over two either side of the path, with paths up between them. A bought
+field is tilled soil in furrows with a row of plants on each, so a ripe one
+reads as a field of strawberries. Land still to buy is a dashed outline,
+like the yard's build spots: the next field is bright, with a "+" and a
+price tag (tap it to buy it; the tag lights up and bobs once you can afford
+it), and the rest are faint, with a padlock. She sits in the
+grid's sixth cell, drawn a little smaller in the garden than in the burrow
+(art/rabbit.ts K_GARDEN) so the fields read at their size. The treeline's
+trees are each their own crown, mixed by season (autumn is orange, gold and
+a few still green). Tap a field to plant,
+tap a ripe crop to pick. A growing field wears a little tag with its countdown ("45m", "1h20"), and tapping it says the same in words. Panel:
 Pick, Plant, the next plot upgrade, Seeds.
 
-**The yard** (area 2). The shed, then 10 patch spots in two rows behind the
-path, 5 hive spots and 5 log spots in front. Owned buildings sit in the
+**The yard** (area 2). Seen from above, like the veg patch, the treeline
+and fence running on from it. The shed, then 10 clover patch spots in two
+rows behind the path (a patch is a square of clover, seen from above), 5
+hive spots and 5 log spots in front, leaving the right-hand end for her. A
+tall tree and a hedge, with the meadow's gate in it on the path, hide the
+seam with the side-on meadow. Owned buildings sit in the
 first spots in order; the rest show a dashed "+". Tap any building, or
 Collect, to collect everything waiting. Tap a "+" to build the next one of
 that kind: the confirm names it and its price, and it appears in the next
@@ -141,11 +157,20 @@ sprite cache, the particles and the rabbit's drawing (moved to a small
 shared base), and adds:
 
 - **A camera.** The strip is `3 × AREA_W` wide; the canvas shows one area
-  at the burrow's scale (`fitScene`, unchanged). `cameraX` eases to
-  `area × AREA_W` on a switch, and jumps with reduced motion.
-- **Swipe.** A horizontal drag over 24 px (and more across than down) pans
-  and snaps to the nearest area. A short drag is a tap, so tapping beds and
-  hives still works.
+  at the burrow's scale (`fitScene`, unchanged). On a switch the camera
+  slides there over 380 ms, easing out, and jumps with reduced motion.
+  **Changed 2026-09-26:** it moves by fractions of a pixel. The art is
+  still drawn on whole pixels, and the canvas (one column wider than the
+  stage) is shifted by the leftover fraction in screen pixels, so a slide
+  no longer steps a whole art pixel (about 4 screen pixels) at a time. The
+  game draws at ~15 fps at rest and every frame while the camera or the
+  rabbit is moving. (Before: 18% of the way per frame, whole pixels, 15 fps.)
+- **Swipe.** The view follows a sideways drag (more across than down, over
+  8 px) one to one, and gives like a rubber band past either end. Let go
+  with a flick and it goes on to the next area that way. Slower, it settles
+  on the nearest area. Either way the slide starts at the finger's speed.
+  A short drag is a tap, so tapping beds and hives still works. (Before: the
+  view stayed put until release, then any drag over 24 px switched area.)
 - **Drawing.** The background (sky, hills, fence, grass, path) is drawn
   once per season, weather and night and cached, like `room()`. Only the
   visible area and a few pixels either side are blitted each frame.

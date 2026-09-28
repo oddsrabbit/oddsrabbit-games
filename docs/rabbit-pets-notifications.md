@@ -74,7 +74,7 @@ return visit, when we know they're coming back) the game asks once:
 > - **Nothing for now**
 
 Each preset maps onto the three groups. The groups can be changed any time
-under **More → Notifications**, which replaces today's Reminders row. A
+on **her page → Notifications**, which replaces today's Reminders row. A
 player who starts a timer on day 1 sees the "Remind me" toggle, which works
 before the ask.
 
@@ -162,7 +162,7 @@ platform**, so it has to know the player's choice and window.
 - **`reminders.ts`**: groups, budget, usual-hours shifting and the "misses
   you" back-off, all pure and tested as today. Skip `nap-done` when the nap
   ends after bedtime.
-- **UI**: the day-2 preset sheet; More → Notifications (three toggles with a
+- **UI**: the day-2 preset sheet; her page → Notifications (three toggles with a
   one-line description each); the "Remind me" toggle on nap, bake and
   plant; the gentle "too many nudges?" prompt.
 - **Harness**: mock the preferences verb; a `hours=` param to seed a play

@@ -18,16 +18,24 @@
 //   coat=cocoa                    coat for the seeded pet
 //   ask=1                         reminders never asked, no timers running
 //   bed=0                         seeded burrow has no bed (she sleeps on the floor)
+//   nap=1                         seeded pet is asleep, two hours from waking
+//   holiday=1                     seeded pet is away on holiday for two days
 //   save=newer|broken             a save from a newer version, or one that can't be read
 //   date=2026-12-20               shift the clock to that date (seasons, weather, events)
 //   extras=1                      seeded pet also has a garden, finds, outfits, a journal, a visitor
 //   critter=fox                   which visitor is in the burrow with extras=1 (default robin)
 //   rich=1                        seeded pet is well off: new decor, walls, the moon window, a yard
-//   rooms=1                       with rich=1: the nook and the loft dug out
+//   rooms=1                       with rich=1: the nook and the loft dug out (hidden while ROOMS_OPEN is false)
 //   friends=0                     no social verbs (hides Friends and gifts)
 //   inbox=0                       no gift waiting from a friend
 //   visits=0                      no friends visited while you were away
-//   click=Feed,Pet                press buttons in order after load
+//   lonely=1                      the social verbs are on but no one you follow has a rabbit yet
+//   lane=1                        the Friends tab's lane of doors (a prototype, main.ts LANE)
+//   guests=4                      that many friends visited (up to 4), to see them take turns
+//   seen=55                       the visits were seen that many minutes ago (guests leave on the hour)
+//   starter=ready                 Getting started step 1's goals are all done, waiting to be claimed
+//   raffle=9                      that many tickets already bought in every event's raffle (9: the next one wins)
+//   click=Feed,Pet                press buttons in order after load (an exact text match first)
 //   drag=x1,y1,x2,y2              then drag on the burrow, in scene pixels
 const q = new URLSearchParams(location.search);
 const store = {};
@@ -53,9 +61,14 @@ if (seed) {
   ] });
   store['v1:settings'] = JSON.stringify({ v: 1, rev: 1, reminders: q.get('ask') ? null : 'on', scheduled: {} });
   if (q.get('ask')) { const p = JSON.parse(store['v1:pet']); p.timers = []; store['v1:pet'] = JSON.stringify(p); }
+  // nap=1: she's asleep, two hours in; holiday=1: she's away for two days
+  if (q.get('nap')) { const p = JSON.parse(store['v1:pet']); p.needs.energy = 30; p.timers.push({ kind: 'nap', startedAtMs: t - gap, endsAtMs: t + 2 * 3600e3 }); store['v1:pet'] = JSON.stringify(p); }
+  if (q.get('holiday')) { const p = JSON.parse(store['v1:pet']); p.vacationUntilMs = t + 2 * 864e5; store['v1:pet'] = JSON.stringify(p); }
   // save=newer: the pet was saved by a newer schema; save=broken: the burrow can't be read (store.ts, "versions")
   if (q.get('save') === 'newer') store['v1:pet'] = JSON.stringify({ ...JSON.parse(store['v1:pet']), schema: 99 });
   if (q.get('save') === 'broken') store['v1:burrow'] = '{oops';
+  if (q.get('raffle')) { const p = JSON.parse(store['v1:pet']); const n = Number(q.get('raffle')); p.raffle = { snowday: n, bloom: n, summer: n, harvest: n, spooky: n, winterfest: n }; store['v1:pet'] = JSON.stringify(p); }
+  if (q.get('starter') === 'ready') { const p = JSON.parse(store['v1:pet']); p.starter = { counts: { feed: 1, bed: 1, toy: 1, dress: 1 }, paid: [] }; store['v1:pet'] = JSON.stringify(p); }
   if (q.get('bed') === '0') { const b = JSON.parse(store['v1:burrow']); b.items = b.items.filter((i) => i.id !== 'cushion'); store['v1:burrow'] = JSON.stringify(b); }
   if (q.get('extras')) {
     const p = JSON.parse(store['v1:pet']);
@@ -103,23 +116,31 @@ if (seed && q.get('rich')) {
 const FRIENDS = [
   { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, updatedAt: new Date().toISOString(),
     data: { v: 1, name: 'Pip', coat: 'ginger', needs: { hunger: 70, happy: 80, energy: 60, clean: 75 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
-      daysVisited: 23, bondLevel: 4, trait: 'playful', head: 'flowercrown', neck: null, missing: ['acorn', 'bat', 'marble'],
+      daysVisited: 23, bondLevel: 4, head: 'flowercrown', neck: null, missing: ['acorn', 'bat', 'marble'],
       garden: { plots: [{ crop: 'berry', plantedAtMs: now() - 9 * 3600e3, readyAtMs: now() - 3600e3 }, { crop: 'sprout', plantedAtMs: now() - 3600e3, readyAtMs: now() + 3 * 3600e3 }], yard: { patch: 4, hive: 1 }, sheds: 1, meadow: null },
       items: [{ id: 'rug', x: 49, y: 106, flip: false }, { id: 'mushroom', x: 20, y: 104, flip: false }, { id: 'garland', x: 50, y: 12, flip: false }, { id: 'jar', x: 80, y: 110, flip: true }] } },
   { uuid: '33333333-3333-4333-8333-333333333333', username: 'mochi.mama', avatar: null, updatedAt: new Date().toISOString(),
     data: { v: 1, name: 'Mochi', coat: 'midnight', needs: { hunger: 50, happy: 60, energy: 40, clean: 80 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
-      daysVisited: 4, bondLevel: 1, trait: 'shy', head: 'beanie', neck: 'redscarf',
+      daysVisited: 4, bondLevel: 1, head: 'beanie', neck: 'redscarf',
       items: [{ id: 'cushion', x: 70, y: 108, flip: false }, { id: 'lantern', x: 30, y: 14, flip: false }] } },
 ];
 const inbox = q.get('inbox') === '0' ? [] : [{ giftUuid: '44444444-4444-4444-8444-444444444444', from: { uuid: FRIENDS[0].uuid, username: 'pip_fan', avatar: null }, kind: 'berry', message: null, sentAt: new Date().toISOString() }];
 const sentToday = [];
-// both friends dropped by while you were away (visits=0 for none)
-const visits = q.get('visits') === '0' ? [] : FRIENDS.map((f, i) => ({
-  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt: null,
+// both friends dropped by while you were away (visits=0 for none; guests=N for more, who
+// only visit, not in the friends list; seen=M for visits already seen M minutes ago)
+const EXTRA = [['Bun', 'silver', 'bun.bun'], ['Maple', 'cream', 'maple_leaf']].map(([name, coat, username], i) => ({
+  uuid: `8888888${i}-8888-4888-8888-888888888888`, username,
+  data: { ...FRIENDS[0].data, name, coat, head: null, neck: i ? 'bell' : null, items: [] },
+}));
+const visitors = [...FRIENDS, ...EXTRA].slice(0, Math.max(0, Math.min(4, Number(q.get('guests') ?? 2))));
+const seenAt = q.get('seen') ? new Date(now() - Number(q.get('seen')) * 60e3).toISOString() : null;
+const visits = q.get('visits') === '0' ? [] : visitors.map((f, i) => ({
+  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack', 'pat', 'brush', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt,
   from: { uuid: f.uuid, username: f.username, avatar: null }, showcase: f.data, counts: true,
 }));
 const visitedToday = [];
 const frame = document.getElementById('g');
+if (q.get('lane') === '1') frame.src = '../dist/rabbit-pets/index.html?lane=1';
 const caps = ['storage.get','storage.set','storage.delete','content.daily','actions.share','actions.haptic','actions.requestSignIn','session.refresh','time.now','notifications.schedule','notifications.cancel','notifications.list','notifications.status'];
 if (q.get('friends') !== '0') caps.push('showcase.publish', 'showcase.friends', 'showcase.get', 'gifts.send', 'gifts.inbox', 'gifts.claim', 'gifts.sentToday',
   'visits.record', 'visits.inbox', 'visits.seen', 'visits.sentToday');
@@ -144,7 +165,8 @@ frame.addEventListener('load', () => {
   }, 1500 + clicks.length * 700);
   clicks.forEach((text, i) => setTimeout(() => {
     const doc = frame.contentDocument;
-    const b = [...doc.querySelectorAll('button')].find((x) => (x.textContent || '').includes(text) || (x.getAttribute('aria-label') || '').includes(text));
+    const all = [...doc.querySelectorAll('button')];
+    const b = all.find((x) => (x.textContent || '').trim() === text) ?? all.find((x) => (x.textContent || '').includes(text) || (x.getAttribute('aria-label') || '').includes(text));
     if (b) b.click(); else console.log('no button', text);
   }, 1500 + i * 700));
 });
@@ -163,7 +185,7 @@ window.addEventListener('message', (e) => {
     case 'notifications.list': return ok({ pending: [], serverTime: new Date(now()).toISOString() });
     case 'notifications.status': return ok({ push: true });
     case 'showcase.publish': console.log('showcase', JSON.stringify(p.data).length, 'bytes', p.data); return ok({ updatedAt: new Date(now()).toISOString() });
-    case 'showcase.friends': return ok(FRIENDS);
+    case 'showcase.friends': return ok(q.get('lonely') === '1' ? [] : FRIENDS);
     case 'showcase.get': return ok(FRIENDS.find((f) => f.uuid === p.userUuid) ?? null);
     case 'gifts.inbox': return ok(inbox);
     case 'gifts.claim': { const i = inbox.findIndex((g) => g.giftUuid === p.giftUuid); if (i < 0) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'gifts/claimed', message: 'claimed' } }); const [g] = inbox.splice(i, 1); return ok({ giftUuid: g.giftUuid, kind: g.kind, claimedAt: new Date(now()).toISOString() }); }

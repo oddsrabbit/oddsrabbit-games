@@ -3,12 +3,12 @@
 // (docs/rabbit-pets-garden.md, stage 1). Built by `npm run build` into
 // dist/dev/garden-lab.js, which dev/garden-lab.html loads. Not shipped.
 
-import { drawFirefly, drawGarden, drawGardenShade, drawSignpost, drawSpot } from '../src/art/garden';
-import { drawItem, drawPlot, type ItemArt } from '../src/art/items';
+import { drawField, drawFirefly, drawGarden, drawGardenShade, drawSpot, drawTag } from '../src/art/garden';
+import { drawItem } from '../src/art/items';
 import { drawRabbit } from '../src/art/rabbit';
 import type { PixelGrid } from '../src/art/pixels';
-import { stage, type CropId } from '../src/extras';
-import { AREA_W, gardenView, GROUND, hitBox, hitTest, STRIP_H, STRIP_W, type GardenThing } from '../src/garden';
+import { plotOffer, plotUpgrade, stage, type CropId } from '../src/extras';
+import { AREA_W, FIELD, gardenView, GROUND, hitBox, hitTest, STRIP_H, STRIP_W, type GardenThing } from '../src/garden';
 import { newPet, type PetState } from '../src/sim';
 import { HOUR_MS } from '../src/tuning';
 import type { Season, Weather } from '../src/world';
@@ -16,7 +16,6 @@ import type { BuildingId } from '../src/yard';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const NOW = Date.UTC(2026, 8, 24, 12, 0);
-const CROP_ART: Record<CropId, ItemArt> = { berry: 'strawberry', golden: 'golden', sprout: 'clover' };
 const SIZE: Record<BuildingId | 'shed', { w: number; h: number }> = { patch: { w: 11, h: 5 }, hive: { w: 8, h: 9 }, log: { w: 12, h: 8 }, shed: { w: 12, h: 10 } };
 
 function preset(name: string): PetState {
@@ -45,15 +44,15 @@ function put(g: PixelGrid, s: PixelGrid, cx: number, by: number): void {
   }
 }
 
-function spriteFor(pet: PetState, t: GardenThing): PixelGrid | null {
+function spriteFor(pet: PetState, t: GardenThing, season: Season): PixelGrid | null {
   if (t.kind === 'plot') {
-    if (t.state === 'locked') return drawSignpost();
+    if (t.state === 'locked') return drawSpot(FIELD.w, FIELD.h, plotOffer(pet, t.index) !== 'next', season === 'winter');
     const p = pet.garden?.plots?.[t.index] ?? null;
-    return p ? drawPlot(CROP_ART[p.crop], stage(p, NOW)) : drawPlot(null, 0);
+    return drawField(season, p?.crop ?? null, p ? stage(p, NOW) : 0);
   }
   const id = t.kind === 'shed' ? 'shed' : t.id;
   if (t.state === 'owned') return drawItem(id);
-  return drawSpot(Math.max(SIZE[id].w, 9), Math.max(SIZE[id].h, 7), t.state === 'locked');
+  return drawSpot(Math.max(SIZE[id].w, 9), Math.max(SIZE[id].h, 7), t.state === 'locked', season === 'winter');
 }
 
 function draw(): void {
@@ -64,8 +63,14 @@ function draw(): void {
   const phase = phaseOn ? Number($<HTMLInputElement>('phase').value) / 100 : null;
   const pet = preset($<HTMLSelectElement>('preset').value);
   const g = drawGarden(season, weather, night, phase);
-  for (const t of gardenView(pet, NOW)) { const s = spriteFor(pet, t); if (s) put(g, s, t.spot.x, t.spot.y); }
-  put(g, drawRabbit('snow', night ? 'asleep' : 'content', 0, { ears: 'long', neck: 'bandana' }), 44, STRIP_H);
+  for (const t of gardenView(pet, NOW)) {
+    const s = spriteFor(pet, t, season);
+    if (s) put(g, s, t.spot.x, t.spot.y);
+    // the next field for sale carries its price
+    const price = t.kind === 'plot' && plotOffer(pet, t.index) === 'next' ? plotUpgrade(t.index)?.price : undefined;
+    if (price !== undefined) put(g, drawTag(String(price), true, pet.clover >= price), t.spot.x, t.spot.y);
+  }
+  put(g, drawRabbit('snow', night ? 'asleep' : 'content', 0, { ears: 'long', neck: 'bandana' }), 80, STRIP_H);
   if (night) {
     // the renderer's night pass: multiply the shade over the ground, then fireflies
     const shade = drawGardenShade(season, weather, [0x62, 0x60, 0x8e, 255]);

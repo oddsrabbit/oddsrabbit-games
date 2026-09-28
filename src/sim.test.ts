@@ -4,7 +4,6 @@ import test from 'node:test';
 import { dayKey, localParts, nextLocalHour } from './localtime';
 import { act, advance, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, sleepMs, visit, type FoodId, type PetState } from './sim';
 import { BOND_DAILY_CAP, DAY_MS, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
-import { traitOf } from './world';
 
 const UTC = 'UTC';
 // 2026-09-24 12:00 UTC, a Thursday afternoon.
@@ -298,10 +297,8 @@ test('the paid foods need their cost', () => {
 
 test('reactions follow the odds: treats and berries delight her far more often', () => {
   const rate = (food: FoodId, kind: 'loves' | 'okay') => {
-    // greedy rabbits love their food more often; measure the base odds
     let n = 0, total = 0;
     for (let i = 0; total < 4000; i++) {
-      if (traitOf(`pet-${i}`) === 'greedy') continue;
       total++;
       if (foodReaction(`pet-${i}`, i % 50, food) === kind) n++;
     }

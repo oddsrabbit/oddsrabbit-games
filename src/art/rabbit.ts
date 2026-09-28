@@ -28,17 +28,28 @@ const SHARED = { pink: 'F3A6B3', pinkd: 'DE8697', eye: '2A2130', glint: 'FFFFFF'
 
 // Kit proportions at 1.35x.
 const K = 1.35;
-const SHAPE = { head: [7.2 * K, 6.4 * K], body: [6.2 * K, 5.0 * K] } as const;
+/**
+ * Smaller, for the garden, where the fields and buildings are seen from
+ * further off. The face and outfits are pixel art of a fixed size, so this
+ * can't go much lower before a hat is wider than her head.
+ */
+export const K_GARDEN = 1.1;
+const shapeAt = (k: number) => ({ head: [7.2 * k, 6.4 * k], body: [6.2 * k, 5.0 * k] } as const);
 /** Lop ears hang from `spread` of the head's width, `out` and `drop` along their length. */
-const EAR_SHAPES: Record<Ears, { len: number; w: number; lop?: { spread: number; out: number; drop: number } }> = {
-  short: { len: 5.3 * K, w: 1.9 * K },
-  long: { len: 7.0 * K, w: 1.9 * K },
-  lop: { len: 5.2 * K, w: 2.0 * K, lop: { spread: 0.86, out: 0.3, drop: 0.9 } },
-};
+const earsAt = (k: number): Record<Ears, { len: number; w: number; lop?: { spread: number; out: number; drop: number } }> => ({
+  short: { len: 5.3 * k, w: 1.9 * k },
+  long: { len: 7.0 * k, w: 1.9 * k },
+  lop: { len: 5.2 * k, w: 2.0 * k, lop: { spread: 0.86, out: 0.3, drop: 0.9 } },
+});
 const EYE_W = 3;
 const EYE_H = 4;
 
-export type Face = 'content' | 'happy' | 'eating' | 'grumpy' | 'asleep';
+/**
+ * The eating reaction's faces (render.ts, drawRabbit): 'nibble' and 'chew'
+ * alternate while she eats (eyes shut; mouth shut, then the nose twitches up),
+ * then 'savour' (loves it), 'lick' (happy) or 'polite' (just okay).
+ */
+export type Face = 'content' | 'happy' | 'eating' | 'grumpy' | 'asleep' | 'nibble' | 'chew' | 'savour' | 'lick' | 'polite';
 /** 0 = rest, 1 = breathe (body squashes a pixel), 2 = blink. */
 export type Frame = 0 | 1 | 2;
 
@@ -61,7 +72,31 @@ export function dressKey(d: Dress | undefined): string {
   return d ? `${d.head ?? ''}/${d.neck ?? ''}/${d.ears ?? ''}` : '//';
 }
 
-export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dress): PixelGrid {
+/**
+ * Pixel nudges for her head and what she wears; negative y is up.
+ * dev/rabbit-lab.html puts these on sliders and copies them back as TS.
+ */
+export const TUNE = {
+  /** Her head relative to her body while awake: negative raises it. */
+  headY: 0,
+  /** The light belly patch: x in pixels from centre; y, w, h as fractions of her body's radii. */
+  belly: { x: 0, y: 0.35, w: 0.55, h: 0.62 },
+  /**
+   * The light muzzle patch: y, w, h as fractions of her head's radii (0 h: none).
+   * `clear`: keep it off the rows of her eyes and out from under them.
+   */
+  muzzle: { y: 0.5, w: 0.25, h: 0.2, clear: false },
+  /** Where each kind of outfit sits, [dx, dy]. */
+  top: [0, 0] as [number, number],
+  ear: [0, 0] as [number, number],
+  chin: [0, 0] as [number, number],
+  /** Per-outfit nudges on top of those, by id. */
+  item: {} as Record<string, [number, number]>,
+};
+
+/** Her, on a RABBIT_W×RABBIT_H grid standing on RABBIT_GROUND. `k`: her size (K; K_GARDEN in the garden). */
+export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dress, k = K): PixelGrid {
+  const SHAPE = shapeAt(k);
   const W = RABBIT_W, H = RABBIT_H, GROUND = RABBIT_GROUND;
   const c = PALETTES[coat];
   const pal = {
@@ -71,7 +106,7 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
     glint: hex(SHARED.glint), nose: hex(SHARED.nose), blush: hex(SHARED.blush),
   };
   const asleep = face === 'asleep';
-  const earShape = EAR_SHAPES[dress?.ears ?? 'short'];
+  const earShape = earsAt(k)[dress?.ears ?? 'short'];
   // asleep, lop ears droop back like any others
   const lop = asleep ? undefined : earShape.lop;
   const cx = 19.5;
@@ -82,7 +117,7 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   const bob = frame === 1 ? 1 : 0;
   // The head bobs a whole pixel: a half-pixel bob moved the rasterised head
   // but not the rounded hat anchor below, so a hat floated while she slept.
-  const headCy = asleep ? bodyCy - bh * 0.35 + bob : bodyCy - bh * 0.85 - hh * 0.55 + bob;
+  const headCy = asleep ? bodyCy - bh * 0.35 + bob : bodyCy - bh * 0.85 - hh * 0.55 + bob + TUNE.headY;
 
   const L = earShape.len, ew = earShape.w;
   const splay = asleep ? 1.25 : face === 'grumpy' ? 0.55 : 0.3;
@@ -116,6 +151,13 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
       region[y]![x] = r;
     }
   }
+  // blunt upright ears: a tip one pixel wide pokes out of the outline like a stray pixel
+  if (!asleep && !lop) {
+    const ear = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && region[y]![x] === 'ear';
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (ear(x, y) && !ear(x - 1, y) && !ear(x + 1, y) && !ear(x, y - 1)) region[y]![x] = null;
+    }
+  }
   // a lop's ears hang with the pink side against her head, so none shows
   if (!lop) for (const [ax, ay, bx, by] of ears) {
     const mx = ax + (bx - ax) * 0.15, my = ay + (by - ay) * 0.15;
@@ -124,6 +166,11 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
     }
   }
 
+  // the light muzzle stops below her eyes and its top row stays between them, so it never touches them
+  const eyeBottom = Math.round(headCy - 0.2) + 2;
+  const eyeGap = 3.3 * (hw / 8.6) * 1.05;
+  const eyeCols = [Math.round(cx - eyeGap - 0.5) - (EYE_W - 2), Math.round(cx + eyeGap - 0.5)];
+  const underEye = (x: number, y: number) => y === eyeBottom + 1 && eyeCols.some((ex) => x >= ex - 1 && x <= ex + EYE_W);
   const g = blank(W, H);
   const filled = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && region[y]![x] !== null;
   for (let y = 0; y < H; y++) {
@@ -131,8 +178,9 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
       const r = region[y]![x];
       if (!r) continue;
       let col: RGBA = r === 'inner' ? pal.pink : pal.base;
-      if (r === 'body' && inEllipse(x + 0.5, y + 0.5, cx, bodyCy + bh * 0.25, bw * 0.55, bh * 0.62)) col = pal.light;
-      if (r === 'head' && inEllipse(x + 0.5, y + 0.5, cx, headCy + hh * 0.45, hw * 0.42, hh * 0.32)) col = pal.light;
+      if (r === 'body' && inEllipse(x + 0.5, y + 0.5, cx + TUNE.belly.x, bodyCy + bh * TUNE.belly.y, bw * TUNE.belly.w, bh * TUNE.belly.h)) col = pal.light;
+      const mz = TUNE.muzzle;
+      if (r === 'head' && mz.h > 0 && (!mz.clear || (y > eyeBottom && !underEye(x, y))) && inEllipse(x + 0.5, y + 0.5, cx, headCy + hh * mz.y, hw * mz.w, hh * mz.h)) col = pal.light;
       if (r !== 'inner' && (!filled(x + 1, y) || !filled(x, y + 1)) && x > cx) col = pal.shade;
       if (r === 'body' && y > 0 && region[y - 1]![x] === 'head') col = pal.shade;
       if (r === 'foot' && !filled(x, y + 1)) col = pal.shade;
@@ -158,13 +206,12 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   // face
   const put = (x: number, y: number, col: RGBA) => { if (x >= 0 && y >= 0 && x < W && y < H) g.px[y]![x] = col; };
   const ey = Math.round(headCy - 0.2);
-  const gap = 3.3 * (hw / 8.6) * 1.05;
-  const exs = [Math.round(cx - gap - 0.5) - (EYE_W - 2), Math.round(cx + gap - 0.5)];
+  const exs = eyeCols;
   const blink = frame === 2;
   exs.forEach((ex, i) => {
     if (asleep || blink) {
       for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey + 1, pal.eye);
-    } else if (face === 'happy') {
+    } else if (face === 'happy' || face === 'nibble' || face === 'chew' || face === 'savour') {
       put(ex - 1, ey + 1, pal.eye); put(ex, ey, pal.eye); put(ex + 1, ey, pal.eye); put(ex + 2, ey + 1, pal.eye);
     } else if (face === 'grumpy') {
       for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey, pal.line);
@@ -180,14 +227,22 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
       put(ex + EYE_W - 1, ey + EYE_H - 3, pal.glint);
     }
     const cheek = ex + (i === 0 ? -1 : EYE_W);
-    if (face === 'happy' || face === 'content' || face === 'eating') {
+    if (face !== 'grumpy' && face !== 'asleep') {
       put(cheek, ey + 2, pal.blush);
-      if (face === 'happy') put(cheek, ey + 3, pal.blush);
+      if (face === 'happy' || face === 'savour') put(cheek, ey + 3, pal.blush);
     }
   });
   const nx = Math.floor(cx - 0.5), ny = ey + 2;
-  put(nx, ny, pal.nose); put(nx + 1, ny, pal.nose);
-  if (face === 'eating') {
+  // a nibble twitches her nose up a pixel
+  const noseY = face === 'chew' ? ny - 1 : ny;
+  put(nx, noseY, pal.nose); put(nx + 1, noseY, pal.nose);
+  if (face === 'nibble' || face === 'polite') {
+    put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line);
+  } else if (face === 'savour' || face === 'lick') {
+    // a lick: the tongue out at one corner
+    put(nx - 1, ny + 1, pal.line); put(nx, ny + 1, pal.line); put(nx + 2, ny + 1, pal.line);
+    put(nx + 1, ny + 2, pal.pink); put(nx + 2, ny + 2, pal.pink);
+  } else if (face === 'eating') {
     put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line);
     put(nx, ny + 2, pal.pinkd); put(nx + 1, ny + 2, pal.pinkd);
   } else if (face === 'grumpy') {
@@ -254,7 +309,20 @@ function drawOutfit(g: PixelGrid, id: string | null | undefined, a: Anchor): voi
   const art = id ? OUTFIT_ART[id] : undefined;
   if (!art) return;
   const n = art.rows.length;
-  if (art.at === 'top') stamp(g, art.rows, a.cx, a.top + Math.min(3, n - 2));
-  else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5, a.top + 2);
-  else if (!a.asleep) stamp(g, art.rows, a.cx, a.chin + n - 2);
+  const [kx, ky] = TUNE[art.at], [ix, iy] = TUNE.item[id!] ?? [0, 0];
+  const dx = kx + ix, dy = ky + iy;
+  if (art.at === 'top') stamp(g, art.rows, a.cx + dx, a.top + Math.min(3, n - 2) + dy);
+  else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5 + dx, a.top + 2 + dy);
+  else if (!a.asleep) stamp(g, art.rows, a.cx + dx, a.chin + n - 2 + dy);
+}
+
+/** One of her front paws (4×4), for holding food up to her mouth. */
+export function drawPaw(coat: Coat): PixelGrid {
+  const c = PALETTES[coat];
+  const g = blank(4, 4);
+  const line = hex(c.line), base = hex(c.base);
+  ['.ll.', 'lbbl', 'lbbl', '.ll.'].forEach((row, y) => {
+    for (let x = 0; x < 4; x++) if (row[x] !== '.') g.px[y]![x] = row[x] === 'l' ? line : base;
+  });
+  return g;
 }

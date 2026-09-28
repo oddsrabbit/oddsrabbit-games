@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  AREA_W, areaAt, areaX, BUILDING_SPOTS, gardenView, GROUND, hitBox, hitTest, HIT, PLOT_SPOTS, SHED_SPOT, STRIP_H, STRIP_W,
+  AREA_W, areaAt, areaX, BUILDING_SPOTS, gardenView, GROUND, hitBox, hitTest, HIT, PLOT_SPOTS, SHED_SPOT, STRIP_H, STRIP_W, timerLabel,
   type Box, type GardenThing,
 } from './garden';
 import { newPet, type PetState } from './sim';
@@ -53,7 +53,7 @@ test('every tap target sits wholly in its own area, and stands on the grass, not
     assert.ok(box.x >= areaX(area) && box.x + box.w <= areaX(area) + AREA_W, `${name} inside ${area}`);
     // where it stands; a tall crop may reach up over the path behind it
     const base = box.y + box.h;
-    assert.ok(base > GROUND.fence + 12 && base <= STRIP_H, `${name} on the grass`);
+    assert.ok(base > GROUND.backFence + 12 && base <= STRIP_H, `${name} on the grass`);
     assert.ok(base <= GROUND.pathY || base > GROUND.pathY + GROUND.pathH, `${name} stands off the path`);
   }
 });
@@ -121,4 +121,14 @@ test('a tap finds what stands there; bare grass and the meadow find nothing', ()
   // just outside a target
   const box = hitBox('hive', hive3);
   assert.equal(at(box.x + box.w, box.y), null);
+});
+
+test('timerLabel: short countdowns for the field tags, minutes rounded up', () => {
+  assert.equal(timerLabel(1), '1m');
+  assert.equal(timerLabel(0), '1m');
+  assert.equal(timerLabel(44.5 * 60_000), '45m');
+  assert.equal(timerLabel(HOUR_MS), '1h');
+  assert.equal(timerLabel(HOUR_MS + 5 * 60_000), '1h05');
+  assert.equal(timerLabel(9 * HOUR_MS + 59 * 60_000), '9h59');
+  assert.equal(timerLabel(12 * HOUR_MS + 30 * 60_000), '12h');
 });

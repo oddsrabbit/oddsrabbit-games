@@ -7,9 +7,9 @@
 import { drawBurrow, drawWindowView, PLAIN_ROOM, SCENE_H, SCENE_W, windowOf, type RoomStyle } from './art/burrow';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
 import { toSprite, type Sprite } from './art/pixels';
-import { drawRabbit, dressKey, RABBIT_GROUND, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
+import { drawPaw, drawRabbit, dressKey, RABBIT_GROUND, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type BurrowState, type DecorDef, type PlacedItem } from './decor';
-import type { Coat, Mood } from './sim';
+import type { Coat, FoodReaction, Mood } from './sim';
 import type { Season, Weather } from './world';
 
 export interface SceneModel {
@@ -35,13 +35,25 @@ export interface SceneModel {
   room?: RoomStyle;
   /** Tonight's moon phase, for the moon window. */
   moon?: number;
-  /** Friends' rabbits visiting, at most two (docs/rabbit-pets-visits.md §1). */
-  guests?: { coat: Coat; dress?: Dress }[];
+  /** Friends' rabbits in the burrow now (guests.ts), keyed by the friend's id so each keeps its place. */
+  guests?: { id: string; coat: Coat; dress?: Dress }[];
   /** Picks her favourite piece of decor, which changes day to day: her id and the date. */
   seed?: string;
   /** A wild visitor in the burrow (wildlife.ts CritterId; its art has the same name). */
   critter?: string | null;
+  /** The player's local time, for the clocks' hands. */
+  time?: { hour: number; minute: number };
 }
+
+/**
+ * A clock hand's pixels out from the centre, pointing at 12, 1 and 2; the
+ * other marks turn these a quarter at a time. The hour hand is the first two.
+ */
+const CLOCK_HAND: [number, number][][] = [
+  [[0, -1], [0, -2], [0, -3]],
+  [[0, -1], [1, -2], [1, -3]],
+  [[1, 0], [2, -1], [3, -1]],
+];
 
 /**
  * Where a wild visitor can sit, best first: the front corners and the middle,
@@ -71,8 +83,12 @@ const BINKY_MS = 700;
 /** How long she stays at a spot, give or take: long enough to notice, and to read about. */
 const SPOT_MS = [20_000, 40_000] as const;
 
-/** Where visiting rabbits stand, either side of her. */
-const GUEST_SPOTS = [{ x: 17, y: 110, facing: -1 as const }, { x: 80, y: 111, facing: 1 as const }];
+/** Visiting rabbits stand at the front of the floor, a step in front of her. */
+const GUEST_Y = 110;
+/** How often a guest wanders somewhere else, give or take. */
+const GUEST_WANDER_MS = [6_000, 14_000] as const;
+/** A visiting rabbit's walk: where it is, where it's going, and when it last got a pat. */
+interface GuestWalk { x: number; targetX: number; facing: 1 | -1; hopPhase: number; nextWander: number; happyUntil: number; arriving: boolean }
 
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -83,6 +99,18 @@ function ceilingY(x: number): number {
 }
 
 type Reaction = 'eating' | 'happy' | 'clean' | 'play';
+
+/**
+ * A meal: she lifts it in her paws and nibbles it away from the top, eyes
+ * shut, then swallows at EAT_SWALLOW_MS and finishes by how she took it.
+ */
+export const EAT_MS = 2300;
+export const EAT_SWALLOW_MS = 1850;
+const EAT_LIFT_MS = 220;
+/** The food goes down between these two times. */
+const EAT_FROM_MS = 300, EAT_TO_MS = 1700;
+/** When a nibble knocks crumbs off. */
+const EAT_CRUMBS_MS = [500, 900, 1300, 1650];
 interface Particle { art: ItemArt; x: number; y: number; vy: number; born: number; life: number }
 
 const WALK_MIN = 28;
@@ -103,10 +131,11 @@ export class Scene {
 
   private x = 40;
   private targetX = 40;
+  /** 1 looks left, -1 right. The art faces right, so 1 is drawn mirrored. */
   private facing: 1 | -1 = 1;
   private nextWander = 0;
   private hopPhase = 0;
-  private reaction: { kind: Reaction; until: number; art?: ItemArt } | null = null;
+  private reaction: { kind: Reaction; start: number; until: number; art?: ItemArt; outcome?: FoodReaction } | null = null;
   private particles: Particle[] = [];
   private blinkAt = 2000;
   private readonly soil: HTMLCanvasElement;
@@ -205,8 +234,9 @@ export class Scene {
     return { x: this.x - 14, y: STAND_Y - 32, w: 28, h: 32 };
   }
 
-  react(kind: Reaction, now: number, art?: ItemArt): void {
-    this.reaction = { kind, until: now + (kind === 'eating' ? 1800 : kind === 'play' ? 2200 : 1400), art };
+  /** `outcome`, for a meal: how she took it (sim.ts foodReaction), which sets how she finishes. */
+  react(kind: Reaction, now: number, art?: ItemArt, outcome?: FoodReaction): void {
+    this.reaction = { kind, start: now, until: now + (kind === 'eating' ? EAT_MS : kind === 'play' ? 2200 : 1400), art, outcome };
     if (kind === 'happy' || kind === 'play') this.burst('heart', 3, now);
     if (kind === 'clean') this.burst('sparkle', 4, now);
   }
@@ -267,6 +297,7 @@ export class Scene {
   draw(m: SceneModel, now: number): void {
     const ctx = this.ctx;
     this.season = m.season ?? 'summer';
+    this.time = m.time;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const soil = (this.soilPattern ??= ctx.createPattern(this.soil, 'repeat'));
     if (soil) { ctx.fillStyle = soil; ctx.fillRect(0, 0, this.canvas.width, this.canvas.height); }
@@ -302,7 +333,7 @@ export class Scene {
       this.animatePiece(p.item, p.def, now);
     }
     if (!drewRabbit && !m.absent) this.drawRabbit(m, now, standY);
-    this.drawGuests(m, now);
+    this.drawGuests(m, now, placed);
     this.drawCritter(m, now);
 
     // hanging decor, on a rope from the ceiling
@@ -357,6 +388,7 @@ export class Scene {
     return def.id === 'seasontree' ? (`tree_${this.season}` as ItemArt) : def.art;
   }
   private season: Season = 'summer';
+  private time: SceneModel['time'];
 
   private drawPiece(item: PlacedItem, def: DecorDef): void {
     const s = this.item(this.artOf(def));
@@ -374,25 +406,86 @@ export class Scene {
     }
   }
 
-  /** Visiting rabbits: they stand either side of her, bob, blink, and doze while she sleeps. */
-  private drawGuests(m: SceneModel, now: number): void {
+  /**
+   * Visiting rabbits: each hops in from the nearer edge, then potters between
+   * free spots on the floor (beside a piece, never in front of one, and not on
+   * top of her or each other), bobs and blinks, and dozes while she sleeps.
+   */
+  private drawGuests(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[]): void {
     const ctx = this.ctx;
-    (m.guests ?? []).slice(0, GUEST_SPOTS.length).forEach((g, i) => {
-      const spot = GUEST_SPOTS[i]!;
-      const asleep = m.mood === 'asleep';
-      const face: Face = asleep ? 'asleep' : this.guestHappyUntil[i]! > now ? 'happy' : 'content';
+    const guests = m.guests ?? [];
+    this.guestOrder = guests.map((g) => g.id);
+    for (const id of [...this.guestWalks.keys()]) if (!this.guestOrder.includes(id)) this.guestWalks.delete(id);
+    const asleep = m.mood === 'asleep';
+    guests.forEach((g, i) => {
+      let w = this.guestWalks.get(g.id);
+      if (!w) {
+        const targetX = this.guestSpot(placed, g.id);
+        const fromLeft = targetX < SCENE_W / 2;
+        // from just past the wall, so the first hop is already in view
+        const x = reduceMotion ? targetX : fromLeft ? -6 : SCENE_W + 6;
+        w = { x, targetX, facing: fromLeft ? -1 : 1, hopPhase: 0, nextWander: now + GUEST_WANDER_MS[0], happyUntil: 0, arriving: !reduceMotion };
+        this.guestWalks.set(g.id, w);
+      }
+      const arrived = Math.abs(w.targetX - w.x) <= 0.5;
+      if (arrived && !asleep && !m.decorating && now > w.nextWander) {
+        w.targetX = this.guestSpot(placed, g.id);
+        w.nextWander = now + GUEST_WANDER_MS[0] + Math.random() * (GUEST_WANDER_MS[1] - GUEST_WANDER_MS[0]);
+      }
+      const dx = w.targetX - w.x;
+      if (Math.abs(dx) > 0.5 && !asleep) {
+        if (reduceMotion) { w.x = w.targetX; w.hopPhase = 0; }
+        else {
+          // bounding in, then pottering
+          const speed = w.arriving ? 0.9 : 0.3;
+          w.facing = dx > 0 ? -1 : 1; w.x += Math.sign(dx) * Math.min(Math.abs(dx), speed); w.hopPhase = (w.hopPhase + (w.arriving ? 0.16 : 0.09)) % 1;
+        }
+      } else {
+        w.hopPhase = 0;
+        w.arriving = false;
+        // standing about, they turn to look at her
+        w.facing = this.x > w.x ? -1 : 1;
+      }
+      const face: Face = asleep ? 'asleep' : w.happyUntil > now ? 'happy' : 'content';
       const frame: Frame = asleep ? (!reduceMotion && Math.floor(now / 1500 + i) % 2 ? 1 : 0)
-        : !reduceMotion && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
+        : !reduceMotion && w.hopPhase === 0 && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
       const sp = this.rabbit(g.coat, face, frame, g.dress);
-      const left = Math.round(spot.x - RABBIT_W / 2), top = spot.y - RABBIT_GROUND;
+      const hop = w.hopPhase ? Math.round(Math.sin(w.hopPhase * Math.PI) * 3) : 0;
+      const left = Math.round(w.x - RABBIT_W / 2), top = GUEST_Y - RABBIT_GROUND - hop;
       ctx.save();
-      if (spot.facing === -1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
+      if (w.facing === 1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
       ctx.drawImage(sp.canvas, left, top);
       ctx.restore();
     });
   }
 
-  private guestHappyUntil = [0, 0];
+  /**
+   * Somewhere for a guest to stand: beside a floor piece (half the time, if
+   * there's room) or a clear stretch of floor, not in front of a piece and a
+   * rabbit's width from her and the other guests. In a full room, in front of
+   * a piece will do; failing that, wherever is furthest from everyone.
+   */
+  private guestSpot(placed: { item: PlacedItem; def: DecorDef }[], id: string): number {
+    const pieces = placed.filter((p) => p.def.zone === 'floor').map((p) => ({ x: p.item.x, w: this.item(p.def.art).w }));
+    // clear of her (where she is and where she's going) and the other guests
+    const others = [this.x, this.targetX, ...[...this.guestWalks].filter(([k]) => k !== id).map(([, w]) => w.targetX)];
+    const apart = (x: number) => others.every((o) => Math.abs(x - o) >= 18);
+    const clear = (x: number) => apart(x) && pieces.every((p) => Math.abs(x - p.x) >= p.w / 2 + 7);
+    const floor: number[] = [];
+    for (let x = 14; x <= SCENE_W - 14; x += 3) floor.push(x);
+    const pick = (xs: number[]) => xs[Math.floor(Math.random() * xs.length)]!;
+    const beside = pieces.flatMap((p) => [p.x - p.w / 2 - 8, p.x + p.w / 2 + 8]).map(Math.round).filter((x) => x >= 14 && x <= SCENE_W - 14 && clear(x));
+    const open = floor.filter(clear);
+    if (beside.length && (Math.random() < 0.5 || !open.length)) return pick(beside);
+    if (open.length) return pick(open);
+    const spaced = floor.filter(apart);
+    if (spaced.length) return pick(spaced);
+    const room = (x: number) => Math.min(...others.map((o) => Math.abs(x - o)));
+    return floor.reduce((best, x) => (room(x) > room(best) ? x : best));
+  }
+
+  private guestWalks = new Map<string, GuestWalk>();
+  private guestOrder: string[] = [];
 
   /** A wild visitor: sits in its corner, bobs now and then, looks about, and hops when tapped. */
   /** The first spot for the visitor that no floor piece or rug covers (or the first, if all are). */
@@ -442,24 +535,25 @@ export class Scene {
     this.burst('heart', 1, now, { x: spot.x, y: spot.y - 18 });
   }
 
-  /** Which guest (0 or 1) is under a point, for tapping. */
-  guestAt(m: SceneModel, px: number, py: number): number | null {
-    const n = Math.min(m.guests?.length ?? 0, GUEST_SPOTS.length);
-    for (let i = 0; i < n; i++) {
-      const spot = GUEST_SPOTS[i]!;
-      if (Math.abs(px - spot.x) <= 13 && py >= spot.y - 32 && py <= spot.y) return i;
+  /** Which guest (its index in the model's guests) is under a point, for tapping. */
+  guestAt(m: Pick<SceneModel, 'guests'>, px: number, py: number): number | null {
+    const guests = m.guests ?? [];
+    for (let i = 0; i < guests.length; i++) {
+      const w = this.guestWalks.get(guests[i]!.id);
+      if (w && Math.abs(px - w.x) <= 13 && py >= GUEST_Y - 32 && py <= GUEST_Y) return i;
     }
     return null;
   }
 
   /** A guest's happy wiggle when tapped. */
   cheerGuest(i: number, now: number): void {
-    this.guestHappyUntil[i] = now + 1400;
-    const spot = GUEST_SPOTS[i];
-    if (spot) this.burst('heart', 2, now, { x: spot.x, y: spot.y - 30 });
+    const w = this.guestWalks.get(this.guestOrder[i] ?? '');
+    if (!w) return;
+    w.happyUntil = now + 1400;
+    this.burst('heart', 2, now, { x: w.x, y: GUEST_Y - 30 });
   }
 
-  /** Moving parts drawn over a piece: the fireplace's flames, the clock's pendulum. */
+  /** Moving parts drawn over a piece: the fireplace's flames, the clocks' hands and pendulum. */
   private animatePiece(item: PlacedItem, def: DecorDef, now: number): void {
     const b = this.itemBox(item);
     if (!b) return;
@@ -467,14 +561,17 @@ export class Scene {
     if (def.id === 'fireplace') {
       const f = this.item(!reduceMotion && Math.floor(now / 260) % 2 ? 'flame2' : 'flame1');
       ctx.drawImage(f.canvas, Math.round(item.x - f.w / 2), b.y + b.h - f.h - 3);
-    } else if (def.id === 'clock') {
-      const swing = reduceMotion ? 0 : Math.round(Math.sin(now / 500) * 1.6);
-      const cx = Math.round(item.x), top = b.y + 10;
-      ctx.fillStyle = '#D5A12A';
-      ctx.fillRect(cx, top, 1, 4);
-      ctx.fillRect(cx + swing, top + 4, 1, 2);
-      ctx.fillStyle = '#F6D24A';
-      ctx.fillRect(cx + swing - 1, top + 6, 3, 2);
+    } else if (def.id === 'clock' || def.id === 'wallclock') {
+      this.drawHands(b.x + 5, b.y + 4);
+      if (def.id === 'clock') {
+        const swing = reduceMotion ? 0 : Math.round(Math.sin(now / 500) * 1.6);
+        const cx = Math.round(item.x), top = b.y + 11;
+        ctx.fillStyle = '#D5A12A';
+        ctx.fillRect(cx, top, 1, 4);
+        ctx.fillRect(cx + swing, top + 4, 1, 2);
+        ctx.fillStyle = '#F6D24A';
+        ctx.fillRect(cx + swing - 1, top + 6, 3, 2);
+      }
     } else if (def.id === 'fireflies') {
       // three fireflies drifting round the jar, blinking on and off
       for (let i = 0; i < 3; i++) {
@@ -491,6 +588,31 @@ export class Scene {
         ctx.drawImage(g.canvas, x, b.y + b.h - 8);
       }
     }
+  }
+
+  /**
+   * A clock face's hands at the player's time, around its centre pixel: the
+   * art's own 10:10 hands (for the shop) are painted over first. The ticks sit
+   * just outside what's painted, the minute hand reaches them.
+   */
+  private drawHands(cx: number, cy: number): void {
+    const t = this.time;
+    if (!t) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(cx - 2, cy - 2, 5, 5);
+    ctx.fillStyle = '#3B2922';
+    // each hand points at one of the twelve marks, turning CLOCK_HAND's quarter
+    const hand = (mark: number, len: number) => {
+      for (const [x0, y0] of CLOCK_HAND[mark % 3]!.slice(0, len)) {
+        let x = x0, y = y0;
+        for (let q = Math.floor(mark / 3) % 4; q > 0; q--) [x, y] = [-y, x];
+        ctx.fillRect(cx + x, cy + y, 1, 1);
+      }
+    };
+    hand(Math.round(t.minute / 5), 3);
+    hand(Math.round((t.hour % 12) + t.minute / 60), 2);
+    ctx.fillRect(cx, cy, 1, 1);
   }
 
   /** A 1-pixel marching dashed outline, crisp at any scale. */
@@ -611,7 +733,8 @@ export class Scene {
       // eyes closed, cosy
       face = 'happy';
     } else if (this.reaction) {
-      face = this.reaction.kind === 'eating' ? 'eating' : 'happy';
+      if (this.reaction.kind === 'eating') ({ face, frame } = eatingPose(now - this.reaction.start, this.reaction.outcome, reduceMotion));
+      else face = 'happy';
     } else if (m.mood === 'grumpy') {
       face = 'grumpy';
     } else {
@@ -624,18 +747,15 @@ export class Scene {
     const top = standY - RABBIT_GROUND - hop;
     const ctx = this.ctx;
     ctx.save();
-    if (this.facing === -1) {
+    if (this.facing === 1) {
       ctx.translate(left * 2 + RABBIT_W, 0);
       ctx.scale(-1, 1);
     }
     ctx.drawImage(s.canvas, left, top);
     ctx.restore();
 
-    // what she's eating, held under her chin
-    if (this.reaction?.kind === 'eating' && this.reaction.art) {
-      const f = this.item(this.reaction.art);
-      ctx.drawImage(f.canvas, Math.round(this.x - f.w / 2 + 1), standY - 12);
-    }
+    // what she's eating, held up in her paws
+    if (this.reaction?.kind === 'eating' && this.reaction.art) drawMeal(ctx, m.coat, this.reaction.art, now - this.reaction.start, this.x, standY, reduceMotion);
     // the toy she's playing with, bouncing beside her
     if (this.reaction?.kind === 'play' && this.reaction.art) {
       const toy = this.item(this.reaction.art);
@@ -685,6 +805,80 @@ export class Scene {
     }
     ctx.globalAlpha = 1;
   }
+}
+
+/**
+ * Her face and frame `e` ms into a meal: nibbling (eyes shut, the nose
+ * twitching), then how she took it. `still`: reduced motion, no twitching.
+ * Exported with drawMeal for dev/eat-lab.html.
+ */
+export function eatingPose(e: number, outcome: FoodReaction = 'happy', still = false): { face: Face; frame: Frame } {
+  if (e < EAT_SWALLOW_MS) return { face: still || Math.floor(e / 90) % 2 ? 'nibble' : 'chew', frame: 0 };
+  const after = e - EAT_SWALLOW_MS;
+  if (outcome === 'loves') return { face: after < 260 ? 'savour' : 'happy', frame: 0 };
+  if (outcome === 'okay') return { face: 'polite', frame: after > 250 && after < 600 ? 2 : 0 };
+  return { face: after < 300 ? 'lick' : 'content', frame: 0 };
+}
+
+const mealSprites = new Map<string, Sprite>();
+const crumbColours = new Map<ItemArt, string[]>();
+
+/** A few of a food's own colours (not its outline), for crumbs. */
+function crumbsOf(art: ItemArt): string[] {
+  let cols = crumbColours.get(art);
+  if (!cols) {
+    const seen = new Set<string>();
+    for (const row of drawItem(art).px) for (const c of row) if (c[3] && c[0] + c[1] + c[2] > 200) seen.add(`rgb(${c[0]},${c[1]},${c[2]})`);
+    cols = [...seen].slice(0, 4);
+    crumbColours.set(art, cols);
+  }
+  return cols;
+}
+
+/**
+ * The food `e` ms into a meal, held up in her paws and eaten from the top,
+ * and the crumbs it drops. `x`: her centre; `standY`: the row she stands on.
+ */
+export function drawMeal(ctx: CanvasRenderingContext2D, coat: Coat, art: ItemArt, e: number, x: number, standY: number, still = false): void {
+  let f = mealSprites.get(art);
+  if (!f) { f = toSprite(drawItem(art)); mealSprites.set(art, f); }
+  const eaten = Math.max(0, Math.min(1, (e - EAT_FROM_MS) / (EAT_TO_MS - EAT_FROM_MS)));
+  const lift = still ? 3 : Math.round(Math.min(1, e / EAT_LIFT_MS) * 3);
+  const fx = Math.round(x - f.w / 2 + 1), fy = standY - 12 - lift;
+  const cut = Math.round(eaten * f.h);
+  if (cut < f.h) {
+    ctx.drawImage(f.canvas, 0, cut, f.w, f.h - cut, fx, fy + cut, f.w, f.h - cut);
+    let paw = mealSprites.get(`paw:${coat}`);
+    if (!paw) { paw = toSprite(drawPaw(coat)); mealSprites.set(`paw:${coat}`, paw); }
+    const py = fy + f.h - 5;
+    ctx.drawImage(paw.canvas, fx - 2, py);
+    ctx.drawImage(paw.canvas, fx + f.w - 2, py);
+  }
+  if (still) return;
+  // three crumbs a nibble, from the bitten edge down to the floor, where they fade
+  const cols = crumbsOf(art);
+  EAT_CRUMBS_MS.forEach((at, i) => {
+    const age = e - at;
+    if (age < 0 || age > 900) return;
+    const from = Math.round(Math.max(0, Math.min(1, (at - EAT_FROM_MS) / (EAT_TO_MS - EAT_FROM_MS))) * f.h);
+    for (let k = 0; k < 3; k++) {
+      const vx = (jitter(i, k) - 0.5) * 0.02;
+      const x0 = fx + f.w / 2 + (jitter(i + 9, k) - 0.5) * 3;
+      const ground = standY + Math.round(jitter(k, i + 3) * 2);
+      let cx = x0 + vx * age, cy = fy + from - 0.005 * age + 0.00006 * age * age;
+      if (cy > ground) { cy = ground; cx = x0 + vx * Math.min(age, 300); }
+      ctx.globalAlpha = age > 600 ? (900 - age) / 300 : 1;
+      ctx.fillStyle = cols[(i + k) % cols.length] ?? '#C96';
+      ctx.fillRect(Math.round(cx), Math.round(cy), 1, 1);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+/** A steady 0..1 from two ints, so a meal's crumbs fall the same way each frame. */
+function jitter(a: number, b: number): number {
+  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 /** A seamless tile of the burrow's soil, for the space around the room. */

@@ -41,18 +41,20 @@ export interface DecorDef {
 
 export const CATALOG: DecorDef[] = [
   // tier 1: everyday
-  { id: 'cushion', name: 'Cloud cushion', price: 30, art: 'cushion', zone: 'floor', bond: 1, tier: 1, bed: true },
+  { id: 'cushion', name: 'Cloud cushion bed', price: 30, art: 'cushion', zone: 'floor', bond: 1, tier: 1, bed: true },
   { id: 'plant', name: 'Clover pot', price: 25, art: 'plant', zone: 'floor', bond: 1, tier: 1 },
   { id: 'rug', name: 'Berry rug', price: 40, art: 'rug', zone: 'rug', bond: 1, tier: 1 },
   { id: 'lantern', name: 'Honey lantern', price: 60, art: 'lantern', zone: 'hang', bond: 1, tier: 1, glow: true },
   { id: 'mushroom', name: 'Toadstool seat', price: 35, art: 'mushroom', zone: 'floor', bond: 2, tier: 1 },
   { id: 'jar', name: 'Dandelion jar', price: 30, art: 'jar', zone: 'floor', bond: 2, tier: 1 },
   { id: 'garland', name: 'Star garland', price: 50, art: 'garland', zone: 'hang', bond: 3, tier: 1 },
+  // tells the player's own time (render.ts animatePiece)
+  { id: 'wallclock', name: 'Wall clock', price: 45, art: 'wallclock', zone: 'hang', bond: 1, tier: 1 },
   // tier 2: saving up (walls and floors are in SURFACES)
   { id: 'flowerbox', name: 'Flower box', price: 150, art: 'flowerbox', zone: 'floor', bond: 1, tier: 2 },
   { id: 'herbs', name: 'Hanging herbs', price: 180, art: 'herbs', zone: 'hang', bond: 1, tier: 2 },
   { id: 'kettle', name: 'Tea kettle', price: 200, art: 'kettle', zone: 'floor', bond: 1, tier: 2 },
-  { id: 'patchcushion', name: 'Patchwork cushion', price: 220, art: 'patchcushion', zone: 'floor', bond: 1, tier: 2, bed: true },
+  { id: 'patchcushion', name: 'Patchwork cushion bed', price: 220, art: 'patchcushion', zone: 'floor', bond: 1, tier: 2, bed: true },
   { id: 'bunting', name: 'Bunting', price: 300, art: 'bunting', zone: 'hang', bond: 1, tier: 2 },
   { id: 'lamp', name: 'Reading lamp', price: 350, art: 'lamp', zone: 'floor', bond: 1, tier: 2, glow: true },
   { id: 'bookshelf', name: 'Bookshelf nook', price: 400, art: 'bookshelf', zone: 'floor', bond: 1, tier: 2 },
@@ -242,6 +244,18 @@ export const ROOMS: Record<RoomId, { name: string; price: number; blurb: string;
 /** The rooms she has, in order. */
 export function roomsOf(b: BurrowState): RoomId[] {
   return ['main', ...EXTRA_ROOMS.filter((r) => b.rooms?.[r])];
+}
+
+/**
+ * Extra rooms are switched off for now: nothing offers them, and her burrow
+ * and friends' show only the main room. Rooms already dug, and the decor in
+ * them, stay in the save for when they're back.
+ */
+export const ROOMS_OPEN = false;
+
+/** The rooms you can look round: the ones she has while ROOMS_OPEN, else just the main one. */
+export function openRoomsOf(b: BurrowState): RoomId[] {
+  return ROOMS_OPEN ? roomsOf(b) : ['main'];
 }
 
 export const itemRoom = (i: PlacedItem): RoomId => (i.placed && i.room) || 'main';

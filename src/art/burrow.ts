@@ -7,7 +7,10 @@ import { hex, lcg, type PixelGrid, type RGBA } from './pixels';
 export const SCENE_W = 98;
 export const SCENE_H = 118;
 export const FLOOR_Y = 92;
-export const WINDOW = { x: 26, y: 30, r: 11 };
+/** The soil either side of the room's walls, in pixels; the stage crops it off. */
+export const WALL_INSET = 3;
+/** The round window, clear of the curved wall (drawn in it is placed from its centre). */
+export const WINDOW = { x: 31, y: 34, r: 11 };
 
 /**
  * Which wall, floor and window the room has (decor.ts SURFACES), and which
@@ -37,6 +40,13 @@ const FLOORS: Record<string, [string, string, string]> = {
   checkerfloor: ['F4E3B5', 'C98A5A', 'A06A42'],
 };
 
+/** A room's wall and floor colours, as CSS hex: for backdrops drawn outside the scene (the shop's display). */
+export function roomColours(style: RoomStyle = PLAIN_ROOM): { wall: string; wallD: string; floor: string; floorD: string } {
+  const wc = WALLS[style.wall] ?? WALLS.plainwall!;
+  const fc = FLOORS[style.floor] ?? FLOORS.plainfloor!;
+  return { wall: `#${wc[0]}`, wallD: `#${wc[3]}`, floor: `#${fc[0]}`, floorD: `#${fc[2]}` };
+}
+
 export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): PixelGrid {
   const W = SCENE_W, H = SCENE_H;
   const rnd = lcg(7);
@@ -53,14 +63,14 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     // An arched ceiling, then straight walls down to the floor from the arch's
     // widest point, so no soil wedge pokes into the bottom corners.
-    const inside = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1 || (y >= cy && x >= 3 && x < W - 3);
+    const inside = ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1 || (y >= cy && x >= WALL_INSET && x < W - WALL_INSET);
     if (inside) {
       const v = rnd();
       px[y]![x] = v < 0.045 ? wall2 : v < 0.065 ? wall3 : wall;
     } else {
       px[y]![x] = rnd() < 0.18 ? soil2 : soil;
     }
-    if (y >= FLOOR_Y && x >= 3 && x < W - 3) {
+    if (y >= FLOOR_Y && x >= WALL_INSET && x < W - WALL_INSET) {
       const row = y - FLOOR_Y;
       if (checker) {
         px[y]![x] = (Math.floor(x / 5) + Math.floor(row / 4)) % 2 ? floor2 : floor;
@@ -79,7 +89,8 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
     }
   }
   wallpaper(px, style.wall, (c) => c === wall || c === wall2 || c === wall3);
-  // round window
+  // round window; what's drawn in it is placed from its centre
+  const { x: wx, y: wy } = WINDOW;
   const sky = night ? hex('1D2748') : hex('A6DBF5');
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const d = Math.hypot(x + 0.5 - WINDOW.x, y + 0.5 - WINDOW.y);
@@ -100,22 +111,13 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
     }
   }
   if (night) {
-    for (const [sx, sy] of [[20, 25], [30, 22], [24, 33], [33, 30], [18, 31]] as const) px[sy]![sx] = hex('FFF6C8');
+    for (const [sx, sy] of [[-6, -5], [4, -8], [-2, 3], [7, 0], [-8, 1]] as const) px[wy + sy]![wx + sx] = hex('FFF6C8');
     for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-      if (dx * dx + dy * dy <= 8 && (dx + 1.6) ** 2 + (dy + 1) ** 2 > 5) px[26 + dy]![30 + dx] = hex('F4E3B5');
+      if (dx * dx + dy * dy <= 8 && (dx + 1.6) ** 2 + (dy + 1) ** 2 > 5) px[wy - 4 + dy]![wx + 4 + dx] = hex('F4E3B5');
     }
   } else {
-    for (let dx = -3; dx < 4; dx++) px[26]![24 + dx] = hex('FFFFFF');
-    for (let dx = -2; dx < 3; dx++) px[25]![24 + dx] = hex('FFFFFF');
-  }
-  // hanging roots
-  const rootRnd = lcg(3);
-  for (const [rx0, len] of [[50, 9], [58, 6], [71, 11], [80, 5]] as const) {
-    let x = rx0;
-    for (let y = 9; y < 9 + len; y++) {
-      if (isWall(px[y]![x]!)) px[y]![x] = plank;
-      if (rootRnd() < 0.3) x += rootRnd() < 0.5 ? -1 : 1;
-    }
+    for (let dx = -3; dx < 4; dx++) px[wy - 4]![wx - 2 + dx] = hex('FFFFFF');
+    for (let dx = -2; dx < 3; dx++) px[wy - 5]![wx - 2 + dx] = hex('FFFFFF');
   }
   if (style.variant === 'loft') {
     // two beams across the arch, and a post down the middle
@@ -172,6 +174,8 @@ export function moonPhase(ms: number): number {
  */
 export function drawWindowView(season: 'spring' | 'summer' | 'autumn' | 'winter', weather: 'sunny' | 'cloudy' | 'rain' | 'snow' | 'leaves', night: boolean, phase: number | null = null, mirror = false): PixelGrid {
   const R = WINDOW.r - 2;
+  // the sky's stars, moon, sun and clouds are placed from the window's centre
+  const { x: wx, y: wy } = WINDOW;
   const px: RGBA[][] = Array.from({ length: SCENE_H }, () => Array<RGBA>(SCENE_W).fill([0, 0, 0, 0]));
   const overcast = weather === 'cloudy' || weather === 'rain' || weather === 'snow';
   const sky = night
@@ -197,32 +201,32 @@ export function drawWindowView(season: 'spring' | 'summer' | 'autumn' | 'winter'
   if (night) {
     if (!overcast && phase !== null) {
       // the moon window: the real moon, in tonight's phase, and more stars
-      for (const [sx, sy] of [[20, 25], [30, 22], [24, 33], [33, 30], [18, 31], [22, 21], [34, 25], [19, 28]] as const) set(sx, sy, hex('FFF6C8'));
+      for (const [sx, sy] of [[-6, -5], [4, -8], [-2, 3], [7, 0], [-8, 1], [-4, -9], [8, -5], [-7, -2]] as const) set(wx + sx, wy + sy, hex('FFF6C8'));
       const r = 4, lit = hex('F4E3B5'), dark = hex('3A4468');
       for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dy * dy > r * r + 1) continue;
         const nx = dx / r, ny = dy / r;
         const t = Math.cos(2 * Math.PI * phase) * Math.sqrt(Math.max(0, 1 - ny * ny));
         const on = phase < 0.5 ? nx >= t : nx <= -t;
-        set(29 + dx, 26 + dy, on ? lit : dark);
+        set(wx + 3 + dx, wy - 4 + dy, on ? lit : dark);
       }
     } else if (!overcast) {
-      for (const [sx, sy] of [[20, 25], [30, 22], [24, 33], [33, 30], [18, 31]] as const) set(sx, sy, hex('FFF6C8'));
+      for (const [sx, sy] of [[-6, -5], [4, -8], [-2, 3], [7, 0], [-8, 1]] as const) set(wx + sx, wy + sy, hex('FFF6C8'));
       for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
-        if (dx * dx + dy * dy <= 8 && (dx + 1.6) ** 2 + (dy + 1) ** 2 > 5) set(30 + dx, 26 + dy, hex('F4E3B5'));
+        if (dx * dx + dy * dy <= 8 && (dx + 1.6) ** 2 + (dy + 1) ** 2 > 5) set(wx + 4 + dx, wy - 4 + dy, hex('F4E3B5'));
       }
     } else {
-      cloud(22, 25, 4, hex('3A4260'));
-      cloud(30, 29, 3, hex('3A4260'));
+      cloud(wx - 4, wy - 5, 4, hex('3A4260'));
+      cloud(wx + 4, wy - 1, 3, hex('3A4260'));
     }
   } else if (weather === 'sunny' || weather === 'leaves') {
-    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx * dx + dy * dy <= 5) set(31 + dx, 25 + dy, hex('F6D24A'));
-    cloud(22, 27, 3, hex('FFFFFF'));
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx * dx + dy * dy <= 5) set(wx + 5 + dx, wy - 5 + dy, hex('F6D24A'));
+    cloud(wx - 4, wy - 3, 3, hex('FFFFFF'));
   } else {
     const c = hex(weather === 'rain' ? 'A7B0BA' : weather === 'snow' ? 'F2F5F8' : 'E9EEF2');
-    cloud(22, 25, 5, c);
-    cloud(30, 28, 4, c);
-    cloud(26, 22, 3, c);
+    cloud(wx - 4, wy - 5, 5, c);
+    cloud(wx + 4, wy - 2, 4, c);
+    cloud(wx, wy - 8, 3, c);
   }
   // the nook's window is on the right: the same view, turned round with the room
   if (mirror) for (const row of px) row.reverse();

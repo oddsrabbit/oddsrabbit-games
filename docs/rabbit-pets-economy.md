@@ -103,7 +103,7 @@ steady steps.
 | Finds | common +2, rare +15 | rare was +2 |
 | Carrot catch | **removed**; Play becomes toy play (§2.3) | was up to 30 a day |
 | Clover sprouts | 2 seed → 6, 4h | unchanged, but you start with **one** plot and buy the others (§2.5) |
-| **Getting started** | a 7-step checklist, a step per day visited, §2.1 | new: 450, and a free clover patch |
+| **Getting started** | a 7-step checklist, in order, each claimed, §2.1 | new: 450, and a free clover patch |
 | **Gift streak milestones** | once each: 7 days +50, 30 days +200, 100 days +750, 365 days +2,500 | new |
 | **Bond level-ups** | once each: level 2 +50, 3 +75, 4 +100, 5 +150, 6 +200, 7 +300 | new |
 
@@ -113,19 +113,24 @@ is reachable by anyone who keeps coming back.
 ### 2.1 Getting started
 
 A short checklist of seven steps sits on the burrow ("Getting started ·
-1/4"). One more step opens for each day the player visits (days visited,
-not the calendar), so a slow starter loses nothing and the clover is spread
-out. **Changed 2026-09-25:** the steps were labelled Day 1–7 as a "starter
-week", which read as a schedule. They're now steps and never mention days;
-between steps the chip reads "more next time" and the sheet says the next
-step "opens next time you drop by (tomorrow or later)". Two goals were
-reworded (below). Every goal can be done alone, and goals done early pay
-when their step opens.
+1/4", with the step's prize beside it). **Changed 2026-09-26:** steps no
+longer wait for a new day visited. They go in order, and the next opens as
+soon as the last is claimed. When a step's goals are all done the chip turns
+green ("Claim +100") and the reward is paid only when the player taps Claim
+in the sheet, so each prize gets its moment. The sheet shows the open step as
+a card with its prize drawn (clover, and the patch for step 1), with the
+steps already claimed and the ones still to come as single lines with their
+prize. Pacing now comes from the goals themselves: she isn't tired enough to
+nap for an hour or more (the sheet says "She isn't tired yet"), the gift
+opens once a day so "3 times" takes 3 days, and bond level 3 takes about a
+week. Goals done early still count when their step opens.
+(2026-09-25: the steps had been labelled Day 1–7 as a "starter week", which
+read as a schedule, and became steps.)
 
 | Step | Goals | Clover |
 |---|---|---|
 | 1 | Feed her, get her a bed (she starts with none and sleeps on the floor), play with her toy, dress her | 100, plus **a free clover patch** so the yard starts on day one |
-| 2 | Put her to bed when she's tired (a new rabbit isn't, for an hour or more), harvest the garden, bake a treat | 70 |
+| 2 | Put her down for a nap when she's tired (a new rabbit isn't, for an hour or more), harvest the garden, bake a treat | 70 |
 | 3 | Open the daily gift 3 times, collect the yard | 70 |
 | 4 | Visit a friend with care, **or** share Rabbit Pets | 50 |
 | 5 | Place 3 pieces of decor | 30 |
@@ -135,7 +140,7 @@ when their step opens.
 
 When every step is done, the checklist goes away for good.
 
-**What week one looks like** (clover earned by the end of each day):
+**What week one looks like** (clover earned by the end of each day; worked out under the old one-step-a-day rule. Without it, steps 4–6 (110 clover) can land a day or two sooner for a player who does them early, and the week's total is the same):
 
 | Player | Day 1 | Day 2 | Day 3 | Day 4 | Day 5 | Day 6 | Day 7 |
 |---|---|---|---|---|---|---|---|
@@ -185,7 +190,7 @@ where its numbers differ from the table above, the table is current.
 | Being visited | +4 |
 | Receiving a clover gift | +10 |
 | **How many pay** | Your **first 5 of each a day**: 5 visits you make, 5 gifts you send, 5 visits you receive, 5 clover gifts you receive. More still happen (guests, care, berries and hugs), just without clover. |
-| **Friend milestones** | once each, for friends you've visited and who've visited you: 3 → +250, 5 → +500, 10 → +1,000, 20 → +2,000 |
+| **Friend milestones** | once each, for friends you've visited and who've visited you: 3 → +250, 5 → +500, 10 → +1,000, 20 → +2,000. **Built** (`FRIEND_MILESTONES`, paid by `settleLumps`, counted by `mutualFriends`). |
 | **Invites** | A new player who signs up through your share link: once their rabbit is 3 days old, you get **+500** and they get **+250**. Paid for up to 10 invites. |
 
 Most players will play alone or with 1–2 friends, so those are the design
@@ -215,7 +220,8 @@ was referred. The inviter pays out on their side, like every other reward.
 
 ### 2.3 Toy play, in place of carrot catch
 
-The Play button opens her toys. Tap one and she plays with it: chases a
+Play, in the care row, opens a tray of her toys (like Feed's food tray),
+ending in a "More toys" tile for the toy box. Tap one and she plays with it: chases a
 ball, bats at yarn, hops in and out of a box. No score, no timer, no
 limit on plays.
 
@@ -279,7 +285,9 @@ hour, day and night, whether or not you open the game.
 for itself fast, so building feels rewarding straight away, and each further
 one costs more, so the last few are long-term goals. A full set of each costs
 about what it did (10.5k, 20k, 88k). The shop shows each building's income
-and payback ("Makes 6 clover a day · pays for itself in about 14 days"). In
+("Makes 6 clover a day") but not its payback: a payback line climbed past
+100 days for the last few, and told the most engaged players a building
+wasn't worth it. `payback()` stays, for tests and the model. In
 the model a casual player's first beehive comes on day 43 (was 101), and
 year-one income rises from about 110k to 128k (engaged: 180k to 195k), which
 the new sinks (rooms, showpieces, the raffle, the welcome line) take up.
@@ -295,7 +303,11 @@ the new sinks (rooms, showpieces, the raffle, the welcome line) take up.
 | Yard shed | 1,000, then 3,000 | Storage holds 36 hours, then 48 | | once each | after the third patch |
 
 - **Collecting.** Clover piles up in the yard's storage. Opening the game
-  shows "+86 clover from the yard" with a tap to collect.
+  shows "86 in the yard" on the burrow, and tapping it walks you to the
+  yard. **Changed 2026-09-26:** it's collected only in the garden, from a
+  big "Collect +86" button floating over the yard; the clovers fly into the
+  clover counter, which counts up as they land. (Before, the burrow's chip
+  and the welcome-back summary collected it straight away.)
 - **Storage fills in 24 hours,** matching "one visit a day". The shed
   stretches it to 36 and 48 hours so a weekend away wastes nothing. It's
   never shorter than a day and never nags: no reminder is sent when it's
@@ -417,14 +429,14 @@ After the review's changes (`dev/economy-model.py`; run it to reprint):
   and the yard is front-loaded (§2.6).
 - **A year of it, solo:** a casual player earns about 148,821 and makes
   630 a day by day 365; an engaged one earns 229,196 and makes 860 a day.
-- **Everything there is to buy** comes to 304,846 (351,846 with the
-  welcome line): everyday decor 13,420, seasonal decor 8,100, showpieces 52,000, walls, floors, windows 8,980, outfits 13,540, toys 2,630, meadow pieces 12,700, rooms 45,000, garden upgrades and soil 22,922, yard and sheds 122,308, raffle 3,246.
+- **Everything there is to buy** comes to 305,507 (352,507 with the
+  welcome line): everyday decor 13,420, seasonal decor 8,100, showpieces 52,000, walls, floors, windows 8,980, outfits 13,540, toys 2,630, meadow pieces 12,700, rooms 45,000, garden upgrades and soil 22,922, yard and sheds 122,308, raffle 3,907 (a ticket that doesn't win is just a miss, a chase for fun).
   The showpieces (7,000, 15,000, 30,000), the rooms (15,000, 30,000) and the
   welcome line (1,000 to 25,000) were trimmed about 40% so that a player can
   own everything in a year to a year and a half: with updates planned, that
   should stay a little ahead of new content, not years ahead of it.
-- **When a player could own it all:** casual solo day 594, casual with five
-  friends day 519, engaged solo day 453, engaged with five friends day 419.
+- **When a player could own it all:** casual solo day 595, casual with five
+  friends day 520, engaged solo day 454, engaged with five friends day 419.
   Most players won't want everything, so what they care about comes sooner.
 - **Updates:** a veteran can bank 800 to 1,000 clover a day once they own
   everything. Each update should bring at least one long-term goal priced
@@ -441,7 +453,7 @@ After the review's changes (`dev/economy-model.py`; run it to reprint):
 
 | Part | Price | What's in it |
 |---|---|---|
-| Tier 1 | 25–60 | Today's shop, unchanged: seven decor (bond gates as now). About 270 in all. Outfits moved up (2026-09-25): bandana 40 (the first-day goal), bow 250, bell 300, beanie 450. |
+| Tier 1 | 25–60 | Today's shop: seven decor (bond gates as now), and since 2026-09-28 a wall clock (45) that tells the player's own time. About 315 in all. Outfits moved up (2026-09-25): bandana 40 (the first-day goal), bow 250, bell 300, beanie 450. |
 | Toys | 50–250 | Yarn ball, cardboard box, tunnel, rope swing (§2.3). 530 in all; the ball is free. |
 | Upgrades | 300–1,000 | Second and third plot, watering can (§2.5). 1,900 in all. Soil levels on top. |
 | Tier 2 | 150–700 | 14 items (below). 5,130 in all. |
@@ -572,8 +584,10 @@ Outfits sit on her head or neck, so Snow day's free item is earmuffs
   during the event, with no other condition. Winterfest's scarf already
   works this way (`gift` in `EVENTS`).
 
-**Recurring costs** stay as they are (strawberry 3, seeds 2 / 4 / 8,
-baking free). With income this high they're flavour, not a sink, and
+**Recurring costs** stay as they are (strawberry 3, seeds 2 for sprouts
+and 8 for a golden carrot, baking free). Strawberry seeds are free and a
+harvest brings 3: paying for them made a berry plot worse than sprouts
+plus buying berries at the tray. With income this high they're flavour, not a sink, and
 that's fine: the ladder is the sink.
 
 ## 4. Goals clover can't buy
