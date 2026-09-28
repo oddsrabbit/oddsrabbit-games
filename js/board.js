@@ -12,10 +12,11 @@
 //   - double tap ON THE SAME CELL                 → toggle between fit and 2.2×
 //
 // That last qualifier matters. A plain "any tap within 300 ms" test made every
-// second tap of a quickly-laid word zoom instead of placing a tile, which is
-// exactly the flow the rack's auto-advance is built for. A double tap now has
-// to land on the cell the previous tap did, and is suppressed outright while a
-// rack tile is selected — during placement the player means to place.
+// second tap of a quickly-laid word zoom instead of placing a tile. A double
+// tap now has to land on the cell the previous tap did, and is suppressed
+// outright while a rack tile is selected — during placement the player means
+// to place. The tap that places a tile doesn't count as the first of a double
+// tap either, so tapping the tile straight back up picks it up.
 //
 // The renderer holds no game logic: it draws the `board` and `layout` from
 // the server's view plus the pending tiles application.js is holding, and
@@ -166,8 +167,10 @@
   };
 
   // True while a rack tile is selected: suppresses double-tap zoom so a fast
-  // second tap always places rather than zooming.
+  // second tap always places rather than zooming. When a placement ends, the
+  // tap that made it is forgotten so it can't start a double tap.
   TilesBoard.prototype.setPlacing = function (active) {
+    if (this.placing && !active) this.lastTap = null;
     this.placing = !!active;
   };
 

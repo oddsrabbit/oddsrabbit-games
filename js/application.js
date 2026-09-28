@@ -2513,11 +2513,9 @@
     if (slot === null || slot === undefined || slot >= state.rackFree.length) return;
     state.rackFree.splice(slot, 1);
     state.pending.push({ row: row, col: col, letter: letter, blank: blank });
-    // Keep a tile selected so a word can be laid with alternating taps: the
-    // one that slid into this slot, or the last tile once the rack shortens.
-    state.selectedRack = state.rackFree.length
-      ? Math.min(slot, state.rackFree.length - 1)
-      : null;
+    // Clear the selection rather than advancing it: a tile highlighted on its
+    // own reads as the game suggesting that letter.
+    state.selectedRack = null;
     haptic("light");
     renderRack();
     syncBoard();
@@ -2544,9 +2542,9 @@
     var cell = board ? board.cellAtClient(clientX, clientY) : null;
     if (!cell || !lift) return null;
     var m = state.match;
-    var own = cell[0] === lift.row && cell[1] === lift.col;
-    var free = m.view.board[cell[0]][cell[1]] === null && (own || pendingIndexAt(cell[0], cell[1]) === -1);
-    return free ? cell : null;
+    // Any square without a played tile: empty, or holding another of this
+    // turn's tiles, which the lifted one swaps with.
+    return m.view.board[cell[0]][cell[1]] === null ? cell : null;
   }
 
   function endLift() {
@@ -2593,6 +2591,11 @@
         haptic("light");
         renderRack();
       } else if (cell) {
+        var other = pendingIndexAt(cell[0], cell[1]);
+        if (other !== -1 && other !== i) {
+          state.pending[other].row = lift.row;
+          state.pending[other].col = lift.col;
+        }
         state.pending[i].row = cell[0];
         state.pending[i].col = cell[1];
         haptic("light");
