@@ -4,7 +4,7 @@ import test from 'node:test';
 import { COLLECTIBLES } from './collectibles';
 import { bestFriends, earn, mutualFriends, nextFriendMilestone, noteFriendship, rate, settleLumps } from './economy';
 import { act, newPet, visit, type PetState } from './sim';
-import { claimStarter, markGoal, starterDone, starterReady, starterStep, starterView } from './starter';
+import { claimStarter, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS } from './starter';
 import { DAY_MS, FRIEND_CLOVER } from './tuning';
 import { countOf } from './yard';
 
@@ -76,7 +76,7 @@ test('the gift grows 2 a day up to 40', () => {
 test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {
   let s = pet();
   assert.equal(starterStep(s), 1);
-  assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked']);
+  assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked', 'locked']);
   for (const g of ['feed', 'toy', 'bed'] as const) markGoal(s, g);
   assert.equal(starterReady(s), false);
   assert.equal(claimStarter(s, NOON).paid, null, 'not all step-one goals done');
@@ -92,8 +92,7 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   assert.equal(starterStep(s), 2);
   assert.equal(starterView(s)[1]!.status, 'open');
   // goals done early count when their step opens, but each step is its own claim
-  for (const g of ['dress', 'nap', 'harvest', 'bake', 'yard', 'forage', 'friend', 'surface', 'meadowpiece'] as const) markGoal(s, g);
-  s.gift.streak = 3;
+  for (const g of ['dress', 'nap', 'groom', 'sprout', 'bake', 'earn', 'yard', 'forage', 'friend', 'surface'] as const) markGoal(s, g);
   assert.equal(r.state.starter?.paid.length, 1);
   r = claimStarter(s, NOON);
   assert.equal(r.paid?.step, 2);
@@ -103,18 +102,48 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 2 } };
   s.toys = ['yarn'];
   s.collection = { pebble: 1 };
-  s.upgrades = ['meadow', 'plot2'];
-  s.bond = 35; // bond level 3
   const paid: number[] = [];
-  for (const step of [3, 4, 5]) {
+  for (const step of [3, 4]) {
     r = claimStarter(s, NOON);
     assert.equal(r.paid?.step, step);
     paid.push(r.paid!.clover);
     s = r.state;
   }
-  assert.deepEqual(paid, [120, 120, 200]);
+  // step five: the gift three times, the meadow with a piece that helps, a pinned goal
+  s.upgrades = ['meadow'];
+  s.meadow = ['stones'];
+  s.goal = 'decor:fireplace';
+  assert.equal(claimStarter(s, NOON).paid, null, 'the gift takes three days');
+  s.gift.streak = 3;
+  r = claimStarter(s, NOON);
+  paid.push(r.paid!.clover);
+  s = r.state;
+  // step six: a third patch, a garden upgrade and bond level 3
+  s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 3 } };
+  s.upgrades = ['meadow', 'plot2'];
+  s.bond = 35; // bond level 3
+  r = claimStarter(s, NOON);
+  paid.push(r.paid!.clover);
+  s = r.state;
+  assert.deepEqual(paid, [120, 120, 200, 250]);
   assert.equal(starterDone(s), true);
   assert.equal(starterReady(s), false);
+});
+
+test('getting started: no step before the last two waits on the calendar', () => {
+  const calendar = new Set(['streak3', 'bond3']);
+  for (const st of STARTER_STEPS.slice(0, -2)) assert.ok(st.goals.every((g) => !calendar.has(g)), `step ${st.step}`);
+});
+
+test('getting started: a meadow piece only for looks doesn\'t count, a pinned goal does', () => {
+  const s = pet();
+  s.meadow = [];
+  assert.equal(goalDone(s, 'meadowhelp'), false);
+  s.meadow = ['birdbath'];
+  assert.equal(goalDone(s, 'meadowhelp'), true);
+  assert.equal(goalDone(s, 'pin'), false);
+  s.goal = 'toy:kite';
+  assert.equal(goalDone(s, 'pin'), true);
 });
 
 test('her save keeps a bounded number of friendships: best friends, then the most recent', () => {

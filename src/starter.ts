@@ -1,9 +1,9 @@
-// Getting started (docs/rabbit-pets-economy.md §2.1): a checklist of five
-// steps of four goals, each paying a lump sum the player claims, and a free clover patch
+// Getting started (docs/rabbit-pets-economy.md §2.1): a checklist of six
+// steps, each paying a lump sum the player claims, and a free clover patch
 // for the first. Steps go in order and the next opens as soon as the last is
-// claimed. Some goals pace themselves (she has to be tired to nap, the gift
-// opens once a day, bond takes time). Anything done early counts when its
-// step opens. Pure, tested in economy.test.ts.
+// claimed. Some goals pace themselves (she has to be tired to nap, a crop
+// takes hours, the gift opens once a day, bond takes time). Anything done
+// early counts when its step opens. Pure, tested in economy.test.ts.
 
 import { bondLevel, earn } from './economy';
 import { hasUpgrade, soilLevel } from './extras';
@@ -11,33 +11,37 @@ import type { PetState } from './sim';
 import { countOf, giveBuilding } from './yard';
 
 export type StarterGoal =
-  | 'feed' | 'nap' | 'bed' | 'lantern' | 'dress'
-  | 'toy' | 'harvest' | 'bake' | 'forage'
-  | 'streak3' | 'yard' | 'patch2'
+  | 'feed' | 'bed' | 'toy' | 'lantern'
+  | 'dress' | 'nap' | 'groom' | 'sprout' | 'bake'
+  | 'earn' | 'yard' | 'patch2' | 'forage'
   | 'friend' | 'newtoy' | 'surface' | 'find'
-  | 'meadow' | 'meadowpiece' | 'gardenup'
-  | 'bond3';
+  | 'streak3' | 'meadow' | 'meadowhelp' | 'pin'
+  | 'patch3' | 'gardenup' | 'bond3';
 
 export const GOAL_TEXT: Record<StarterGoal, string> = {
   feed: 'Feed her',
-  nap: 'Put her down for a nap when she\'s tired',
   bed: 'Get her a bed from the Shop (try the Cloud cushion bed)',
+  toy: 'Play with her toy',
   lantern: 'Hang the honey lantern (it\'s waiting in storage)',
   dress: 'Dress her in an outfit',
-  toy: 'Play with her toy',
-  harvest: 'Harvest the garden',
+  nap: 'Put her down for a nap when she\'s tired',
+  groom: 'Brush her',
+  sprout: 'Grow clover sprouts in the garden and pick them',
   bake: 'Bake a treat',
-  forage: 'Send her out foraging',
-  streak3: 'Open the daily gift 3 times',
+  earn: 'Tap your clover to see the ways to earn more',
   yard: 'Collect clover from the yard',
   patch2: 'Build a second clover patch in the yard',
+  forage: 'Send her out foraging',
+  friend: 'Visit a friend, or share Rabbit Pets',
   newtoy: 'Get her a new toy from the Shop',
   surface: 'Get new wallpaper or a new floor from the Shop',
   find: 'Find something for her collection',
-  meadowpiece: 'Put something out in the meadow',
-  gardenup: 'Buy a garden upgrade',
-  friend: 'Visit a friend, or share Rabbit Pets',
+  streak3: 'Open the daily gift 3 times',
   meadow: 'Open the meadow, past the yard',
+  meadowhelp: 'Put out a meadow piece that helps the yard (try the stepping stones)',
+  pin: 'Pick something in the Shop to save up for',
+  patch3: 'Build a third clover patch (beehives and the shed come next)',
+  gardenup: 'Buy a garden upgrade',
   bond3: 'Reach bond level 3',
 };
 
@@ -47,15 +51,21 @@ export const STARTER_STEPS: StarterStep[] = [
   // Step one can all be done in the first sitting. The lantern comes free in
   // storage: hanging it teaches arranging the room.
   { step: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 100, patch: true },
-  // Something to do (dress her, with step one's clover) in the hour or more
-  // before a new rabbit is tired enough to nap.
-  { step: 2, goals: ['dress', 'nap', 'harvest', 'bake'], clover: 70 },
-  // The daily round: the gift takes three days, the rest fills them.
-  { step: 3, goals: ['streak3', 'yard', 'patch2', 'forage'], clover: 120 },
+  // The first day: something to do (dress her, with step one's clover) while
+  // she gets tired enough to nap, dusty enough to brush and sprouts grow (4 hours).
+  { step: 2, goals: ['dress', 'nap', 'groom', 'sprout', 'bake'], clover: 70 },
+  // Where clover comes from: the clover sheet, the yard and foraging. All of
+  // it can be done the same day: nothing here waits on the calendar.
+  { step: 3, goals: ['earn', 'yard', 'patch2', 'forage'], clover: 120 },
   // Spending on her and her room, and what foraging turns up.
   { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 120 },
-  // Saving up (about 850 clover in all) while the bond grows: about a week in.
-  { step: 5, goals: ['meadow', 'meadowpiece', 'gardenup', 'bond3'], clover: 200 },
+  // The daily round (the gift takes three days) and the meadow, with a piece
+  // that pays: about 700 clover of spending.
+  { step: 5, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 200 },
+  // The yard grows: the third patch opens beehives and the shed, which the
+  // goals after Getting started (goals.ts) take up. With bond level 3, about
+  // a week and a half in.
+  { step: 6, goals: ['patch3', 'gardenup', 'bond3'], clover: 250 },
 ];
 
 /** `paid` holds claimed step numbers (saves from the "starter week" hold the same numbers as days). */
@@ -88,9 +98,12 @@ export function goalDone(s: PetState, goal: StarterGoal): boolean {
   if (goal === 'streak3') return s.gift.streak >= 3;
   if (goal === 'bond3') return bondLevel(s.bond).level >= 3;
   if (goal === 'meadow') return hasUpgrade(s, 'meadow');
-  // what she has counts however she got it (the burrow's, the surface and the
-  // meadow piece, are marked by main.ts like the bed and the lantern)
+  // what she has counts however she got it (the burrow's, the bed, the
+  // lantern and the surface, are marked by main.ts)
   if (goal === 'patch2') return countOf(s, 'patch') >= 2;
+  if (goal === 'patch3') return countOf(s, 'patch') >= 3;
+  if (goal === 'meadowhelp') return (s.meadow ?? []).length > 0;
+  if (goal === 'pin') return !!s.goal || (c.pin ?? 0) > 0;
   if (goal === 'newtoy') return (s.toys ?? []).length > 0;
   if (goal === 'find') return Object.values(s.collection ?? {}).some((n) => n > 0);
   if (goal === 'gardenup') return soilLevel(s) > 0 || (['plot2', 'plot3', 'can', 'plot4', 'plot5'] as const).some((u) => hasUpgrade(s, u));

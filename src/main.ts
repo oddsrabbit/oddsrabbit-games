@@ -22,6 +22,7 @@ import {
 import { bestFriends, mutualFriends, nextFriendMilestone, rate, settleLumps, type Lump } from './economy';
 import { COLLECTION_SETS, setComplete } from './collectibles';
 import { claimStarter, GOAL_TEXT, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS, type StarterGoal, type StarterStep } from './starter';
+import { claimGoal, goalsAllDone, goalsReady, LATER_GOALS, laterDone, openGoals, type LaterGoalId } from './goals';
 import {
   BUILDING_IDS, BUILDINGS, buyBuilding, buyShed, capacity, collect, countOf, nextPrice, perHour, SHED_REQUIRES, shedPrice, storageHours, stored,
   unlocked as buildingUnlocked, meadowPerDay, setMeadow, type BuildingId,
@@ -48,7 +49,7 @@ import {
   FOOD_IDS, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
 } from './sim';
 import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
-import { BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, DAY_ROLLOVER_HOUR, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
+import { BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
 import { dayKey, localParts } from './localtime';
 import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherName, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
 
@@ -287,7 +288,6 @@ function markBurrowGoals(): boolean {
     ['bed', () => hasBed(burrow)],
     ['lantern', () => hasLantern(burrow)],
     ['surface', () => surfacesOf(burrow).owned.some((id) => { const k = surfaceById(id)?.kind; return k === 'wall' || k === 'floor'; })],
-    ['meadowpiece', () => meadowItems(burrow).length > 0],
   ];
   let marked = false;
   for (const [g, ok] of has) if (!goalDone(pet, g) && ok()) { markGoal(pet, g); marked = true; }
@@ -300,8 +300,16 @@ function markBurrowGoals(): boolean {
  * home from foraging), checked every tick.
  */
 let starterWasReady = false;
+/** How many later goals were ready to claim, last we looked: a new one gets a toast. */
+let laterWereReady = 0;
 function watchGoals(): void {
-  if (!pet || starterDone(pet)) return;
+  if (!pet) return;
+  if (starterDone(pet)) {
+    const ready = goalsReady(pet).length;
+    if (ready > laterWereReady) window.setTimeout(() => toast('A goal is done! Claim your reward.', () => play('gift')), 700);
+    laterWereReady = ready;
+    return;
+  }
   if (markBurrowGoals()) savePet();
   const ready = starterReady(pet);
   if (ready && !starterWasReady) {
@@ -320,6 +328,25 @@ function claimStep(): void {
   play('gift');
   toast(`+${d.clover} clover${d.patch ? ' and a clover patch for the yard' : ''}!`);
   note(`Getting started: step ${d.step} done.`, 'clover', `starter:${d.step}`);
+  // the goals after it open now: ones already done wait quietly to be claimed
+  if (starterDone(pet)) {
+    laterWereReady = goalsReady(pet).length;
+    note(`All settled in with ${pet.name}. Bigger goals from here on.`, 'star', 'starter:done');
+  }
+  render();
+}
+
+/** Pay a later goal's reward; the next goal opens in its place. */
+function claimLater(id: LaterGoalId): void {
+  const r = claimGoal(pet, id);
+  if (!r) return;
+  pet = r.state;
+  laterWereReady = goalsReady(pet).length;
+  savePet();
+  play('gift');
+  toast(`+${r.clover} clover!`);
+  const text = LATER_GOALS.find((g) => g.id === id)!.text;
+  note(`Goal done: ${text.charAt(0).toLowerCase()}${text.slice(1)}.`, 'clover', `goal:${id}`);
   render();
 }
 
@@ -618,6 +645,7 @@ function startGame(returning: boolean): void {
   buildBurrowScreen();
   // a step already waiting when she's opened isn't news (its chip says so)
   starterWasReady = starterReady(pet);
+  laterWereReady = goalsReady(pet).length;
   catchUp(returning);
   // the lantern to hang: the header's Arrange gives a little bounce, once a visit, to show where arranging is
   if (!starterDone(pet) && starterStep(pet) === 1 && !goalDone(pet, 'lantern')) {
@@ -712,7 +740,7 @@ function buildBurrowScreen(): void {
     h('header', { class: 'hud' },
       h('div', { class: 'hud-top' },
         who,
-        h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover), arrange, sound),
+        cloverChip(clover), arrange, sound),
       h('div', { class: 'needs' }, ...needEls),
       goalBar),
     stage,
@@ -869,7 +897,7 @@ function buildPage(): Ui['page'] {
     h('div', { class: 'hud-top' },
       h('div', { class: 'who' }, title, sub),
       action,
-      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
+      cloverChip(clover)));
   return { nodes: [header, body], title, sub, action, clover, body };
 }
 
@@ -1482,7 +1510,11 @@ function render(): void {
   }
   const events = holiday ? [] : activeEvents(n, tz);
   const starter = starterDone(pet) ? null : starterView(pet).find((d) => d.status === 'open');
-  const cardSig = [...events.map((e) => `${e.id}:${daysLeft(e, n, tz)}:${e.raffle && !prizeWon(pet, e) ? 'r' : ''}`), starter ? `s${starter.step.step}:${starter.done.filter(Boolean).length}` : ''].join('|');
+  // after Getting started, the goals that follow it: the nearest open one, or what's ready
+  const later = starterDone(pet) ? openGoals(pet) : [];
+  const laterReady = later.filter((g) => laterDone(pet, g));
+  const laterSig = later.length ? `g${later.map((g) => `${g.id}:${g.progress(pet).join('/')}`).join(',')}` : '';
+  const cardSig = [...events.map((e) => `${e.id}:${daysLeft(e, n, tz)}:${e.raffle && !prizeWon(pet, e) ? 'r' : ''}`), starter ? `s${starter.step.step}:${starter.done.filter(Boolean).length}` : '', laterSig].join('|');
   if (cardsBox.dataset.sig !== cardSig) {
     cardsBox.dataset.sig = cardSig;
     const cards = events.map((e) => {
@@ -1514,6 +1546,24 @@ function render(): void {
           ? h('span', { class: 'event-card-sub', text: `Claim +${clover} clover` })
           : h('span', { class: 'event-card-sub' }, `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))));
       card.addEventListener('click', () => openStarter());
+      cards.push(card);
+    }
+    if (later.length) {
+      const ready = laterReady.length > 0;
+      const sum = laterReady.reduce((t, g) => t + g.clover, 0);
+      const next = later[0]!;
+      const [have, need] = next.progress(pet);
+      const card = h('button', {
+        class: `event-card starter-card-btn${ready ? ' claim' : ''}`, type: 'button',
+        'aria-label': ready ? `${laterReady.length === 1 ? 'A goal is' : `${laterReady.length} goals are`} done. Claim ${sum} clover` : `Next goal: ${next.text}, ${have} of ${need}, for ${next.clover} clover`,
+      },
+      img(itemSprite(ready ? 'clover' : 'star'), 2),
+      h('span', { class: 'event-card-text' },
+        h('span', { class: 'event-card-name', text: ready ? (laterReady.length === 1 ? 'Goal done!' : `${laterReady.length} goals done!`) : 'Next goal' }),
+        ready
+          ? h('span', { class: 'event-card-sub', text: `Claim +${sum} clover` })
+          : h('span', { class: 'event-card-sub' }, need > 1 ? `${Math.min(have, need)}/${need} · ` : '', h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(next.clover)))));
+      card.addEventListener('click', () => openLaterGoals());
       cards.push(card);
     }
     cardsBox.replaceChildren(...cards);
@@ -1586,6 +1636,9 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
   const t = performance.now();
   if (a === 'bake' && pet.treats >= 3) { toast('The pantry is full. Feed her a treat first.'); return; }
   if (away()) { play('nope'); toast(`${pet.name} is on holiday.`); return; }
+  // replay any steps she's behind first: act() judges her as she is now, so an
+  // old copy could send her out when she'd really have dozed off by then
+  tick();
   const bondBefore = bondLevel(pet.bond).level;
   const r = act(pet, a, now(), tz, opts);
   if (!r.ok) { play('nope'); toast(REFUSAL[r.reason] ?? 'Not right now.'); return; }
@@ -1597,7 +1650,7 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
   if (a !== 'gift' && a !== 'nap' && a !== 'wake' && a !== 'bake' && a !== 'forage' && a !== 'recall') play(a);
   if (a === 'feed' || a === 'pet' || a === 'play' || a === 'clean') careClover(r.clover, r.bond);
   payLumps(r.lumps);
-  const goals: Partial<Record<Action, StarterGoal>> = { feed: 'feed', nap: 'nap', bake: 'bake', play: 'toy', forage: 'forage' };
+  const goals: Partial<Record<Action, StarterGoal>> = { feed: 'feed', nap: 'nap', bake: 'bake', play: 'toy', clean: 'groom', forage: 'forage' };
   const g = goals[a];
   // settles too: care can finish a goal on its own (bond level 3)
   goal(g);
@@ -2288,6 +2341,7 @@ function goalInfo(key: string | null | undefined): { name: string; price: number
 function toggleGoal(key: string, name: string): void {
   pet = { ...pet, goal: pet.goal === key ? null : key };
   savePet();
+  if (pet.goal) goal('pin');
   toast(pet.goal ? `Saving up for the ${name.toLowerCase()}. It shows under your clover.` : 'Goal unpinned.');
   play('flip');
   render();
@@ -2486,7 +2540,7 @@ function buildShopScreen(): ShopUi {
   const header = h('header', { class: 'hud page-hud' },
     h('div', { class: 'hud-top' },
       h('div', { class: 'who' }, h('div', { class: 'name', text: 'Shop' }), sub),
-      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
+      cloverChip(clover)));
   const top = h('div', { class: 'shop-top' }, h('nav', { class: 'seg shop-cats', 'aria-label': 'Shop sections' }, ...SHOP_CATS.map((c) => cats[c])), display);
   return { nodes: [header, top, grid], sub, clover, cats, display, grid };
 }
@@ -2582,7 +2636,8 @@ function buyOrSave(it: ShopItem, buy: () => void): HTMLButtonElement[] {
   }
   if (it.state === 'saving') {
     const pinned = pet.goal === it.key;
-    return [button(pinned ? 'Stop saving for it' : 'Save up for it', pinned ? 'btn' : 'btn primary', () => { toggleGoal(it.key, it.name); shopSig = ''; renderShop(); })];
+    return [button(pinned ? 'Stop saving for it' : 'Save up for it', pinned ? 'btn' : 'btn primary', () => { toggleGoal(it.key, it.name); shopSig = ''; renderShop(); }),
+      button('How to get more', 'btn', () => openCloverSheet())];
   }
   return [];
 }
@@ -3034,7 +3089,7 @@ function buildGardenScreen(): GardenUi {
   const header = h('header', { class: 'hud' },
     h('div', { class: 'hud-top' },
       h('div', { class: 'who' }, title, sub),
-      h('div', { class: 'chip', 'aria-label': 'Clover' }, img(itemSprite('clover'), 2), clover)));
+      cloverChip(clover)));
   const panel = h('section', { class: 'panel' }, moodline, acts);
   // its label turns into the countdown while she's out; tap it then to call her home
   const forage = actButton('Forage', 'basket', () => openForage());
@@ -3229,7 +3284,7 @@ function pickPlot(i: number): boolean {
     : cropYield(pet, 'golden') > 1 ? 'Two golden carrots, in the pantry. She always loves these.' : 'A golden carrot, in the pantry. She always loves these.';
   toast(`Picked! ${got}`);
   note(`First ${CROPS[r.crop].name.toLowerCase()} from the garden.`, CROP_ART[r.crop], `harvest:${r.crop}`);
-  goal('harvest');
+  if (r.crop === 'sprout') goal('sprout');
   queueReconcile();
   renderGarden();
   return true;
@@ -3718,6 +3773,97 @@ function moreClover(price: number): string {
   return `${price - pet.clover} more clover to go.`;
 }
 
+/** The clover count in a header: a button, to how to get more. */
+function cloverChip(count: HTMLElement): HTMLButtonElement {
+  const b = h('button', { class: 'chip clover-chip', type: 'button', 'aria-description': 'How to get more clover' }, img(itemSprite('clover'), 2, 'Clover'), count);
+  b.addEventListener('click', () => openCloverSheet());
+  return b;
+}
+
+/**
+ * Tapping the clover count: what's ready to collect now (with a way there),
+ * what boosts her clover and by how much, and every way to earn it, with the
+ * game's real numbers. There's no buying clover: it's all earned.
+ */
+function openCloverSheet(): void {
+  goal('earn');
+  openSheet((close) => {
+    const n = now();
+    const go = (fn: () => void) => () => { close(); fn(); };
+    type Ready = [ItemArt, string, string, HTMLButtonElement];
+    const ready: Ready[] = [];
+    const holiday = away();
+    // her gift: what it pays today, as earn() will (the streak, the rate, Supporter)
+    if (giftReady(pet, n, tz) && !holiday) {
+      const base = Math.min(CLOVER.giftMax, CLOVER.giftBase + CLOVER.giftStep * pet.gift.streak);
+      const amt = Math.floor(base * rate(pet).total * (pet.supporter ? SUPPORTER_BONUS : 1));
+      const b = button('Open', 'btn small primary', () => { doAction('gift'); b.disabled = true; b.textContent = 'Opened'; });
+      ready.push(['gift', 'Her daily gift', `About +${amt} today`, b]);
+    }
+    const inYard = Math.floor(stored(pet, n));
+    if (inYard >= 1) ready.push(['clover', `${inYard} waiting in the yard`, 'Collect it in the garden', button('Go', 'btn small', go(() => { goTab('garden'); goArea('yard'); }))]);
+    const ripe = plots(pet).filter((p) => p && p.readyAtMs <= n).length;
+    if (ripe) ready.push(['strawberry', ripe === 1 ? 'A crop is ready' : `${ripe} crops are ready`, 'Pick them in the garden', button('Go', 'btn small', go(() => { goTab('garden'); goArea('patch'); }))]);
+    if (!holiday && !isOut(pet, n) && !isAsleep(pet, n) && pet.needs.energy >= FORAGE.minEnergy) {
+      ready.push(['basket', 'She can go foraging', 'She brings home clover and finds', button('Go', 'btn small', go(() => { goTab('garden'); openForage(); }))]);
+    }
+    const careLeft = BOND_DAILY_CAP - pet.bondToday;
+    if (!holiday && careLeft > 0) ready.push(['heart', 'Look after her', `${careLeft} more today pay +${CLOVER.perCare} each`, button('Go', 'btn small', go(() => goTab('burrow')))]);
+    if (socialOn() && paidVisitsLeft() > 0) ready.push(['carrot', 'Visit a friend', `${paidVisitsLeft()} more today pay +${visitPay(pet)} each`, button('Go', 'btn small', go(() => goTab('friends')))]);
+    if (starterReady(pet)) {
+      const step = STARTER_STEPS.find((s) => s.step === starterStep(pet))!;
+      ready.push(['star', 'Getting started', `Step ${step.step} is done: +${step.clover} to claim`, button('Claim', 'btn small primary', go(() => openStarter()))]);
+    }
+    const goalsDone = goalsReady(pet);
+    if (goalsDone.length) {
+      const sum = goalsDone.reduce((t, g) => t + g.clover, 0);
+      ready.push(['star', goalsDone.length === 1 ? 'A goal is done' : `${goalsDone.length} goals are done`, `+${sum} to claim`, button('Claim', 'btn small primary', go(() => openLaterGoals()))]);
+    }
+
+    const row = (art: ItemArt, nm: string, sub: string, end?: Node) => h('li', {},
+      h('span', { class: 'ico' }, img(itemSprite(art), fitScale(itemSprite(art), 28))),
+      h('span', { class: 'txt' }, h('span', { class: 'nm', text: nm }), h('span', { class: 'sub', text: sub })), end ?? null);
+
+    // what boosts it: the same sum rate() makes, part by part
+    const r = rate(pet);
+    const pct = (x: number) => `+${Math.round(x * 100)}%`;
+    const boosts: [ItemArt, string, string][] = [];
+    if (r.bond) boosts.push(['heart', `Bond level ${bondLevel(pet.bond).level}`, pct(r.bond)]);
+    if (r.sets) boosts.push(['marble', 'Collection sets', pct(r.sets)]);
+    if (r.friends) boosts.push(['gift', `${bestFriends(pet)} best ${bestFriends(pet) === 1 ? 'friend' : 'friends'}`, pct(r.friends)]);
+    if (pet.supporter) boosts.push(['star', 'Supporter', `+${Math.round((SUPPORTER_BONUS - 1) * 100)}% on everything`]);
+
+    const ways: [ItemArt, string, string][] = [
+      ['heart', 'Look after her', `Feed, pet, play and clean: +${CLOVER.perCare} clover each, the first ${BOND_DAILY_CAP} times a day.`],
+      ['gift', 'Her daily gift', `${CLOVER.giftBase} clover, +${CLOVER.giftStep} for each day of your streak, up to ${CLOVER.giftMax}. Streak milestones pay extra.`],
+      ['clover', 'The yard', 'Clover patches, beehives and mushroom logs make clover every hour, even while you’re away.'],
+      ['strawberry', 'The garden', `Clover sprouts grow into ${SPROUT_CLOVER} clover or more (richer soil adds to it).`],
+      ['basket', 'Foraging', 'Send her out for a few hours: she brings home clover, strawberries and finds.'],
+      ['carrot', 'Friends', `+${visitPay(pet)} when you visit a friend, and when one visits you. More friends pay bonuses.`],
+      ['marble', 'Finds and sets', 'Finishing a set in her collection raises all the clover she earns.'],
+      ['star', 'Her bond', 'Each new bond level pays a bonus, and raises the clover she earns.'],
+    ];
+
+    return [
+      closeX(close),
+      h('div', { class: 'eyebrow', text: 'Clover' }),
+      h('h2', {}, img(itemSprite('clover'), 2), ` ${pet.clover.toLocaleString()}`),
+      h('h3', { class: 'sheet-h', text: 'Ready now' }),
+      ready.length
+        ? h('ul', { class: 'list perks clover-ready' }, ...ready.map(([art, nm, sub, b]) => row(art, nm, sub, b)))
+        : h('p', { class: 'note', text: holiday ? `${pet.name} is on holiday: clover waits until she's home.` : 'Nothing to collect right now. Her gift is back tomorrow, and the yard keeps filling.' }),
+      h('h3', { class: 'sheet-h', text: boosts.length ? `Your clover rate: ${pct(r.total - 1)}` : 'Your clover rate' }),
+      boosts.length ? h('ul', { class: 'list perks' }, ...boosts.map(([art, nm, sub]) => row(art, nm, sub))) : null,
+      h('p', { class: 'note', text: boosts.length
+        ? 'It boosts clover from looking after her, her gift, finds, foraging and wild visitors.'
+        : 'Bond levels, collection sets and best friends each raise the clover she earns from care, her gift, finds, foraging and wild visitors.' }),
+      h('h3', { class: 'sheet-h', text: 'Ways to earn' }),
+      h('ul', { class: 'list perks' }, ...ways.map(([art, nm, sub]) => row(art, nm, sub))),
+      h('div', { class: 'actions-col' }, button('Done', 'btn primary', close)),
+    ].filter((x): x is HTMLElement => !!x);
+  });
+}
+
 /** Extras for a shop row: its art, a progress line of pips, a key other rows can point to, and what a locked row waits on. */
 interface RowOpts { art?: ItemArt; pips?: [number, number]; key?: string; need?: { text: string; key: string } }
 
@@ -3982,12 +4128,15 @@ function goalShortcut(g: StarterGoal): (() => void) | null {
     };
     case 'dress': return () => openShop({ cat: 'wardrobe' });
     case 'toy': return onBurrow(() => ui.acts.play);
-    case 'harvest': return inGarden('patch');
+    case 'groom': return onBurrow(() => ui.acts.clean);
+    case 'sprout': return inGarden('patch');
+    case 'earn': return () => openCloverSheet();
+    case 'pin': return () => openShop();
     case 'forage': return () => { goTab('garden'); if (!isOut(pet, now())) openForage(); };
     case 'yard': return inGarden('yard');
-    case 'patch2': return inGarden('yard');
+    case 'patch2': case 'patch3': return inGarden('yard');
     case 'meadow': return inGarden('meadow');
-    case 'meadowpiece': return () => { goTab('garden'); goArea('meadow'); if (!gated('meadow')) openMeadowShop(); };
+    case 'meadowhelp': return () => { goTab('garden'); goArea('meadow'); if (!gated('meadow')) openMeadowShop(); };
     case 'gardenup': return () => { goTab('garden'); openGardenUpgrades('garden'); };
     case 'newtoy': return () => openShop({ cat: 'toys' });
     case 'surface': return () => openShop({ cat: 'walls' });
@@ -4002,6 +4151,14 @@ function goalShortcut(g: StarterGoal): (() => void) | null {
 function goalHint(g: StarterGoal): string | null {
   switch (g) {
     case 'nap': return isAsleep(pet, now()) || pet.needs.energy < CARE.napBelowEnergy ? null : "She isn't tired yet";
+    case 'groom': return pet.needs.clean < CARE.full ? null : "She's still clean";
+    case 'sprout': {
+      const n = now();
+      const growing = plots(pet).filter((p): p is NonNullable<typeof p> => p?.crop === 'sprout');
+      if (growing.some((p) => p.readyAtMs <= n)) return 'Ready to pick';
+      if (growing.length) return `Ready in ${fmtDuration(Math.min(...growing.map((p) => p.readyAtMs)) - n)}`;
+      return `They grow in ${fmtDuration(growMs(pet, 'sprout'))}: plant them and come back`;
+    }
     case 'forage': return isOut(pet, now()) || pet.needs.energy >= FORAGE.minEnergy ? null : 'She needs a rest first';
     case 'find': return isOut(pet, now()) ? 'She might bring one home' : 'Foraging turns things up';
     case 'streak3': return `${Math.min(pet.gift.streak, 3)} of 3`;
@@ -4152,8 +4309,54 @@ function openStarter(): void {
       h('div', { class: 'starter-dots' }, ...dots),
     ];
     if (!starterDone(pet)) out.push(h('p', { class: 'note', text: 'Claim a step and the next one slides in. Anything you do early still counts.' }));
-    out.push(h('div', { class: 'actions-col' }, button('Close', 'btn', close)));
+    out.push(h('div', { class: 'actions-col' },
+      starterDone(pet) ? button('See your next goals', 'btn primary', () => { close(); openLaterGoals(); }) : button('Ways to earn clover', 'btn', () => { close(); openCloverSheet(); }),
+      button('Close', 'btn', close)));
     return out;
+  });
+}
+
+/** Where to go for a later goal, for its "Show me". */
+function laterShortcut(id: LaterGoalId): (() => void) | null {
+  const inGarden = (a: AreaId) => () => { goTab('garden'); goArea(a); };
+  switch (id) {
+    case 'hive': case 'patch5': case 'shed': case 'hive3': case 'hive5': case 'log': return inGarden('yard');
+    case 'soil2': return () => { goTab('garden'); openGardenUpgrades('garden'); };
+    case 'hivehelp': return () => { goTab('garden'); goArea('meadow'); if (!gated('meadow')) openMeadowShop(); };
+    case 'set': return () => { goTab('garden'); if (!isOut(pet, now())) openForage(); };
+    case 'bestfriend': return () => goTab('friends');
+  }
+}
+
+/**
+ * The goals after Getting started: the open few, each with how far along it
+ * is and a Claim once it's done. Claiming one opens the next in its place.
+ */
+function openLaterGoals(): void {
+  openLiveSheet((close, redraw) => {
+    const open = openGoals(pet);
+    const rows = open.map((g) => {
+      const [have, need] = g.progress(pet);
+      const done = have >= need;
+      const end = done
+        ? button(`Claim +${g.clover}`, 'btn small primary', () => { claimLater(g.id); redraw(); })
+        : (() => { const go = laterShortcut(g.id); return go ? button('Show me', 'btn small', () => { close(); go(); }) : null; })();
+      return h('li', { class: done ? 'done' : '' },
+        h('span', { class: 'txt' },
+          h('span', { class: 'nm' }, `${done ? '✓' : '○'} ${g.text}`, need > 1 && !done ? h('span', { class: 'hint', text: ` · ${have} of ${need}` }) : null),
+          h('span', { class: 'sub' }, g.how, ' ', h('span', { class: 'prize' }, img(itemSprite('clover'), 1), `+${g.clover}`))),
+        end);
+    });
+    return [
+      closeX(close),
+      h('div', { class: 'eyebrow', text: 'Goals' }),
+      h('h2', { text: goalsAllDone(pet) ? 'Every goal done!' : `Growing with ${pet.name}` }),
+      rows.length
+        ? h('ul', { class: 'list perks goals-list' }, ...rows)
+        : h('p', { class: 'note', text: 'You’ve done them all. New goals come with updates.' }),
+      rows.length ? h('p', { class: 'note', text: 'Claim one and the next opens. Anything you do early still counts.' }) : null,
+      h('div', { class: 'actions-col' }, button('Ways to earn clover', 'btn', () => { close(); openCloverSheet(); }), button('Close', 'btn', close)),
+    ].filter((x): x is HTMLElement => !!x);
   });
 }
 
@@ -4956,9 +5159,11 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
   const back = button('Back', 'btn', () => leave());
   back.setAttribute('aria-label', 'Back home');
   const holiday = !!d.vacationUntilMs && d.vacationUntilMs > now();
+  const outNow = (n: number) => !!d.outUntilMs && d.outUntilMs > n;
   const needs = friendNeeds(d, now());
   const hint = holiday ? null : careHint(needs);
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite', text: holiday ? `${d.name} is away on holiday.`
+    : outNow(now()) ? `${d.name} is out foraging. Pick something to leave for her.`
     : hint ? `${d.name}'s ${hint.word}. Pick something to do for her.` : `${d.name} is happy to have a visitor. Pick something to do for her.` });
   setLine(moodline, moodline.textContent ?? '');
   // How she is, from their snapshot: the one place a visitor sees it.
@@ -5120,11 +5325,13 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     lastT = t;
     const n = now();
     const w = today(n);
-    const asleep = !!d.napEndsAtMs && d.napEndsAtMs > n;
+    // out foraging, she isn't home to nap
+    const out = outNow(n);
+    const asleep = !out && !!d.napEndsAtMs && d.napEndsAtMs > n;
     if (view === 'garden' && gscene && gardenPet) {
       gscene.draw({
         pet: gardenPet, nowMs: n, area: garea, season: w.season, weather: w.weather, night: isNight(n, tz), moon: moonPhase(n),
-        coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears }, asleep, absent: holiday, meadowOpen: !!d.garden?.meadow,
+        coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears }, asleep, absent: holiday || out, meadowOpen: !!d.garden?.meadow,
         items: (d.garden?.meadow ?? []).map((it, i) => ({ uid: `m${i}`, ...it, placed: true })), selected: null, guest: true,
       }, t);
       nudgeGarden(gcanvas, gscene, gscale);
@@ -5132,7 +5339,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     }
     const r = view === 'garden' ? 'main' : view;
     sc.draw({ coat: d.coat, night: isNight(n, tz), mood: asleep ? 'asleep' : 'content', burrow: guestRooms[r] ?? guestRooms.main!, decorating: false, selected: null,
-      dress: { head: d.head, neck: d.neck, ears: d.ears }, season: w.season, weather: w.weather, guest: true, absent: holiday,
+      dress: { head: d.head, neck: d.neck, ears: d.ears }, season: w.season, weather: w.weather, guest: true, absent: holiday || out,
       room: { wall: d.wall ?? 'plainwall', floor: d.floor ?? 'plainfloor', window: d.window ?? 'roundwindow', ...(r !== 'main' ? { variant: r } : {}) }, moon: moonPhase(n), time: clockTime(n) }, t);
   };
   raf = requestAnimationFrame(loop);
@@ -5463,7 +5670,8 @@ function renderFriendsPage(): void {
       const doors = [...info].sort((a, b) => a.rank - b.rank || Number(b.p >= best) - Number(a.p >= best) || b.p - a.p).slice(0, 8);
       out.push(lane([...doors.map((x): LaneDoor => {
         const d = x.f.data;
-        const asleep = !!d.napEndsAtMs && d.napEndsAtMs > n;
+        const out = !!d.outUntilMs && d.outUntilMs > n;
+        const asleep = !out && !!d.napEndsAtMs && d.napEndsAtMs > n;
         return { d, label: d.name.toUpperCase().slice(0, 8), lit: x.visited, parcel: x.sent, best: x.p >= best,
           badge: x.rank === 0 ? 'Visit back' : asleep ? 'zzz' : undefined,
           aria: `Visit ${d.name}${x.visited ? ', visited today' : ''}${x.sent ? ', gift sent' : ''}${x.p >= best ? ', best friends' : ''}`,
@@ -5552,12 +5760,14 @@ function renderFriendsPage(): void {
   function friendCard(x: Info): HTMLElement {
     const d = x.f.data;
     const holiday = !!d.vacationUntilMs && d.vacationUntilMs > n;
-    const asleep = !!d.napEndsAtMs && d.napEndsAtMs > n;
+    const out = !!d.outUntilMs && d.outUntilMs > n;
+    const asleep = !out && !!d.napEndsAtMs && d.napEndsAtMs > n;
     const hint = holiday ? null : careHint(friendNeeds(d, n));
     const flag = x.came ? h('span', { class: 'flag back', text: 'Visited you today' })
       : x.p >= best ? h('span', { class: 'flag best', text: 'Best friends' })
         : best - x.p <= 5 ? h('span', { class: 'flag best', text: `${best - x.p} ${best - x.p === 1 ? 'day' : 'days'} to best friends` })
           : holiday ? h('span', { class: 'flag', text: 'On holiday' })
+            : out ? h('span', { class: 'flag', text: 'Out foraging' })
             : asleep ? h('span', { class: 'flag', text: 'Napping' }) : null;
     return h('li', { class: 'fcard', 'data-friend': x.f.uuid },
       h('span', { class: 'hd' }, friendFace(d),

@@ -9,3 +9,5 @@ __pycache__/
 *.tsbuildinfo
 .idea/
 .vscode/
+promo/out/
+promo/.promo/

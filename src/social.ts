@@ -13,6 +13,7 @@ import { dayKey, isNewDay } from './localtime';
 import { CROPS, hasUpgrade, onVacation, outfitById, plots, type CropId } from './extras';
 import { BUILDING_IDS, BUILDINGS, countOf, yardOf, type BuildingId } from './yard';
 import { widgetSprites, type WidgetSprites } from './widgetSprites';
+import { trip } from './forage';
 import { COLLECTIBLES, COLLECTION_SETS, setComplete, type Collectible, type CollectionSet } from './collectibles';
 
 /** Widget and friends' view of a rabbit. Field names are a contract with the widget; add, don't rename. */
@@ -25,6 +26,8 @@ export interface ShowcaseData {
   needs: Needs;
   simAtMs: number;
   napEndsAtMs: number | null;
+  /** Home from foraging at; null when she's in. Missing from older snapshots. */
+  outUntilMs?: number | null;
   vacationUntilMs: number | null;
   daysVisited: number;
   bondLevel: number;
@@ -140,6 +143,7 @@ export function buildShowcase(pet: PetState, burrow: BurrowState): ShowcaseData 
     needs: { hunger: round(pet.needs.hunger), happy: round(pet.needs.happy), energy: round(pet.needs.energy), clean: round(pet.needs.clean) },
     simAtMs: pet.simAtMs,
     napEndsAtMs: nap ? nap.endsAtMs : null,
+    outUntilMs: trip(pet)?.endsAtMs ?? null,
     vacationUntilMs: pet.vacationUntilMs ?? null,
     daysVisited: pet.daysVisited,
     bondLevel: bondLevel(pet.bond).level,
@@ -190,6 +194,7 @@ export function readShowcase(raw: unknown): ShowcaseData | null {
     needs: { hunger: num(n.hunger, 0, 100, 70), happy: num(n.happy, 0, 100, 70), energy: num(n.energy, 0, 100, 70), clean: num(n.clean, 0, 100, 70) },
     simAtMs: num(d.simAtMs, 0, 8.64e15, 0),
     napEndsAtMs: d.napEndsAtMs == null ? null : num(d.napEndsAtMs, 0, 8.64e15, 0),
+    outUntilMs: d.outUntilMs == null ? null : num(d.outUntilMs, 0, 8.64e15, 0),
     vacationUntilMs: d.vacationUntilMs == null ? null : num(d.vacationUntilMs, 0, 8.64e15, 0),
     daysVisited: Math.round(num(d.daysVisited, 1, 100_000, 1)),
     bondLevel: Math.round(num(d.bondLevel, 1, 99, 1)),

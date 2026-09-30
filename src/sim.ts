@@ -367,10 +367,15 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
 
   switch (action) {
     case 'forage': {
+      // one trip at a time: a finished one waits for its step to bring her
+      // home (and trip() only ever sees the first, so a second would hide)
+      if (trip(state)) return { ok: false, reason: 'out' };
       if (asleep) return { ok: false, reason: 'asleep' };
       if (n.energy < FORAGE.minEnergy) return { ok: false, reason: 'tooTired' };
       const hours = (FORAGE.hours as readonly number[]).includes(opts.hours ?? 0) ? opts.hours! : FORAGE.hours[0];
-      state.timers.push({ kind: 'forage', startedAtMs: nowMs, endsAtMs: nowMs + hours * 3_600_000 });
+      // home on a step, the one that brings her home: ending between steps,
+      // she'd look home before she was
+      state.timers.push({ kind: 'forage', startedAtMs: nowMs, endsAtMs: Math.ceil((nowMs + hours * HOUR_MS) / STEP_MS) * STEP_MS });
       return { ok: true, state, clover: 0, bond: 0 };
     }
     case 'recall': {
@@ -432,9 +437,13 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
     }
     case 'nap': {
       // Bedtime, at any hour: she sleeps until she's rested.
-      if (asleep) return { ok: false, reason: 'asleep' };
+      // one sleep at a time, as with trips: a finished one waits for its step
+      if (asleep || timer(state, 'nap')) return { ok: false, reason: 'asleep' };
       if (n.energy >= CARE.napBelowEnergy) return { ok: false, reason: 'notTired' };
-      state.timers.push({ kind: 'nap', startedAtMs: nowMs, endsAtMs: nowMs + sleepMs(n.energy) });
+      // she wakes on a step, the one that finishes her sleep: ending between
+      // steps, she'd look awake (and could be sent foraging) before it did
+      const wakeAt = nowMs + sleepMs(n.energy);
+      state.timers.push({ kind: 'nap', startedAtMs: nowMs, endsAtMs: Math.ceil(wakeAt / STEP_MS) * STEP_MS });
       return { ok: true, state, clover: 0, bond: 0 };
     }
     case 'wake': {

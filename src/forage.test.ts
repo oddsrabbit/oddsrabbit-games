@@ -4,7 +4,7 @@ import test from 'node:test';
 import { isOut, tripLoot } from './forage';
 import { act, advance, newPet, type PetState } from './sim';
 import { desiredReminders } from './reminders';
-import { DECAY_AWAKE, FORAGE, HOUR_MS } from './tuning';
+import { DECAY_AWAKE, FORAGE, HOUR_MS, STEP_MS } from './tuning';
 
 const UTC = 'UTC';
 // a day with no seasonal event, so finds come from the everyday pools
@@ -50,6 +50,46 @@ test("she won't go asleep or worn out, and doesn't doze off while she's out", ()
   assert.equal(later.timers.some((t) => t.kind === 'nap'), false, 'no nap timer out in the woods');
   const home = advance(later, NOON + 8 * HOUR_MS + 20 * 60_000, UTC).state;
   assert.equal(home.timers.some((t) => t.kind === 'nap'), true, 'home and worn out, she dozes off');
+});
+
+test("put to bed off the step, she's asleep until the step that wakes her, so she can't slip out first", () => {
+  const s = pet();
+  s.needs.energy = 60;
+  const bed = ok(act(s, 'nap', NOON + 3 * 60_000, UTC)).state;
+  const nap = bed.timers.find((t) => t.kind === 'nap')!;
+  assert.equal(nap.endsAtMs % STEP_MS, 0, 'she wakes on a step');
+  // any moment before the step that finishes her sleep, she's still asleep
+  const before = advance(bed, nap.endsAtMs - 1, UTC).state;
+  assert.deepEqual(act(before, 'forage', nap.endsAtMs - 1, UTC, { hours: 4 }), { ok: false, reason: 'asleep' });
+  // once it's run, she's rested and can go, and no waking-up news follows her out
+  const up = advance(bed, nap.endsAtMs, UTC).state;
+  const out = ok(act(up, 'forage', nap.endsAtMs + 60_000, UTC, { hours: 4 })).state;
+  const { events } = advance(out, nap.endsAtMs + 3 * STEP_MS, UTC);
+  assert.deepEqual(events.filter((e) => e.kind === 'napDone' || e.kind === 'wokeUp' || e.kind === 'fellAsleep'), []);
+});
+
+test("back from one trip, she can't be sent on a second, or put to bed, before the first has brought her home", () => {
+  const s = pet();
+  s.needs.energy = 90;
+  const out = ok(act(s, 'forage', NOON + 3 * 60_000, UTC, { hours: 2 })).state;
+  const tr = out.timers.find((t) => t.kind === 'forage')!;
+  assert.equal(tr.endsAtMs % STEP_MS, 0, 'she comes home on a step');
+  assert.ok(tr.endsAtMs >= NOON + 3 * 60_000 + 2 * HOUR_MS, 'no shorter than the trip she was sent on');
+  // just before that step she's still out, whatever she's asked to do
+  const before = advance(out, tr.endsAtMs - 1, UTC).state;
+  assert.equal(isOut(before, tr.endsAtMs - 1), true);
+  // a save from before trips ended on a step: the trip is over but its step hasn't come
+  const old = structuredClone(before);
+  old.timers = [{ kind: 'forage', startedAtMs: NOON + 3 * 60_000, endsAtMs: NOON + 2 * HOUR_MS + 3 * 60_000 }];
+  const at = NOON + 2 * HOUR_MS + 4 * 60_000;
+  assert.equal(isOut(old, at), false);
+  assert.deepEqual(act(old, 'forage', at, UTC, { hours: 4 }), { ok: false, reason: 'out' });
+  // the nap on its own is fine, and then she stays home until she's rested
+  const bed = ok(act(old, 'nap', at, UTC)).state;
+  assert.equal(act(bed, 'forage', at + 60_000, UTC, { hours: 4 }).ok, false);
+  const home = advance(bed, at + 2 * HOUR_MS, UTC).state;
+  assert.equal(isOut(home, at + 2 * HOUR_MS), false);
+  assert.equal(home.timers.filter((t) => t.kind === 'forage').length, 0);
 });
 
 test('the basket: over many trips, mostly clover, then berries, finds, and a rare golden carrot', () => {

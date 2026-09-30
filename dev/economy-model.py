@@ -13,8 +13,11 @@ together.
 """
 
 START = 100
-# Starter week: goals unlock one day at a time; all reachable solo (§2.1).
-STARTER_WEEK = {1: 100, 2: 70, 3: 70, 4: 50, 5: 30, 6: 30, 7: 100}
+# Getting started (§2.1), by the day each step lands: steps 1–2 on day one,
+# 3–4 on day two, 5 with the third gift, 6 with bond level 3. All solo.
+STARTER_WEEK = {1: 170, 2: 240, 3: 200, 10: 250}
+# The goals after it (goals.ts) are left out: about 1,900 over months, well
+# under 1% of year one.
 STREAK_LUMP = {7: 50, 30: 200, 100: 750, 365: 2500}
 BOND_LUMP = {2: 50, 3: 75, 4: 100, 5: 150, 6: 200, 7: 300}
 

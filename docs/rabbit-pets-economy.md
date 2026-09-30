@@ -112,7 +112,7 @@ is reachable by anyone who keeps coming back.
 
 ### 2.1 Getting started
 
-A short checklist of five steps sits on the burrow ("Getting started ·
+A short checklist of six steps sits on the burrow ("Getting started ·
 1/4", with the step's prize beside it). **Changed 2026-09-26:** steps no
 longer wait for a new day visited. They go in order, and the next opens as
 soon as the last is claimed. When a step's goals are all done the chip turns
@@ -129,29 +129,66 @@ read as a schedule, and became steps.)
 
 | Step | Goals | Clover |
 |---|---|---|
-| 1 | Feed her, get her a bed (she starts with none and sleeps on the floor), play with her toy, hang the honey lantern (**changed 2026-09-28:** every new burrow starts with one in storage, so step one teaches arranging the room; a save still on step one gets one too) | 100, plus **a free clover patch** so the yard starts on day one |
-| 2 | Dress her (**moved from step 1, 2026-09-28**: step one's clover pays for it, and it fills the wait before she's tired), put her down for a nap when she's tired (a new rabbit isn't, for an hour or more), harvest the garden, bake a treat | 70 |
-| 3 · Every day | Open the daily gift 3 times, collect the yard, **build a second clover patch** (about 128), send her out foraging | 120 |
-| 4 · Make it hers | Visit a friend with care **or** share Rabbit Pets, **get her a new toy** (from 50), **new wallpaper or a new floor** (from 250), **find something for her collection** (foraging turns things up) | 120 |
-| 5 · The big garden | Open the meadow (300), **put something out in the meadow** (from 250), **buy a garden upgrade** (a plot, the can or richer soil; from 300), reach bond level 3 (about a week) | 200 |
-| | **Total** | **610 and a patch** |
+| 1 | Feed her, get her a bed, play with her toy, hang the honey lantern | 100, plus **a free clover patch** |
+| 2 | Dress her, nap when she's tired, **brush her**, **grow clover sprouts and pick them** (4 hours; the card says when they're ready), bake a treat | 70 |
+| 3 · Where clover comes from | **Tap your clover to see the ways to earn**, collect the yard, build a second clover patch (about 128), send her out foraging | 120 |
+| 4 · Make it hers | Visit a friend or share, a new toy (from 50), new wallpaper or floor (from 250), a find for her collection | 120 |
+| 5 · The big garden | Open the daily gift 3 times, open the meadow (300), **put out a meadow piece that helps the yard** (stones 400 or birdbath 500), **pick something to save up for** | 200 |
+| 6 · The yard grows | **A third clover patch** (about 195; opens the beehive and the shed), a garden upgrade (from 300), bond level 3 | 250 |
+| | **Total** | **860 and a patch** |
 
-**Changed 2026-09-28** (before it shipped): seven steps, most with one goal,
-became five of four goals each. Steps 3–5 now teach the yard, the shop's
-toys and surfaces, the collection, the meadow's decor and the garden
-upgrades, none of which a step taught before. Step 5 is the saving-up finale:
-about 850 clover of spending, which lands with bond level 3 at about a week.
-The new goals count what she has (patches, toys, surfaces, finds, meadow
-pieces, upgrades), so doing one before its step opens still counts. Left out
-on purpose: seasonal events and the raffle (only live part of the year),
-greeting a wild visitor (luck of the timing), sending a gift (needs a
-friend), reminders and holiday (settings), digging rooms (not open yet).
-Was: 3 gift ×3 and the yard, 70; 4 a friend or a share, 50; 5 foraging, 30;
-6 the meadow, 30; 7 bond level 3, 100: 450 in all.
+**Changed 2026-09-30,** after a review of the first days:
+
+- **No calendar goal before step 5.** "Open the gift 3 times" sat in step 3,
+  and because steps go in order it held steps 4 and 5 back until day 3 even
+  for a player who'd done everything else. It moved to step 5, and bond
+  level 3 to step 6, so steps 1–4 can all land in the first two days and
+  only the last two are "come back all week".
+- **The checklist teaches where clover comes from.** "Harvest the garden"
+  was met by strawberries; it's now clover sprouts, the garden's clover
+  crop. Step 3 asks the player to tap the clover counter, which opens the
+  Ways to earn sheet, and the Getting started sheet has a "Ways to earn
+  clover" button.
+- **Brushing** is taught (step 2; she starts too clean to brush, so not
+  step 1), and **pinning a Save up goal** (step 5).
+- **The meadow goal needs a piece that helps the yard.** Fence lights (looks
+  only) used to meet it, so the step passed without showing that the meadow
+  pays.
+- **Step 6** leads into the yard's longer game: the third patch opens the
+  beehive and the shed. It lands about a week and a half in.
+
+A save that had finished the old five steps sees step 6 open; one part way
+through keeps its claimed steps (goals are counted afresh, so strawberries
+picked for the old step 2 don't count for sprouts).
+
+#### After Getting started: goals
+
+When the last step is claimed, the burrow's card becomes **Next goal**
+(`goals.ts`): the long goals, three open at a time, in order, each paying a
+lump sum the player claims. Three are open so one that's stuck (a best
+friend needs friends) never blocks the rest. Each counts what she has, so
+doing one early counts once it opens. "Show me" goes where it's done.
+
+| Goal | Clover |
+|---|---|
+| First beehive | 100 |
+| Finish a collection set | 100 |
+| 5 clover patches | 100 |
+| The yard shed | 120 |
+| Richer soil level 2 | 150 |
+| A meadow piece that helps the beehives | 150 |
+| 3 beehives | 200 |
+| A best friend | 150 |
+| 5 beehives | 300 |
+| First mushroom log | 500 |
+| **Total** | **1,870** |
+
+Small next to the year's income (under 2%): they're signposts, not a
+source. Updates can add more to the end of the list.
 
 When every step is done, the checklist goes away for good.
 
-**What week one looks like** (clover earned by the end of each day; worked out under the old one-step-a-day rule and the old seven steps, not yet redone for the five: those pay 160 more, and ask about 1,300 of spending in return. Without it, steps 4–6 (110 clover) can land a day or two sooner for a player who does them early, and the week's total is the same):
+**What week one looks like** (clover earned by the end of each day; worked out under the old one-step-a-day rule and the old seven steps. `dev/economy-model.py` now pays the six steps as they land, days 1, 2, 3 and 10, and prints the new table; this one hasn't been redone from it):
 
 | Player | Day 1 | Day 2 | Day 3 | Day 4 | Day 5 | Day 6 | Day 7 |
 |---|---|---|---|---|---|---|---|

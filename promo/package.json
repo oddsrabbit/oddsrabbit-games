@@ -1,16 +1,14 @@
 {
-  "name": "reel",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "rabbit-pets-promo",
+  "private": true,
+  "type": "module",
+  "description": "Promo reel and shorts for Rabbit Pets (see promo.config.mjs).",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "all": "promo all",
+    "reel": "promo reel",
+    "shorts": "promo shorts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "playwright": "^1.63.0"
+  "devDependencies": {
+    "promo-kit": "file:../../promo-kit"
   }
 }

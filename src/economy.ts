@@ -26,11 +26,11 @@ import {
 export type EarnReason =
   | 'gift' | 'care' | 'find' | 'visit' | 'hosted' | 'giftSent' | 'giftClover'
   | 'harvest' | 'yard' | 'critter' | 'forage'
-  | 'milestone' | 'starter' | 'bond' | 'invite' | 'friendMilestone';
+  | 'milestone' | 'starter' | 'goal' | 'bond' | 'invite' | 'friendMilestone';
 
 // Friend clover (visit, hosted, giftClover) is flat: what it says is what you get.
 const ACTIVE: ReadonlySet<EarnReason> = new Set(['gift', 'care', 'find', 'critter', 'forage']);
-const LUMP: ReadonlySet<EarnReason> = new Set(['milestone', 'starter', 'bond', 'invite', 'friendMilestone']);
+const LUMP: ReadonlySet<EarnReason> = new Set(['milestone', 'starter', 'goal', 'bond', 'invite', 'friendMilestone']);
 
 /**
  * Pay `amount` clover for `reason`, boosted as that reason allows. Mutates

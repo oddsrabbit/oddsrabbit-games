@@ -988,6 +988,10 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 /* her face sits on the bottom edge, cropped; the item icons stay centred */
 .list.perks li .ico.face { overflow: hidden; align-items: flex-end; }
 .list.perks li .nm { font-size: 14px; }
+/* the goals after Getting started */
+.goals-list li .hint { font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.goals-list li .prize { display: inline-flex; align-items: center; gap: 2px; font-weight: 800; color: var(--ink); }
+.goals-list li.done .nm { color: var(--clover); }
 
 /* invite sheet and friend bonuses */
 .invite-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--soil); color: var(--cream); border: 3px solid var(--edge); border-radius: 14px; }
@@ -1100,3 +1104,10 @@ body.arranging-burrow .arrange-btn { visibility: hidden; }
   .frow .btns .btn { padding: 0 8px; font-size: 12px; }
   .friends-seg .seg-tab { font-size: 12px; }
 }
+
+/* ---------- the clover count, and how to get more (main.ts openCloverSheet) ---------- */
+button.chip { color: inherit; cursor: pointer; }
+button.chip:active { transform: translateY(1px); }
+.sheet h2 img { vertical-align: -3px; }
+.sheet h3.sheet-h { margin: 14px 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+.clover-ready li .btn { margin-left: auto; }

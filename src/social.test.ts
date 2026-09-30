@@ -8,6 +8,18 @@ import { applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRan
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = () => newPet('p1', 'Clover', 'cocoa', NOON, 'UTC');
 
+test("out foraging, her showcase says when she's home, so friends don't see her napping in the burrow", () => {
+  const s = pet();
+  s.timers.push({ kind: 'forage', startedAtMs: NOON, endsAtMs: NOON + 4 * 3_600_000 });
+  const d = buildShowcase(s, starterBurrow());
+  assert.equal(d.outUntilMs, NOON + 4 * 3_600_000);
+  assert.equal(readShowcase(JSON.parse(JSON.stringify(d)))!.outUntilMs, NOON + 4 * 3_600_000);
+  assert.equal(buildShowcase(pet(), starterBurrow()).outUntilMs, null);
+  // an older snapshot, from before trips were shown
+  const { outUntilMs: _o, ...old } = d;
+  assert.equal(readShowcase(JSON.parse(JSON.stringify(old)))!.outUntilMs, null);
+});
+
 test('a showcase round-trips through a friend reading it', () => {
   const d = buildShowcase(pet(), starterBurrow());
   const back = readShowcase(JSON.parse(JSON.stringify(d)));
