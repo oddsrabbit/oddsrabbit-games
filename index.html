@@ -207,6 +207,12 @@
     <section class="screen screen-match" hidden>
       <header class="bar">
         <div class="players"></div>
+        <!-- Shown only on hosts with matches.chat, and once someone else is
+             at the table. The badge is the unread count from the chat poll. -->
+        <button type="button" class="chat-button icon-button" aria-label="Chat" hidden>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.2 3.6c-.5.4-1.3.1-1.3-.6V16A2.5 2.5 0 0 1 4 13.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          <span class="chat-badge" hidden></span>
+        </button>
         <button type="button" class="menu-button icon-button" aria-label="Match options">⋯</button>
         <button type="button" class="back-button" aria-label="Back to games">✕</button>
       </header>
@@ -321,6 +327,32 @@
       <div class="wait-bar" hidden>
         <span class="wait-text"></span>
         <button type="button" class="wait-shuffle subtle">Shuffle</button>
+      </div>
+
+      <!-- The match's conversation, as a sheet over the lower part of the
+           screen so the board stays in view above it. It is the platform's
+           own chat (the players' DM, or a group for 3–4), so everything here
+           is also in each player's Chat inbox, and the other way round. -->
+      <div class="chat-backdrop" hidden>
+        <section class="chat-sheet" role="dialog" aria-modal="true" aria-labelledby="chat-title">
+          <header class="chat-head">
+            <div class="chat-heading">
+              <h2 class="chat-title" id="chat-title">Chat</h2>
+              <p class="chat-sub muted small"></p>
+            </div>
+            <button type="button" class="chat-close icon-button" aria-label="Close chat">✕</button>
+          </header>
+          <div class="chat-log">
+            <button type="button" class="chat-older subtle" hidden>Earlier messages</button>
+            <p class="chat-empty muted" hidden></p>
+            <ol class="chat-list" role="log" aria-live="polite"></ol>
+          </div>
+          <div class="chat-quick" role="group" aria-label="Quick replies"></div>
+          <form class="chat-form">
+            <textarea class="chat-input" rows="1" maxlength="500" placeholder="Message" aria-label="Message" enterkeyhint="send"></textarea>
+            <button type="submit" class="chat-send primary" disabled>Send</button>
+          </form>
+        </section>
       </div>
     </section>
 

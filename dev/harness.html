@@ -30,6 +30,10 @@
 //   passes=n        start each game with n scoreless turns already in a row
 //   idle=days       every turn counts as having started this many days ago,
 //                   to show Nudge (1+) and End game (14+)
+//   chat=0          host without matches.chat / matches.chatSend
+// Chat: the first game opens with a few messages from @pip_fan, one unread.
+// An opponent answers whatever you send 2.5 s later (not with opp=none), and
+// a message containing "spam" is refused the way the platform would.
 const q = new URLSearchParams(location.search);
 const R = window.TilesRules;
 const DELAY = Number(q.get('delay') || 50);
@@ -75,7 +79,7 @@ function newMatch(people, game = 'tiles', maxPlayers = 0, ageMs = 0, open = fals
     uuid: uuid(), version: 1, status: open && seats.length < max ? 'lobby' : 'active',
     joinCode: open && seats.length < max ? Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('') : null,
     updatedAt: new Date(Date.now() - ageMs).toISOString(), history: [], turnStartedAt: turnStart(), turn: 0, ply: 0, winner: null, passes: Number(q.get('passes') || 0),
-    board: Array.from({ length: R.SIZE }, () => new Array(R.SIZE).fill(null)),
+    board: Array.from({ length: R.SIZE }, () => new Array(R.SIZE).fill(null)), chat: [], chatSeen: 0,
     maxPlayers: max, game, layout: game === 'tiles-wild' ? wildLayout() : R.layout(), bag, lastMove: null, lastWords: [],
     players: seats.map((p, seat) => ({ seat, uuid: p.uuid, username: p.username, avatar: null, status: 'joined', score: 0, rack: bag.splice(0, 7) })),
   };
@@ -97,6 +101,7 @@ function view(m) {
     // What MatchService now puts on every row and view: the public recap of
     // the last move, and whether this is a quick-match table.
     recap: m.lastWords.length ? { lastWords: m.lastWords } : null, matchmaking: !!m.matchmaking,
+    chatUnread: m.chat.length - m.chatSeen,
     view: { board: m.board, layout: m.layout, myRack: me.rack.slice(), rackCounts, bagCount: m.bag.length, lastWords: m.lastWords, passes: m.passes, history: m.history },
     lastMove: m.lastMove,
   };
@@ -155,13 +160,30 @@ function opponentsMove(m) {
   }, 2000);
 }
 
+// The match's conversation, as matches.chat / chatSend answer it.
+function chatMessage(m, who, text) {
+  const p = m.players.find((x) => x.uuid === who.uuid);
+  const msg = {
+    messageUuid: uuid(), seat: p ? p.seat : null, uuid: who.uuid, username: who.username, avatar: null,
+    kind: 'text', text, sentAt: new Date().toISOString(), isSelf: who.uuid === ME.uuid, nonce: null,
+  };
+  m.chat.push(msg);
+  return msg;
+}
+const REPLIES = ['ha, nice one', 'ugh, my rack is all vowels', 'gg so far', 'you’re going down 😤', 'ok that word is not real', '👀'];
+
 // Two games to start: yours to move against one player, and a three-seat table.
 // games=0 starts with none, for the first-run landing.
 // finished=1 adds a game already over, against a stranger who came in on a
 // join code, to try Rematch and Moves on.
 const STRANGER = { uuid: '55555555-5555-4555-8555-555555555555', username: 'stranger_danger' };
 if (q.get('games') !== '0') {
-  newMatch([PEOPLE[0]], 'tiles', 0, 3 * 3600e3);
+  const first = newMatch([PEOPLE[0]], 'tiles', 0, 3 * 3600e3);
+  const hour = (h, msg) => { msg.sentAt = new Date(Date.now() - h * 3600e3).toISOString(); };
+  hour(26, chatMessage(first, PEOPLE[0], 'rematch from last week? 😄'));
+  hour(25.9, chatMessage(first, ME, 'you’re on'));
+  first.chatSeen = first.chat.length;
+  hour(0.2, chatMessage(first, PEOPLE[0], 'good luck, you’ll need it'));
   newMatch([PEOPLE[1], PEOPLE[2]], 'tiles', 0, 2 * 86400e3);
 }
 // busy=1: a player mid-season. A game where @pip_fan just played QUIZ through
@@ -196,6 +218,7 @@ const caps = ['storage.get', 'storage.set', 'actions.share', 'actions.haptic', '
 if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'matches.list', 'matches.get', 'matches.move', 'matches.resign', 'matches.invitable', 'matches.nudge', 'matches.claim');
 // newverbs=0: a host from before matches.check / matches.quick (today's app).
 if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.check', 'matches.quick');
+if (q.get('matches') !== '0' && q.get('chat') !== '0') caps.push('matches.chat', 'matches.chatSend');
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
   send({ type: 'init', user: q.get('user') === '0' ? null : { ...ME, avatar: null, createdAt: null },
@@ -225,6 +248,30 @@ function handle(type, p) {
         opponentsMove(lobby);
       }, Number(q.get('quickwait') || 4000));
       return view(lobby);
+    }
+    // Latest page, or the page before a message; markSeen reads it all.
+    case 'matches.chat': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      const limit = p.limit || 30;
+      const end = p.before ? m.chat.findIndex((x) => x.messageUuid === p.before) : m.chat.length;
+      const start = Math.max(0, end - limit);
+      if (p.markSeen) m.chatSeen = m.chat.length;
+      return { conversationUuid: m.chat.length ? m.uuid : null, messages: m.chat.slice(start, end), unread: m.chat.length - m.chatSeen, hasMore: start > 0 };
+    }
+    case 'matches.chatSend': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      const text = String(p.text || '').trim();
+      if (/spam/i.test(text)) throw { code: 'match/chat-refused', message: 'That message can’t be sent.' };
+      const again = p.nonce && m.chat.find((x) => x.nonce === p.nonce);
+      if (again) return again;
+      const msg = chatMessage(m, ME, text);
+      msg.nonce = p.nonce || null;
+      m.chatSeen = m.chat.length;
+      const other = m.players.find((x) => x.seat !== 0 && x.status === 'joined');
+      if (other && q.get('opp') !== 'none') {
+        setTimeout(() => chatMessage(m, other, REPLIES[Math.floor(Math.random() * REPLIES.length)]), 2500);
+      }
+      return msg;
     }
     case 'matches.get': if (!m) throw { code: 'match/not-found', message: 'No such match.' }; return view(m);
     case 'matches.invitable': return PEOPLE;

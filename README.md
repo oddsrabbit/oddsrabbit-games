@@ -34,5 +34,6 @@ Plain JS with no bundler: `js/rules.js`, `js/board.js` and `js/application.js` l
 
 - `matches.create/join/list/get/move/resign/invitable/watch` (the game hides itself on hosts without `matches.get`), and `matches.nudge/claim` for a player who has stopped moving (hidden on hosts without them)
 - `matches.check` (the dictionary, asked while tiles are still on the board) and `matches.quick` (Find an opponent); both are hidden on hosts without them. List rows use each summary's `lastMove` and `recap` for the "played QUIZ for 32" line
+- `matches.chat` and `matches.chatSend` (the match's conversation, which is the players' own DM or a group in platform Chat; apps-sdk `multiplayer-matches.md` §2.8), and each summary's `chatUnread` for the list badges. The chat sheet and its badge are hidden on hosts without both verbs
 - `user`, `actions.requestSignIn`, `actions.share`, `actions.haptic`, `lifecycle.on`
 - The shared leaderboard UI's avatar renderer (`leaderboard-v1.js`)

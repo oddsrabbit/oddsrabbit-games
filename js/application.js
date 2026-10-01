@@ -165,6 +165,20 @@
     dialogBody: $(".dialog-body"),
     dialogConfirm: $(".dialog-confirm"),
     dialogCancel: $(".dialog-cancel"),
+    chatButton: $(".chat-button"),
+    chatBadge: $(".chat-badge"),
+    chatWrap: $(".chat-backdrop"),
+    chatSheet: $(".chat-sheet"),
+    chatSub: $(".chat-sub"),
+    chatClose: $(".chat-close"),
+    chatLog: $(".chat-log"),
+    chatOlder: $(".chat-older"),
+    chatEmpty: $(".chat-empty"),
+    chatList: $(".chat-list"),
+    chatQuick: $(".chat-quick"),
+    chatForm: $(".chat-form"),
+    chatInput: $(".chat-input"),
+    chatSend: $(".chat-send"),
     toast: $(".toast")
   };
 
@@ -203,7 +217,9 @@
     findTimer: null,
     listTimer: null,
     announcedPly: null,
-    pendingFocus: undefined
+    pendingFocus: undefined,
+    // The open match's conversation (see the chat section); null elsewhere.
+    chat: null
   };
 
   var board = null;
@@ -366,7 +382,7 @@
     state.screen = name;
     if (name !== "match") stopFinding();
     Object.keys(els.screens).forEach(function (key) { els.screens[key].hidden = key !== name; });
-    if (name !== "match") stopWatching();
+    if (name !== "match") { stopWatching(); stopChat(); }
     // The board is sized from its box, and its box is 0x0 while the screen is
     // hidden — so it has to be measured again once the screen is up, or every
     // match opens one pixel wide.
@@ -621,7 +637,8 @@
     return rows.map(function (m) {
       // The age labels are in here so "4m" moves on to "5m" between polls,
       // and a quiet opponent's "2 days" to "3 days".
-      return [m.matchUuid, m.version, m.status, m.isMyTurn ? 1 : 0, ago(m.updatedAt), ago(m.turnStartedAt),
+      // A chat message moves no version, so its count is in here on its own.
+      return [m.matchUuid, m.version, m.status, m.isMyTurn ? 1 : 0, ago(m.updatedAt), ago(m.turnStartedAt), m.chatUnread || 0,
         m.players.map(function (p) { return p.score + ":" + p.status; }).join("/")].join("|");
     }).join(";");
   }
@@ -796,9 +813,11 @@
     var when = ago(m.updatedAt);
     if (when) side.appendChild(el("span", "match-when", when));
     if (m.isMyTurn) side.appendChild(el("span", "badge", "Play"));
+    var unread = canChat() && m.chatUnread > 0 ? m.chatUnread : 0;
+    if (unread) side.appendChild(el("span", "row-chat", (unread > 9 ? "9+" : String(unread)) + " new"));
     open.appendChild(side);
     open.setAttribute("aria-label", names + ". " + detail.textContent + (status ? ". " + status : "")
-      + (m.isMyTurn ? ". Your move." : "") + (when ? " Last activity " + ago(m.updatedAt, true) + "." : ""));
+      + (m.isMyTurn ? ". Your move." : "") + (unread ? " " + unread + " unread message" + (unread === 1 ? "" : "s") + "." : "") + (when ? " Last activity " + ago(m.updatedAt, true) + "." : ""));
     open.addEventListener("click", function () { openFromList(open, m.matchUuid); });
     row.appendChild(open);
 
@@ -885,7 +904,14 @@
     titles.appendChild(name);
     head.appendChild(titles);
     var when = ago(m.updatedAt);
-    if (when) head.appendChild(el("span", "match-when", when === "now" ? "just now" : when + " ago"));
+    var unread = canChat() && m.chatUnread > 0 ? m.chatUnread : 0;
+    if (when || unread) {
+      var side = el("span", "match-side");
+      if (when) side.appendChild(el("span", "match-when", when === "now" ? "just now" : when + " ago"));
+      if (unread) side.appendChild(el("span", "row-chat", (unread > 9 ? "9+" : String(unread)) + " new"));
+      head.appendChild(side);
+    }
+    if (unread) card.setAttribute("aria-label", card.getAttribute("aria-label") + ". " + unread + " unread message" + (unread === 1 ? "" : "s") + ".");
     card.appendChild(head);
 
     var last = el("p", "spot-last");
@@ -1205,8 +1231,8 @@
     els.invitableEmpty.hidden = !nothing;
     if (nothing) {
       els.invitableEmpty.textContent = !total
-        ? "Nobody to invite yet — follow a few people, or start the table anyway and share the code."
-        : "Nobody matching that — you can only invite people you follow or who follow you. Share the join code with anyone else.";
+        ? "Nobody to invite yet — follow a few people, or add a seat for a link and send it to anyone."
+        : "Nobody matching that — you can only invite people you follow or who follow you. For anyone else, add a seat for a link.";
     }
     els.invitableList.scrollTop = scroll;
   }
@@ -1378,6 +1404,7 @@
     applyView(view, true);
     showScreen("match");
     startWatching(view.matchUuid);
+    startChat(view);
   }
 
   function startWatching(uuid) {
@@ -1435,6 +1462,11 @@
     els.screens.match.classList.toggle("is-over", view.status === "finished" || view.status === "abandoned");
 
     renderPlayers(view);
+    if (state.chat && state.chat.uuid === view.matchUuid) {
+      var hadChat = !els.chatButton.hidden;
+      renderChatButton();
+      if (!hadChat && !els.chatButton.hidden) scheduleChat(0);
+    }
     renderTurnStrip(view);
     renderLastMove(view);
     renderLobby(view);
@@ -1780,22 +1812,35 @@
   // wait. Stopped whenever the panel is not on screen, and never started for
   // players who asked for less motion.
   var FIND_LETTERS = "ABCDEFGHIJKLMNOPRSTUVWY";
+  var FLIP_FIRST_MS = 900;    // the "?" shows for a moment first
+  var FLIP_STAGGER_MS = 700;  // between open seats' first flips
+  var FLIP_HOLD_MS = 1400;    // how long a letter stays up, at least
+  var FLIP_JITTER_MS = 1000;  // ...plus up to this much
   var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
 
   function startFinding() {
     if (state.findTimer || (reduceMotion && reduceMotion.matches)) return;
+    // Each tile keeps its own schedule: a letter holds for FLIP_HOLD_MS plus
+    // up to FLIP_JITTER_MS, and several open seats start a beat apart, so the
+    // row reads as calm and separate seats rather than one flickering strip.
+    var started = Date.now();
     state.findTimer = setInterval(function () {
       if (state.screen !== "match" || document.hidden) return;
+      var now = Date.now();
       $$(".flip-tile", els.screens.match).forEach(function (tile, i) {
         if (tile.offsetParent === null) return;
-        // Several open seats flip out of step, so they read as separate seats.
-        if (i && Math.random() < 0.4) return;
-        tile.textContent = FIND_LETTERS.charAt(Math.floor(Math.random() * FIND_LETTERS.length));
+        var next = Number(tile.getAttribute("data-next")) || started + FLIP_FIRST_MS + i * FLIP_STAGGER_MS;
+        if (now < next) { tile.setAttribute("data-next", String(next)); return; }
+        tile.setAttribute("data-next", String(now + FLIP_HOLD_MS + Math.random() * FLIP_JITTER_MS));
+        var letter;
+        do { letter = FIND_LETTERS.charAt(Math.floor(Math.random() * FIND_LETTERS.length)); }
+        while (letter === tile.textContent);
+        tile.textContent = letter;
         tile.classList.remove("is-flip");
         void tile.offsetWidth; // restart the flip
         tile.classList.add("is-flip");
       });
-    }, 420);
+    }, 150);
   }
 
   function stopFinding() {
@@ -1803,6 +1848,7 @@
     $$(".flip-tile", els.screens.match).forEach(function (tile) {
       tile.textContent = "?";
       tile.classList.remove("is-flip");
+      tile.removeAttribute("data-next");
     });
   }
 
@@ -2090,7 +2136,7 @@
   }
 
   function checkWordsSoon(words) {
-    if (state.dictOff || !OR.capabilities.has("matches.check") || !state.match) return;
+    if (state.dictOff || !OR.capabilities.has("matches.check") || typeof OR.matches.check !== "function" || !state.match) return;
     var unknown = words.filter(function (w) {
       return /^[A-Z]{2,15}$/.test(w) && !(w in state.dict) && !state.dictPending[w];
     });
@@ -2423,6 +2469,422 @@
     });
   }
 
+  // ---------------------------------------------------------------- chat
+  //
+  // The match's conversation (`matches.chat` / `matches.chatSend`). It is the
+  // platform's own chat seen through the match: two players share their DM,
+  // three or four a group the server links to the match. So a message sent
+  // here is in the other player's Chat inbox, and one sent from Chat shows up
+  // here. A message does not move the match's `version`, so `watch` never
+  // fires for one; the chat polls on its own, faster while the sheet is open.
+  // Everything is gated on the host declaring both verbs.
+
+  var CHAT_POLL_OPEN_MS = 4000;
+  var CHAT_POLL_CLOSED_MS = 15000;
+  var CHAT_PAGE = 30;
+  var CHAT_MAX = 500;
+  // A gap this long between two messages starts a new time heading.
+  var CHAT_GAP_MS = 30 * 60 * 1000;
+  var CHAT_QUICK = ["Good game!", "Nice word!", "Your move 👀", "👍"];
+
+  function canChat() {
+    return OR.capabilities.has("matches.chat") && OR.capabilities.has("matches.chatSend")
+      && typeof OR.matches.chat === "function" && typeof OR.matches.chatSend === "function";
+  }
+
+  // Somebody to talk to: another seat that is (or was) actually at the table.
+  // A lobby of one, or a quick-match table still looking, has nobody.
+  function chatAvailable(view) {
+    return !!view && canChat() && view.players.some(function (p) { return !p.isSelf && p.status !== "invited"; });
+  }
+
+  function newChatState(uuid) {
+    return {
+      uuid: uuid,
+      messages: [],     // stored messages, oldest first, by messageUuid
+      outbox: [],       // { nonce, text, failed, error } not yet stored
+      unread: 0,
+      hasMore: false,
+      loaded: false,
+      loadError: false,
+      loadingOlder: false,
+      open: false,
+      timer: null,
+      inFlight: false,
+      lastSeenUuid: null
+    };
+  }
+
+  function chatNonce() {
+    var out = "wb-";
+    for (var i = 0; i < 16; i++) out += "abcdefghijklmnopqrstuvwxyz0123456789".charAt(Math.floor(Math.random() * 36));
+    return out;
+  }
+
+  function startChat(view) {
+    stopChat();
+    state.chat = newChatState(view.matchUuid);
+    renderChatButton();
+    if (chatAvailable(view)) pollChat();
+  }
+
+  function stopChat() {
+    var c = state.chat;
+    if (!c) return;
+    // Close first: closing schedules the next poll, which must not outlive us.
+    if (c.open) closeChat();
+    clearTimeout(c.timer);
+    c.timer = null;
+    state.chat = null;
+  }
+
+  function scheduleChat(ms) {
+    var c = state.chat;
+    if (!c) return;
+    clearTimeout(c.timer);
+    c.timer = setTimeout(pollChat, ms === undefined ? (c.open ? CHAT_POLL_OPEN_MS : CHAT_POLL_CLOSED_MS) : ms);
+  }
+
+  // One poll: the latest page, merged into what is already held (older pages
+  // the player scrolled back to stay). Skipped while the page is hidden and
+  // picked up again on the next tick.
+  function pollChat() {
+    var c = state.chat;
+    if (!c || state.screen !== "match" || !chatAvailable(state.match)) return;
+    if (document.hidden || c.inFlight) { scheduleChat(); return; }
+    c.inFlight = true;
+    var uuid = c.uuid;
+    OR.matches.chat({ matchUuid: uuid, limit: CHAT_PAGE, markSeen: c.open }).then(function (page) {
+      if (state.chat !== c) return;
+      var fresh = mergeChat(c, page.messages);
+      if (!c.loaded) c.hasMore = page.hasMore;
+      c.loaded = true;
+      c.loadError = false;
+      c.unread = c.open ? 0 : page.unread;
+      if (c.open && fresh.length) renderChatLog(false);
+      else if (c.open && !c.messages.length) renderChatLog(true);
+      else announceChat(fresh);
+      renderChatButton();
+    }).catch(function () {
+      if (state.chat !== c) return;
+      c.loadError = !c.loaded;
+      if (c.open) renderChatLog(false);
+    }).then(function () {
+      if (state.chat !== c) return;
+      c.inFlight = false;
+      scheduleChat();
+    });
+  }
+
+  // Add messages by uuid, keep the list oldest first, and retire any outbox
+  // entry the server now holds (matched by the nonce it echoes). Returns the
+  // messages that were not held before.
+  function mergeChat(c, messages) {
+    var have = {};
+    c.messages.forEach(function (msg) { have[msg.messageUuid] = true; });
+    var fresh = messages.filter(function (msg) { return !have[msg.messageUuid]; });
+    if (!fresh.length) return fresh;
+    c.messages = c.messages.concat(fresh).sort(function (a, b) {
+      return Date.parse(a.sentAt) - Date.parse(b.sentAt);
+    });
+    var stored = {};
+    fresh.forEach(function (msg) { if (msg.nonce) stored[msg.nonce] = true; });
+    c.outbox = c.outbox.filter(function (o) { return !stored[o.nonce]; });
+    return fresh;
+  }
+
+  // With the sheet closed: a short line for the newest message from someone
+  // else, after the first load (which is history, not news).
+  function announceChat(fresh) {
+    var c = state.chat;
+    if (!c || !c.lastSeenUuid) {
+      if (c && c.messages.length) c.lastSeenUuid = c.messages[c.messages.length - 1].messageUuid;
+      return;
+    }
+    var theirs = fresh.filter(function (msg) { return !msg.isSelf; });
+    c.lastSeenUuid = c.messages[c.messages.length - 1].messageUuid;
+    if (!theirs.length || dialogState) return;
+    var last = theirs[theirs.length - 1];
+    haptic("light");
+    toast("@" + last.username + ": " + chatPreviewText(last));
+  }
+
+  function chatPreviewText(msg) {
+    var text = msg.kind === "text" ? msg.text : chatKindText(msg.kind);
+    return text.length > 60 ? text.slice(0, 57) + "…" : text;
+  }
+
+  function chatKindText(kind) {
+    if (kind === "image") return "Sent a photo";
+    if (kind === "voice") return "Sent a voice message";
+    if (kind === "video") return "Sent a video";
+    return "Sent something";
+  }
+
+  function renderChatButton() {
+    var c = state.chat;
+    var show = !!c && chatAvailable(state.match);
+    els.chatButton.hidden = !show;
+    var n = show ? c.unread : 0;
+    els.chatBadge.hidden = !n;
+    els.chatBadge.textContent = n > 9 ? "9+" : String(n);
+    els.chatButton.setAttribute("aria-label", n ? "Chat, " + n + " unread" : "Chat");
+  }
+
+  function openChat() {
+    var c = state.chat;
+    var m = state.match;
+    if (!c || !chatAvailable(m) || c.open) return;
+    if (dialogState) closeDialog(null);
+    c.open = true;
+    c.unread = 0;
+    // A "new message" toast would sit on the composer, and the message is here now.
+    els.toast.hidden = true;
+    var others = m.players.filter(function (p) { return !p.isSelf && p.status !== "invited"; });
+    els.chatSub.textContent = others.length === 1
+      ? "With @" + others[0].username + " · also in your Chat"
+      : "Everyone in this game · also in your Chat";
+    renderChatQuick();
+    renderChatLog(true);
+    renderChatButton();
+    els.chatWrap.hidden = false;
+    document.documentElement.setAttribute("data-overlay", "chat");
+    fitChatToViewport();
+    // Opening marks it read on the server, and fetches anything newer.
+    scheduleChat(0);
+    // On touch the keyboard would cover half the sheet the moment it opens;
+    // a player usually wants to read first. With a real keyboard, type away.
+    if (!window.matchMedia || !window.matchMedia("(pointer: coarse)").matches) {
+      setTimeout(function () { els.chatInput.focus(); }, 0);
+    } else {
+      setTimeout(function () { els.chatClose.focus({ preventScroll: true }); }, 0);
+    }
+  }
+
+  function closeChat() {
+    var c = state.chat;
+    if (!c || !c.open) return;
+    c.open = false;
+    els.chatWrap.hidden = true;
+    els.chatInput.blur();
+    if (!dialogState) document.documentElement.removeAttribute("data-overlay");
+    if (c.messages.length) c.lastSeenUuid = c.messages[c.messages.length - 1].messageUuid;
+    scheduleChat();
+    try { els.chatButton.focus({ preventScroll: true }); } catch (_) {}
+  }
+
+  // The on-screen keyboard shrinks the visual viewport but not always the
+  // layout one (iOS WebViews), which would leave the composer under it. Lift
+  // the sheet by the difference while it is open.
+  function fitChatToViewport() {
+    var vv = window.visualViewport;
+    var lift = 0;
+    if (vv) lift = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    els.chatSheet.style.setProperty("--chat-kb", lift + "px");
+  }
+
+  function renderChatQuick() {
+    clear(els.chatQuick);
+    CHAT_QUICK.forEach(function (text) {
+      var chip = el("button", "chat-chip", text);
+      chip.type = "button";
+      chip.addEventListener("click", function () { sendChat(text); });
+      els.chatQuick.appendChild(chip);
+    });
+  }
+
+  function chatTimeHeading(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    var today = new Date();
+    var yesterday = new Date(today.getTime() - 86400000);
+    if (d.toDateString() === today.toDateString()) return "Today " + time;
+    if (d.toDateString() === yesterday.toDateString()) return "Yesterday " + time;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + ", " + time;
+  }
+
+  // Redraw the whole log. Small (a page or a few), and simpler than patching:
+  // stays pinned to the bottom when it was there (or `toBottom`), and keeps
+  // its place when the player has scrolled up to read.
+  function renderChatLog(toBottom) {
+    var c = state.chat;
+    if (!c) return;
+    var log = els.chatLog;
+    var atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    var fromBottom = log.scrollHeight - log.scrollTop;
+    var many = state.match && state.match.players.filter(function (p) { return !p.isSelf; }).length > 1;
+
+    clear(els.chatList);
+    var prev = null;
+    c.messages.forEach(function (msg) {
+      var t = Date.parse(msg.sentAt);
+      if (!prev || t - Date.parse(prev.sentAt) > CHAT_GAP_MS) {
+        els.chatList.appendChild(el("li", "chat-time", chatTimeHeading(msg.sentAt)));
+        prev = null;
+      }
+      var first = !prev || prev.uuid !== msg.uuid;
+      var row = el("li", "chat-msg" + (msg.isSelf ? " is-self" : "") + (first ? " is-first" : ""));
+      if (first && many && !msg.isSelf) row.appendChild(el("span", "chat-who", "@" + msg.username));
+      var bubble = el("span", "chat-bubble" + (msg.kind === "text" ? "" : " is-other"),
+        msg.kind === "text" ? msg.text : chatKindText(msg.kind) + " — open Chat to see it");
+      bubble.title = chatTimeHeading(msg.sentAt);
+      row.appendChild(bubble);
+      els.chatList.appendChild(row);
+      prev = msg;
+    });
+    c.outbox.forEach(function (o) {
+      var row = el("li", "chat-msg is-self is-first" + (o.failed ? " is-failed" : " is-sending"));
+      var bubble = el("span", "chat-bubble", o.text);
+      row.appendChild(bubble);
+      if (o.failed) {
+        // A refusal (muted, blocked, moderation) would only be refused again,
+        // so it offers to take the bubble away; a dropped send offers a retry.
+        var retry = el("button", "chat-retry", o.refused ? o.error + " · Remove" : "Not sent · Tap to retry");
+        retry.type = "button";
+        retry.addEventListener("click", function () { if (o.refused) dropChat(o); else retryChat(o); });
+        row.appendChild(retry);
+      }
+      els.chatList.appendChild(row);
+    });
+
+    els.chatOlder.hidden = !(c.loaded && c.hasMore);
+    els.chatOlder.disabled = c.loadingOlder;
+    els.chatOlder.textContent = c.loadingOlder ? "Loading…" : "Earlier messages";
+    var empty = !c.messages.length && !c.outbox.length;
+    els.chatEmpty.hidden = !empty;
+    els.chatEmpty.textContent = c.loadError ? "Couldn’t load messages. Trying again…"
+      : !c.loaded ? "Loading…"
+      : "No messages yet. Say hi — it’ll land in their Chat too.";
+    els.chatQuick.hidden = !c.loaded;
+
+    if (toBottom || atBottom) log.scrollTop = log.scrollHeight;
+    else log.scrollTop = log.scrollHeight - fromBottom;
+  }
+
+  function loadOlderChat() {
+    var c = state.chat;
+    if (!c || c.loadingOlder || !c.hasMore || !c.messages.length) return;
+    c.loadingOlder = true;
+    renderChatLog(false);
+    OR.matches.chat({ matchUuid: c.uuid, before: c.messages[0].messageUuid, limit: CHAT_PAGE }).then(function (page) {
+      if (state.chat !== c) return;
+      mergeChat(c, page.messages);
+      c.hasMore = page.hasMore;
+    }).catch(function (err) {
+      if (state.chat === c) toast(errorText(err, "Couldn't load earlier messages."), true);
+    }).then(function () {
+      if (state.chat !== c) return;
+      c.loadingOlder = false;
+      if (c.open) {
+        // Keep the message the player was looking at where it was.
+        renderChatLog(false);
+      }
+    });
+  }
+
+  function sendChat(text) {
+    var c = state.chat;
+    text = String(text || "").trim();
+    if (!c || !text) return;
+    if (text.length > CHAT_MAX) text = text.slice(0, CHAT_MAX);
+    var entry = { nonce: chatNonce(), text: text, failed: false, refused: false, error: "" };
+    c.outbox.push(entry);
+    renderChatLog(true);
+    deliverChat(c, entry);
+  }
+
+  function retryChat(entry) {
+    var c = state.chat;
+    if (!c || !entry.failed) return;
+    entry.failed = false;
+    entry.error = "";
+    renderChatLog(false);
+    deliverChat(c, entry);
+  }
+
+  function dropChat(entry) {
+    var c = state.chat;
+    if (!c) return;
+    c.outbox = c.outbox.filter(function (o) { return o !== entry; });
+    renderChatLog(false);
+  }
+
+  // The nonce rides every attempt, so a retry after a reply that got lost is
+  // stored once and its echo retires the bubble either way.
+  function deliverChat(c, entry) {
+    OR.matches.chatSend({ matchUuid: c.uuid, text: entry.text, nonce: entry.nonce }).then(function (msg) {
+      if (state.chat !== c) return;
+      if (!msg.nonce) msg.nonce = entry.nonce;
+      c.outbox = c.outbox.filter(function (o) { return o !== entry; });
+      mergeChat(c, [msg]);
+      c.lastSeenUuid = c.messages[c.messages.length - 1].messageUuid;
+      if (c.open) renderChatLog(true);
+    }).catch(function (err) {
+      if (state.chat !== c) return;
+      entry.failed = true;
+      entry.refused = errorCode(err) === "match/chat-refused";
+      entry.error = entry.refused ? errorText(err, "That message can't be sent.") : "";
+      if (c.open) renderChatLog(false);
+      else toast(entry.refused ? entry.error : "Your message didn't send.", true);
+    });
+  }
+
+  function submitChat() {
+    var text = els.chatInput.value.trim();
+    if (!text) return;
+    els.chatInput.value = "";
+    sizeChatInput();
+    sendChat(text);
+  }
+
+  function sizeChatInput() {
+    var input = els.chatInput;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 120) + "px";
+    els.chatSend.disabled = !input.value.trim();
+  }
+
+  function wireChat() {
+    els.chatButton.addEventListener("click", openChat);
+    els.chatClose.addEventListener("click", closeChat);
+    els.chatOlder.addEventListener("click", loadOlderChat);
+    els.chatWrap.addEventListener("click", function (e) {
+      if (e.target === els.chatWrap) closeChat();
+    });
+    els.chatWrap.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeChat(); }
+    });
+    els.chatForm.addEventListener("submit", function (e) {
+      e.preventDefault();
+      submitChat();
+    });
+    els.chatInput.addEventListener("input", sizeChatInput);
+    // Enter sends and Shift+Enter breaks the line, with a real keyboard. On a
+    // phone the keyboard's own send key (enterkeyhint) is the Enter key too.
+    els.chatInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        submitChat();
+      }
+    });
+    els.chatLog.addEventListener("scroll", function () {
+      if (els.chatLog.scrollTop < 24) loadOlderChat();
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", function () {
+        if (state.chat && state.chat.open) {
+          fitChatToViewport();
+          els.chatLog.scrollTop = els.chatLog.scrollHeight;
+        }
+      });
+    }
+    // Back in view: catch up now rather than at the next tick.
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && state.chat && state.screen === "match") scheduleChat(0);
+    });
+  }
+
   // ------------------------------------------------------------ celebration
 
   function popScore(points, bingo, word) {
@@ -2694,6 +3156,7 @@
 
   function onKeyDown(e) {
     if (dialogState) return; // the dialog traps its own keys
+    if (state.chat && state.chat.open) return; // and so does the chat sheet
     if (state.screen !== "match" || !board) return;
     var target = e.target;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
@@ -3013,9 +3476,12 @@
     return false;
   }
 
+  // Coming back to a list that is already drawn refreshes it quietly: a
+  // "Loading…" line over rows that are already there is noise, and it pushed
+  // the sheet down and back up again on every return.
   function backToList() {
     showScreen("list");
-    loadList();
+    loadList(state.rows.length > 0);
   }
 
   function wire() {
@@ -3039,6 +3505,7 @@
     els.lobbyBack.addEventListener("click", backToList);
     els.lobbyClose.addEventListener("click", resign);
     els.menuButton.addEventListener("click", openMatchMenu);
+    wireChat();
     els.players.addEventListener("click", showPlayers);
     els.nudgeButton.addEventListener("click", nudge);
     els.claimButton.addEventListener("click", claim);
@@ -3138,7 +3605,10 @@
       OR.ready();
       return;
     }
-    var canQuick = OR.capabilities.has("matches.quick");
+    // The host declaring the verb is not enough on its own: a stale cached SDK
+    // (one CDN copy served under a new version stamp) can lack the method, and
+    // a button that throws is worse than no button.
+    var canQuick = OR.capabilities.has("matches.quick") && typeof OR.matches.quick === "function";
     els.quickButtons.forEach(function (b) { b.hidden = !canQuick; });
     state.canQuick = canQuick;
 
