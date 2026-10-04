@@ -2005,14 +2005,31 @@
     function cancel() {
       tile.style.transform = "";
       tile.classList.remove("is-dragging");
+      if (siblings) siblings.forEach(function (node) { node.classList.remove("is-drop-target"); });
       siblings = null;
       mode = null;
       state.cancelDrag = null;
       clearGhost();
     }
 
+    function startBoardDrag() {
+      mode = "board";
+      makeGhost();
+      // The dashed "this connects" squares are shown for a selected tile;
+      // a dragged tile wants them just as much, and wants them before the
+      // drop rather than after it fails.
+      state.dragSlot = index;
+      syncBoard();
+    }
+
+    // Safari on macOS turns a mouse press-and-move into text selection or a
+    // native drag unless the press is claimed, and a native drag cancels the
+    // pointer stream mid-gesture. The click still follows a claimed press.
+    tile.addEventListener("dragstart", function (e) { e.preventDefault(); });
+
     tile.addEventListener("pointerdown", function (e) {
       if (!rackMovable()) return;
+      e.preventDefault();
       try { tile.setPointerCapture(e.pointerId); } catch (_) {}
       state.cancelDrag = cancel;
       startX = e.clientX;
@@ -2032,17 +2049,22 @@
         if (Math.hypot(dx, dy) <= 8) return;
         // Upward is towards the board; sideways is along the rack. Off turn
         // the rack can only be rearranged.
-        mode = Math.abs(dy) > Math.abs(dx) && rackActive() ? "board" : "reorder";
-        if (mode === "board") {
-          makeGhost();
-          // The dashed "this connects" squares are shown for a selected tile;
-          // a dragged tile wants them just as much, and wants them before the
-          // drop rather than after it fails.
-          state.dragSlot = index;
-          syncBoard();
+        if (Math.abs(dy) > Math.abs(dx) && rackActive()) {
+          startBoardDrag();
         } else {
+          mode = "reorder";
           tile.classList.add("is-dragging");
         }
+      }
+      // The first few pixels of a trackpad drag often run sideways, which
+      // locked the gesture into reordering for good. A tile carried well
+      // clear of the rack is headed for the board whatever it started as.
+      if (mode === "reorder" && dy < -step && rackActive()) {
+        tile.style.transform = "";
+        tile.classList.remove("is-dragging");
+        siblings.forEach(function (node) { node.classList.remove("is-drop-target"); });
+        target = index;
+        startBoardDrag();
       }
       if (mode === "board") {
         moveGhost(e.clientX, e.clientY);
@@ -2111,7 +2133,12 @@
     }
 
     tile.addEventListener("pointerup", finish);
-    tile.addEventListener("pointercancel", finish);
+    // A cancelled gesture (the browser took it over) is not a drop: put the
+    // tile back without the "rejected" shake or a stray select.
+    tile.addEventListener("pointercancel", function () {
+      if (!siblings) return;
+      cancel();
+    });
     // Keyboard activation still arrives as a click with no pointer sequence,
     // and must always select — hence a deadline rather than a flag.
     tile.addEventListener("click", function () {

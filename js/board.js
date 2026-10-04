@@ -467,9 +467,16 @@
     }
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
+    // A Mac trackpad sends dozens of small wheel events per gesture (plus
+    // momentum), so a fixed 15% step per event slammed the board to its zoom
+    // limits. Zoom in proportion to the distance instead: one ~100px mouse
+    // wheel notch still comes to about the old step. A pinch arrives as
+    // ctrl+wheel with much smaller deltas, so it is scaled up.
     el.addEventListener("wheel", function (e) {
       var p = pos(e);
-      self._zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15, p.x, p.y);
+      var unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? self.cssH : 1;
+      var dy = Math.max(-100, Math.min(100, e.deltaY * unit));
+      self._zoomAt(Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015)), p.x, p.y);
       e.preventDefault();
     }, { passive: false });
 

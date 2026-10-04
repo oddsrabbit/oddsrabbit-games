@@ -779,6 +779,12 @@ button.chip-bag::after { content: " ›"; }
    limited by the shorter side, so widening it is the only thing that makes
    the cells bigger. */
 .board-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+/* Safari on macOS starts a text selection or a native drag from a mouse
+   press-and-move, which cancels the game's own pointer drag mid-gesture. */
+.board-canvas, .rack, .tile {
+  -webkit-user-select: none; user-select: none;
+  -webkit-user-drag: none; -webkit-touch-callout: none;
+}
 .board-canvas:focus-visible { outline-offset: -3px; }
 /* In the turn strip, pushed to its end, rather than floating over the board:
    anywhere on the board covers a square a player could otherwise tap. */
