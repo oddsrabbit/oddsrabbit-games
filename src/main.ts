@@ -45,11 +45,11 @@ import { EAT_SWALLOW_MS, Scene, type Activity } from './render';
 import { newPetId } from './rng';
 import { pauseSound, play, resumeSound, setMuted } from './sound';
 import {
-  act, advance, bondLevel, COATS, giftReady, isAsleep, isNight, mood, newPet,
+  act, advance, thriving, bondLevel, COATS, giftReady, isAsleep, isNight, mood, newPet,
   FOOD_IDS, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
 } from './sim';
 import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
-import { BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
+import { THRIVING, BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
 import { dayKey, localParts } from './localtime';
 import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherName, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
 
@@ -1483,7 +1483,8 @@ function render(): void {
   });
   const inYard = Math.floor(stored(pet, n));
   const guests = guestsHere(visitTurns, n);
-  const pillSig = `y${inYard}|v${guests.map((g) => g.visit.from.uuid).join(',')}`;
+  const thrives = !holiday && thriving(pet.needs);
+  const pillSig = `y${inYard}|v${guests.map((g) => g.visit.from.uuid).join(',')}|t${thrives}`;
   if (eventsBox.dataset.sig !== pillSig) {
     eventsBox.dataset.sig = pillSig;
     const chips: Node[] = [];
@@ -1494,6 +1495,11 @@ function render(): void {
       const chip = h('button', { class: `tchip event${fresh ? ' fresh' : ''}`, type: 'button', 'aria-label': `${k} ${k === 1 ? 'friend is' : 'friends are'} visiting` },
         img(itemSprite('heart'), 2), k === 1 ? `${guests[0]!.data.name} is visiting` : `${k} visiting`);
       chip.addEventListener('click', () => goTab('friends'));
+      chips.push(chip);
+    }
+    if (thrives) {
+      const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('sparkle'), 2), 'Thriving');
+      chip.addEventListener('click', () => openThriving());
       chips.push(chip);
     }
     if (inYard >= 1) {
@@ -5204,6 +5210,19 @@ function sendGift(f: Friend, done: () => void): void {
       h('div', { class: 'actions-col' }, button('Not now', 'btn', close)),
     ];
   });
+}
+
+/** What thriving brings, and how to keep her there. */
+function openThriving(): void {
+  const pct = (x: number) => `${Math.round((x - 1) * 100)}%`;
+  openSheet((close) => [
+    h('div', { class: 'event-art' }, img(itemSprite('sparkle'), 4)),
+    h('div', { class: 'eyebrow', text: 'Thriving' }),
+    h('h2', { text: thriving(pet.needs) ? `${pet.name} is thriving` : `${pet.name} isn't thriving just now` }),
+    h('p', { text: `While her food, joy and clean are all ${THRIVING.above} or more, she finds ${pct(THRIVING.odds)} more things, ${pct(THRIVING.odds)} more wild visitors drop by, and her daily gift is ${pct(THRIVING.gift)} bigger.` }),
+    h('p', { class: 'note', text: "Look after her before bed and she'll still be thriving when you open her morning gift. Friends' visits help too." }),
+    h('div', { class: 'actions-col' }, button('OK', 'btn', close)),
+  ]);
 }
 
 /** A friend's burrow, read-only: their room, their rabbit, pottering about. */

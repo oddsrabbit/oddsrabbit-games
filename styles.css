@@ -1113,3 +1113,4 @@ button.chip:active { transform: translateY(1px); }
 .clover-ready li .btn { margin-left: auto; }
 /* Settings: each kind of reminder sits indented under the Reminders switch. */
 .menu-row.sub-row { padding-left: 28px; }
+.tchip.thriving { background: #fff3c4; }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { dayKey, localParts, nextLocalHour } from './localtime';
-import { act, advance, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, sleepMs, visit, type FoodId, type PetState } from './sim';
+import { act, advance, thriving, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, sleepMs, visit, type FoodId, type PetState } from './sim';
 import { BOND_DAILY_CAP, DAY_MS, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
 
 const UTC = 'UTC';
@@ -221,6 +221,7 @@ test('the gift is once a day, rolls over at 05:00 local, and a missed day only p
   const tz = 'America/New_York';
   const day1 = Date.parse('2026-09-24T09:00:00-04:00');
   let s = newPet('p', 'Clover', 'snow', day1, tz);
+  s.needs.clean = 40;
   let r = act(s, 'gift', day1, tz);
   assert.ok(r.ok && r.clover === 30);
   s = r.ok ? r.state : s;
@@ -364,4 +365,28 @@ test('a save missing something the game needs is unreadable, not a crash later',
     assert.equal(isPetState(broken), false, `without ${k}`);
   }
   assert.equal(isPetState({ ...s, needs: { hunger: 50 } }), false, 'only some of her needs');
+});
+
+test('thriving: food, joy and clean all 60 or more; she finds more and more visitors come', () => {
+  const s = pet();
+  s.needs = { hunger: 60, happy: 60, energy: 5, clean: 60 };
+  assert.ok(thriving(s.needs), 'energy comes and goes with sleep: it doesn\'t count');
+  s.needs.happy = 59;
+  assert.ok(!thriving(s.needs));
+  // the same week, replayed from a thriving start and from a neglected one: needs are pinned each day
+  const week = (n: number) => {
+    let p = pet();
+    let found = 0, critters = 0;
+    for (let d = 0; d < 60; d++) {
+      p.needs = { hunger: n, happy: n, energy: 100, clean: n };
+      const r = advance(p, NOON + (d + 1) * DAY_MS, UTC);
+      p = r.state;
+      found += r.events.filter((e) => e.kind === 'found').length;
+      critters += r.events.filter((e) => e.kind === 'critter').length;
+    }
+    return { found, critters };
+  };
+  const good = week(100), poor = week(40);
+  assert.ok(good.found > poor.found, `finds ${good.found} vs ${poor.found}`);
+  assert.ok(good.critters > poor.critters, `visitors ${good.critters} vs ${poor.critters}`);
 });

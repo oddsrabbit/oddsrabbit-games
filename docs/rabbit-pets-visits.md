@@ -33,9 +33,9 @@ Friends tab → Visit. The bottom panel gains three care buttons next to
 
 | Care | Art | Moodline after | Host's rabbit gets |
 |---|---|---|---|
-| Pat | heart | "Mochi leans into the pat." | +8 joy |
-| Snack | carrot | "Mochi nibbles the snack you left." | +8 food |
-| Brush | brush | "Mochi's fur is shiny now." | +8 clean |
+| Pat | heart | "Mochi leans into the pat." | +15 joy |
+| Snack | carrot | "Mochi nibbles the snack you left." | +15 food |
+| Brush | brush | "Mochi's fur is shiny now." | +15 clean |
 
 Picking one plays the local reaction on the friend's rabbit, records the
 visit, and pays the visitor **+3 clover**. The three buttons then read
@@ -76,8 +76,8 @@ Starting values, all in `tuning.ts`:
 
 | What | Value | Why |
 |---|---|---|
-| Care boost | +8 to one need | About 2½ hours of hunger decay (3/h). Noticeable, not a meal. |
-| Care that counts, per host per local day | first **3** visits | Ten friends can't feed her for you: 3 × 8 = 24, about 8 hours of one need at most. |
+| Care boost | +15 to one need (was +8 until 2026‑10‑06) | About 5 hours of hunger decay (3/h): enough to help keep her thriving (60+ in food, joy and clean) on a day you can't look in. |
+| Care that counts, per host per local day | first **3** visits | Ten friends can't feed her for you: 3 × 15 = 45, about 15 hours of one need at most. |
 | Visitor clover | +3 per visit with care, for your first 5 visits a day | |
 | Host clover | +4 per visit, for the first 5 a day, only from friends with a verified email (`counts` below) | |
 | Clover from friends, received | the first 5 visits and the first 5 clover gifts a local day | A limit on receiving, not just sending, so spare accounts following you can't farm you. |

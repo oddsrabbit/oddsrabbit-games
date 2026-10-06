@@ -58,7 +58,8 @@ test('bond level-ups and gift-streak milestones pay once each', () => {
   const lumps = settleLumps(s);
   assert.deepEqual(lumps.map((l) => l.clover), [100, 150]);
   assert.deepEqual(settleLumps(s), [], 'only once');
-  // the 7th gift pays the 7-day milestone
+  // the 7th gift pays the 7-day milestone (she isn't thriving: that's its own test)
+  s.needs.clean = 40;
   s.gift.streak = 6;
   const r = act(s, 'gift', NOON, UTC);
   assert.ok(r.ok && r.lumps?.some((l) => l.what === '7-day gift streak' && l.clover === 100));
@@ -68,9 +69,14 @@ test('bond level-ups and gift-streak milestones pay once each', () => {
 
 test('the gift grows 4 a day up to 80', () => {
   const s = pet();
+  s.needs.clean = 40;
   s.gift.streak = 40;
   const r = act(s, 'gift', NOON, UTC);
   assert.ok(r.ok && r.clover === 80);
+  // thriving, it's a quarter more
+  s.needs.clean = 100;
+  const t = act(s, 'gift', NOON, UTC);
+  assert.ok(t.ok && t.clover === 100);
 });
 
 test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {

@@ -121,7 +121,7 @@ test('visits seen: the first 3 a day boost her, the first 5 pay the host, and od
   });
   const r = applyVisits(s, [v(1, 'snack'), v(2, 'pat'), v(3, 'brush'), v(4, 'snack'), v(5, 'pat', false)], NOON, 'UTC');
   assert.equal(r.cared, 3);
-  assert.deepEqual(r.state.needs, { hunger: 58, happy: 58, energy: 50, clean: 58 });
+  assert.deepEqual(r.state.needs, { hunger: 65, happy: 65, energy: 50, clean: 65 });
   assert.equal(r.clover, 40, '4 counting visits × 10 (flat)');
 });
 
@@ -210,7 +210,7 @@ test('a visit can carry a guest-book note, and older visits still read', () => {
   const s = pet();
   s.needs = { hunger: 50, happy: 50, energy: 50, clean: 50 };
   const r = applyVisits(s, [{ visitUuid: 'v', kind: 'snack-cozy', visitedAt: new Date(NOON).toISOString(), seenAt: null, from: { uuid: 'f', username: 'u' }, showcase: null }], NOON, 'UTC');
-  assert.equal(r.state.needs.hunger, 58);
+  assert.equal(r.state.needs.hunger, 65);
 });
 
 test('her garden goes in her snapshot, is checked on the way in, and draws as a stand-in pet', () => {

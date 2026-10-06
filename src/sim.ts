@@ -35,6 +35,7 @@ import {
   WILDLIFE,
   FORAGE,
   SLEEP,
+  THRIVING,
   STEP_MS,
   TIMERS,
 } from './tuning';
@@ -261,8 +262,9 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
     state.needs.energy = clamp(state.needs.energy - rates.energy * per);
     state.needs.clean = clamp(state.needs.clean - rates.clean * per);
 
-    // her finds at home; out foraging, her basket is her finds
-    if (!asleep && !isOut(state, t) && roll(state.petId, state.stepIndex, 'pebble') < PEBBLE_CHANCE) {
+    // her finds at home; out foraging, her basket is her finds. Thriving, she finds more.
+    const odds = thriving(state.needs) ? THRIVING.odds : 1;
+    if (!asleep && !isOut(state, t) && roll(state.petId, state.stepIndex, 'pebble') < PEBBLE_CHANCE * odds) {
       const find = pickFind(state.petId, state.stepIndex, activeEvents(t, tz).flatMap((e) => e.finds));
       earn(state, 'find', find.rarity === 'rare' ? CLOVER.rareFind : CLOVER.pebble);
       state.collection = { ...(state.collection ?? {}), [find.id]: (state.collection?.[find.id] ?? 0) + 1 };
@@ -272,7 +274,7 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
     // A wild visitor, one at a time, asleep or awake (they tiptoe).
     const here = state.critters?.here;
     if (here && here.untilMs <= t) state.critters = { ...state.critters!, here: null };
-    if (!state.critters?.here && roll(state.petId, state.stepIndex, 'critter') < WILDLIFE.chancePerStep) {
+    if (!state.critters?.here && roll(state.petId, state.stepIndex, 'critter') < WILDLIFE.chancePerStep * odds) {
       const c = critterAt(state.petId, state.stepIndex, conditionsAt(t, tz));
       if (c) {
         const clover = earn(state, 'critter', visitClover(state.petId, state.stepIndex));
@@ -285,6 +287,11 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
     }
   }
   return { state, events };
+}
+
+/** Food, joy and clean all looked after: better finds, more wild visitors, a bigger gift (THRIVING). */
+export function thriving(n: Needs): boolean {
+  return n.hunger >= THRIVING.above && n.happy >= THRIVING.above && n.clean >= THRIVING.above;
 }
 
 function structuredCloneState(s: PetState): PetState {
@@ -467,7 +474,8 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
       // A missed day pauses the streak; nothing ever resets it.
       state.gift.streak += 1;
       state.gift.lastClaimDay = today;
-      const amount = Math.min(CLOVER.giftMax, CLOVER.giftBase + CLOVER.giftStep * (state.gift.streak - 1));
+      const base = Math.min(CLOVER.giftMax, CLOVER.giftBase + CLOVER.giftStep * (state.gift.streak - 1));
+      const amount = Math.round(base * (thriving(n) ? THRIVING.gift : 1));
       const clover = earn(state, 'gift', amount);
       return { ok: true, state, clover, bond: 0, lumps: settleLumps(state) };
     }

@@ -16,6 +16,14 @@ export const DECAY_ASLEEP = { hunger: 1.5, happy: 0, energy: -12, clean: 0 } as 
 export const LOW_NEED = 30;
 
 /**
+ * Thriving: while her food, joy and clean are all at least `above` (energy
+ * comes and goes with sleep, so it doesn't count), she finds things and wild
+ * visitors come `odds` times as often, and the daily gift is `gift` times
+ * bigger. Looking after her well, and friends' visits, keep her there.
+ */
+export const THRIVING = { above: 60, odds: 1.5, gift: 1.25 } as const;
+
+/**
  * The sky outside, local time: night is [DUSK_HOUR, DAWN_HOUR). Only the
  * window and the lighting follow it; her sleep follows her energy (SLEEP).
  */
@@ -176,8 +184,8 @@ export const GUESTS = {
 } as const;
 
 export const VISIT_CARE = {
-  /** How much one act of care raises the need. */
-  boost: 8,
+  /** How much one act of care raises the need: enough to help keep her thriving. */
+  boost: 15,
   /** Only the first this-many visits a local day boost her needs. */
   perDay: 3,
 } as const;
