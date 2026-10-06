@@ -16,7 +16,7 @@ export interface Plot { crop: CropId; plantedAtMs: number; readyAtMs: number }
 export const CROPS: Record<CropId, { name: string; seedCost: number; growMs: number; yields: string }> = {
   berry: { name: 'Strawberries', seedCost: 0, growMs: 8 * HOUR_MS, yields: `${BERRY_HARVEST} strawberries` },
   golden: { name: 'Golden carrot', seedCost: 8, growMs: 12 * HOUR_MS, yields: '1 golden carrot' },
-  sprout: { name: 'Clover sprouts', seedCost: 2, growMs: 4 * HOUR_MS, yields: 'clover' },
+  sprout: { name: 'Clover sprouts', seedCost: 0, growMs: 4 * HOUR_MS, yields: 'clover' },
 };
 
 // ---------------------------------------------------------------- garden upgrades

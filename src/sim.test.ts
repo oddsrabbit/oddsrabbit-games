@@ -222,13 +222,13 @@ test('the gift is once a day, rolls over at 05:00 local, and a missed day only p
   const day1 = Date.parse('2026-09-24T09:00:00-04:00');
   let s = newPet('p', 'Clover', 'snow', day1, tz);
   let r = act(s, 'gift', day1, tz);
-  assert.ok(r.ok && r.clover === 15);
+  assert.ok(r.ok && r.clover === 30);
   s = r.ok ? r.state : s;
   assert.equal(giftReady(s, Date.parse('2026-09-25T04:59:00-04:00'), tz), false);
   assert.equal(giftReady(s, Date.parse('2026-09-25T05:00:00-04:00'), tz), true);
   // skip the 25th entirely; the streak continues on the 26th
   r = act(s, 'gift', Date.parse('2026-09-26T10:00:00-04:00'), tz);
-  assert.ok(r.ok && r.state.gift.streak === 2 && r.clover === 17);
+  assert.ok(r.ok && r.state.gift.streak === 2 && r.clover === 34);
 });
 
 test('two low needs make her grumpy; one low need names what she wants', () => {
@@ -289,7 +289,7 @@ test('the paid foods need their cost', () => {
   const s = pet();
   s.needs.hunger = 20;
   const berry = act(s, 'feed', NOON, UTC, { food: 'strawberry' });
-  assert.ok(berry.ok && berry.state.clover === s.clover - 3 + 2, 'costs 3, care pays 2 back');
+  assert.ok(berry.ok && berry.state.clover === s.clover - 3 + 4, 'costs 3, care pays 4 back');
   s.clover = 2;
   assert.deepEqual(act(s, 'feed', NOON, UTC, { food: 'strawberry' }), { ok: false, reason: 'broke' });
   assert.deepEqual(act(s, 'feed', NOON, UTC, { food: 'treat' }), { ok: false, reason: 'noTreats' });

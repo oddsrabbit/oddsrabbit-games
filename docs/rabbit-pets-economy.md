@@ -5,6 +5,29 @@ Status: **built 2026‑09‑25**, not yet deployed. In the game: `earn()` and th
 [`rabbit-pets-visits.md`](./rabbit-pets-visits.md), whose visit rewards
 are set here.
 
+**Changed 2026‑10‑06: about twice the clover.** A review found the game too
+slow after the starter week (a casual player waited 3–6 days for each new
+thing from month 2 on, and 593 days to own the shop). Every source of clover
+was doubled: starting clover 200, care 4, the daily gift 30 (+4 a streak
+day, max 80), finds 4 and 30, wild visitors 4–20, friend visits 10 (+6 a
+welcome piece), a golden carrot gift 60 and every lump sum (Getting
+started, later goals, bond, streak and friend milestones). **The yard was
+left as it was**: doubled too, it became about 70% of a casual player's
+income by month 6, and the game should be about the rabbit, not the idle
+income. Sprouts
+went further: **their seeds are free** and they pay 10, +4 a soil level
+(they paid a net 4 every 4 hours, the weakest thing a tap could do).
+Foraging went up less, 4–8 to 6–12 an hour, since it was already the best
+clover per tap. **Prices didn't change.** The tables below are from before
+this change and are kept as the record of the reasoning; the numbers in
+`tuning.ts` and `dev/economy-model.py` are current. From the model, for a
+casual player with no friends: tier 2 done day 27 (was 46), the moon window
+day 40 (was 68), everything owned day 437 (was 593); for an engaged one,
+day 19, 28 and 307 (were 32, 47 and 452). Something new about every
+1.7 days in month 2 (was 3). Months 3–4 are still sparse (every 6–7 days)
+once the launch ladder is bought: that needs more mid-priced items, not
+more income.
+
 **Decisions already taken** (2026‑09‑25):
 
 - **Paced for a player who plays daily, alone.** A casual player with no

@@ -99,7 +99,7 @@ test('the basket: over many trips, mostly clover, then berries, finds, and a rar
     total.clover += l.clover; total.berries += l.berries; total.golden += l.golden; total.finds += l.finds.length;
   }
   assert.ok(total.berries > total.finds && total.finds > total.golden && total.golden > 0, JSON.stringify(total));
-  assert.ok(total.clover / 400 > 15 && total.clover / 400 < 40, `${total.clover / 400} clover a trip`);
+  assert.ok(total.clover / 400 > 22.5 && total.clover / 400 < 60, `${total.clover / 400} clover a trip`);
 });
 
 test('a reminder for when she is home', () => {

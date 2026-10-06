@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { startVacation } from './extras';
 import { advance, newPet, type PetEvent } from './sim';
+import { rate } from './economy';
 import { DAY_MS, WILDLIFE } from './tuning';
 import { CRITTERS, critterAt, visitClover } from './wildlife';
 
@@ -17,12 +18,14 @@ function live(s0: ReturnType<typeof newPet>, days: number) {
 }
 const critters = (events: PetEvent[]) => events.filter((e): e is Extract<PetEvent, { kind: 'critter' }> => e.kind === 'critter');
 
-test('about 1.3 visitors a day, each leaving 2 to 10 clover, mostly 2 or 3', () => {
+test('about 1.3 visitors a day, each leaving 4 to 20 clover, mostly 4 to 6', () => {
   const { state, events } = live(newPet('wild', 'Mochi', 'snow', NOON, UTC), 60);
   const v = critters(events);
   assert.ok(v.length > 55 && v.length < 110, `${v.length} visits in 60 days`);
-  assert.ok(v.every((e) => e.clover >= WILDLIFE.clover.min && e.clover <= WILDLIFE.clover.max));
-  const low = v.filter((e) => e.clover <= 3).length;
+  // the clover paid is boosted by her rate (finished sets raise it as finds come in), which only grows
+  const top = Math.ceil(WILDLIFE.clover.max * rate(state).total);
+  assert.ok(v.every((e) => e.clover >= WILDLIFE.clover.min && e.clover <= top), `${top} at most`);
+  const low = v.filter((e) => e.clover <= 6).length;
   assert.ok(low / v.length > 0.5, 'mostly the low end');
   const seen = Object.values(state.critters!.seen).reduce((a, b) => a + b, 0);
   assert.equal(seen, v.length);
@@ -61,9 +64,10 @@ test('who comes depends on the hour, the season and the weather', () => {
   assert.deepEqual([...all].sort(), CRITTERS.map((c) => c.id).sort());
 });
 
-test('a 10 is rare but possible', () => {
+test('a 20 is rare but possible', () => {
   const counts = new Map<number, number>();
   for (let i = 0; i < 20_000; i++) { const n = visitClover('p', i); counts.set(n, (counts.get(n) ?? 0) + 1); }
-  assert.ok((counts.get(10) ?? 0) > 0);
-  assert.ok((counts.get(10) ?? 0) < (counts.get(2) ?? 0) / 5);
+  assert.ok([...counts.keys()].every((n) => n >= WILDLIFE.clover.min && n <= WILDLIFE.clover.max), 'before her rate: 4 to 20');
+  assert.ok((counts.get(20) ?? 0) > 0);
+  assert.ok((counts.get(20) ?? 0) < (counts.get(4) ?? 0) / 5);
 });

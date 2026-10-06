@@ -30,9 +30,9 @@ test('later goals: the first few are open, and claiming one opens the next', () 
   assert.deepEqual(goalsReady(s).map((g) => g.id), ['hive']);
   const before = s.clover;
   const r = claimGoal(s, 'hive')!;
-  assert.equal(r.clover, 100);
+  assert.equal(r.clover, 200);
   s = r.state;
-  assert.equal(s.clover, before + 100);
+  assert.equal(s.clover, before + 200);
   assert.equal(claimGoal(s, 'hive'), null, 'paid once');
   assert.deepEqual(openGoals(s).map((g) => g.id), ['set', 'patch5', 'shed']);
 });

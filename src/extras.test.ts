@@ -32,7 +32,12 @@ test('finds while away go into the collection and pay a little clover', () => {
   assert.equal(pickFind('x', 5).id, pickFind('x', 5).id, 'seeded');
 });
 
-test('garden: plant with clover, wait, harvest into the pantry', () => {
+test('garden: planting is free, wait, harvest into the pantry', () => {
+  const broke = pet('broke');
+  broke.clover = 0;
+  assert.equal(CROPS.sprout.seedCost, 0);
+  const sprout = plant(broke, 0, 'sprout', NOON);
+  assert.ok(sprout.ok && sprout.state.clover === 0, 'sprouts cost no clover to plant');
   let s = pet();
   s.clover = 20;
   const p = plant(s, 0, 'berry', NOON);
@@ -50,7 +55,7 @@ test('garden: plant with clover, wait, harvest into the pantry', () => {
   // a home-grown berry is eaten before any clover is spent
   h.state.needs.hunger = 20;
   const fed = act(h.state, 'feed', NOON + CROPS.berry.growMs, UTC, { food: 'strawberry' });
-  assert.ok(fed.ok && fed.state.pantry?.berries === 2 && fed.state.clover === h.state.clover + 2);
+  assert.ok(fed.ok && fed.state.pantry?.berries === 2 && fed.state.clover === h.state.clover + 4);
 });
 
 test('a golden carrot is always loved', () => {
@@ -109,7 +114,7 @@ test('garden upgrades: one plot to start, plots in order, soil repeats and pays 
   const p = plant(s, 0, 'sprout', NOON);
   assert.ok(p.ok);
   const h = p.ok ? harvest(p.state, 0, NOON + CROPS.sprout.growMs) : null;
-  assert.ok(h?.ok && h.clover === 8, '6 + 2 per soil level');
+  assert.ok(h?.ok && h.clover === 14, '10 + 4 per soil level');
 });
 
 test('plotOffer: only the next bed is for sale, and not while it waits on soil', () => {

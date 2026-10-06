@@ -70,9 +70,9 @@ test('gifts are things; a golden carrot, an old clover bundle or an unknown kind
   const s = pet();
   s.clover = 100;
   const g = (kind: string) => applyGift(s, { kind }, NOON, 'UTC');
-  assert.equal(g('golden').state.clover, 130, 'a golden carrot: 30, not boosted');
-  assert.equal(g('clover').clover, 5, "a bundle from a friend who hasn't updated");
-  assert.equal(g('sparkly-new-thing').clover, 5);
+  assert.equal(g('golden').state.clover, 160, 'a golden carrot: 60, not boosted');
+  assert.equal(g('clover').clover, 10, "a bundle from a friend who hasn't updated");
+  assert.equal(g('sparkly-new-thing').clover, 10);
   assert.equal(g('berry').state.pantry?.berries, 1);
   s.needs.happy = 95;
   assert.equal(g('hug').state.needs.happy, 100);
@@ -88,29 +88,29 @@ test('only the first 5 clover gifts a day pay, and sending one pays nothing', ()
     got.push(r.clover);
     s = r.state;
   }
-  assert.deepEqual(got, [30, 30, 30, 30, 30, 0, 0]);
+  assert.deepEqual(got, [60, 60, 60, 60, 60, 0, 0]);
   assert.equal(rewardGiftSent(s, 'f1', NOON, 'UTC').clover, 0);
-  assert.equal(applyGift(s, { kind: 'golden' }, NOON + 86_400_000, 'UTC').clover, 30, 'a new day');
+  assert.equal(applyGift(s, { kind: 'golden' }, NOON + 86_400_000, 'UTC').clover, 60, 'a new day');
   const withCarrot = { ...pet(), pantry: { berries: 0, golden: 1 } };
   assert.equal(takeGolden(withCarrot)?.pantry?.golden, 0);
   assert.equal(takeGolden(pet()), null);
 });
 
-test('a visit pays a flat 5 to the visitor, plus 3 for each welcome piece they have, for their first 5 a day', () => {
+test('a visit pays a flat 10 to the visitor, plus 6 for each welcome piece they have, for their first 5 a day', () => {
   let s = pet();
   s.clover = 0;
   s.bond = 10_000; // a high clover rate: visits aren't boosted
   const got: number[] = [];
   for (let i = 0; i < 6; i++) { const r = rewardVisit(s, `f${i}`, NOON, 'UTC'); got.push(r.clover); s = r.state; }
-  assert.deepEqual(got, [5, 5, 5, 5, 5, 0]);
+  assert.deepEqual(got, [10, 10, 10, 10, 10, 0]);
   const welcomed = { ...pet(), clover: 100_000 };
   let w: PetState = welcomed;
   for (let i = 0; i < 5; i++) { const r = buyWelcome(w); assert.ok(r.ok); w = r.state; }
   assert.equal(welcomeLevel(w), 5);
-  assert.equal(visitPay(w), 20);
+  assert.equal(visitPay(w), 40);
   assert.equal(w.clover, 100_000 - 47_000);
   assert.deepEqual(buyWelcome(w), { ok: false, reason: 'done' });
-  assert.equal(rewardVisit(w, 'f', NOON, 'UTC').clover, 20);
+  assert.equal(rewardVisit(w, 'f', NOON, 'UTC').clover, 40);
 });
 
 test('visits seen: the first 3 a day boost her, the first 5 pay the host, and odd senders pay nothing', () => {
@@ -122,7 +122,7 @@ test('visits seen: the first 3 a day boost her, the first 5 pay the host, and od
   const r = applyVisits(s, [v(1, 'snack'), v(2, 'pat'), v(3, 'brush'), v(4, 'snack'), v(5, 'pat', false)], NOON, 'UTC');
   assert.equal(r.cared, 3);
   assert.deepEqual(r.state.needs, { hunger: 58, happy: 58, energy: 50, clean: 58 });
-  assert.equal(r.clover, 20, '4 counting visits × 5 (flat)');
+  assert.equal(r.clover, 40, '4 counting visits × 10 (flat)');
 });
 
 test('guests: unseen visits and ones seen today, one per friend, newest first', () => {

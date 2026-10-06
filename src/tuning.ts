@@ -102,22 +102,22 @@ export const BOND_LEVELS = [0, 12, 35, 70, 120, 190, 280];
 // dev/economy-model.py. Change a number here and re-run the model.
 
 export const CLOVER = {
-  start: 100,
+  start: 200,
   /** Each capped care action pays this alongside its bond point. */
-  perCare: 2,
+  perCare: 4,
   /** The daily gift: giftBase, +giftStep a streak day, up to giftMax. */
-  giftBase: 15,
-  giftStep: 2,
-  giftMax: 40,
+  giftBase: 30,
+  giftStep: 4,
+  giftMax: 80,
   /** A find while she's away. */
-  pebble: 2,
-  rareFind: 15,
+  pebble: 4,
+  rareFind: 30,
 } as const;
 
 /** Once each, when the gift streak reaches the day. The streak never resets. */
-export const STREAK_MILESTONES: Record<number, number> = { 7: 50, 30: 200, 100: 750, 365: 2500 };
+export const STREAK_MILESTONES: Record<number, number> = { 7: 100, 30: 400, 100: 1500, 365: 5000 };
 /** Once each, on reaching the bond level. */
-export const BOND_LEVEL_CLOVER: Record<number, number> = { 2: 50, 3: 75, 4: 100, 5: 150, 6: 200, 7: 300 };
+export const BOND_LEVEL_CLOVER: Record<number, number> = { 2: 100, 3: 150, 4: 200, 5: 300, 6: 400, 7: 600 };
 /** Past the last of BOND_LEVELS, each level's gap grows by this. */
 export const BOND_GAP_GROWTH = 20;
 
@@ -143,9 +143,9 @@ export const SUPPORTER_BONUS = 1.25;
  * friend on an older version pays now that bundles aren't sent.
  */
 export const FRIEND_CLOVER = {
-  visit: 5,
-  goldenGift: 30,
-  legacyBundle: 5,
+  visit: 10,
+  goldenGift: 60,
+  legacyBundle: 10,
   /** Only the first this-many of each kind a day pay clover. */
   paidPerDay: 5,
   /** Friendship points (a day of visiting or gifting, each way) to be best friends. */
@@ -162,7 +162,7 @@ export const FRIEND_CLOVER = {
  * Friend milestones: a lump sum, once each, for this many friends you've
  * visited and who've visited you (economy.ts settleLumps).
  */
-export const FRIEND_MILESTONES: Record<number, number> = { 3: 250, 5: 500, 10: 1_000, 20: 2_000 };
+export const FRIEND_MILESTONES: Record<number, number> = { 3: 500, 5: 1_000, 10: 2_000, 20: 4_000 };
 
 /** A friend's visit with care (docs/rabbit-pets-visits.md §2). */
 /**
@@ -189,11 +189,11 @@ export const VISIT_CARE = {
  * adds `perLevel` clover to a sprout harvest. Strawberries give one more at
  * each of `berryAt`, and golden carrots come in twos from `goldenAt`.
  */
-export const SOIL = { basePrice: 600, growth: 1.8, perLevel: 2, maxLevel: 5, berryAt: [2, 4], goldenAt: 5 } as const;
+export const SOIL = { basePrice: 600, growth: 1.8, perLevel: 4, maxLevel: 5, berryAt: [2, 4], goldenAt: 5 } as const;
 /** Strawberries per harvest before soil. Their seeds are free: a berry only saves the 3 clover the tray charges, so they need to come in numbers to rival sprouts. */
 export const BERRY_HARVEST = 3;
-/** Sprouts: seed cost and base clover per harvest, before soil. */
-export const SPROUT_CLOVER = 6;
+/** Sprouts: clover per harvest, before soil. Their seeds are free. */
+export const SPROUT_CLOVER = 10;
 /** The watering can makes crops grow this much faster. */
 export const CAN_SPEED = 1.25;
 
@@ -214,13 +214,13 @@ export const MEADOW = { gate: 300, boost: 0.1 } as const;
 /**
  * Wild visitors (wildlife.ts). Chance per 10-minute step that one drops by
  * (about 1.3 a day), how long it stays, the clover it leaves (min to max,
- * skewed low: most leave 2 or 3, a 10 is rare), and the chance it also
+ * skewed low: most leave 4 to 6, a 20 is rare), and the chance it also
  * leaves its keepsake.
  */
 export const WILDLIFE = {
   chancePerStep: 0.009,
   stayMs: [60 * 60_000, 90 * 60_000],
-  clover: { min: 2, max: 10 },
+  clover: { min: 4, max: 20 },
   keepsakeChance: 0.1,
 } as const;
 
@@ -234,7 +234,7 @@ export const FORAGE = {
   hours: [2, 4, 8],
   minEnergy: 30,
   odds: { clover: 0.55, berry: 0.25, find: 0.15 },
-  clover: { min: 4, max: 8 },
+  clover: { min: 6, max: 12 },
 } as const;
 
 /**
@@ -250,7 +250,7 @@ export const RAFFLE = { ticket: 100, odds: 0.1, guaranteeBy: 10 } as const;
  * never your friend's). Only worth buying if friends visit.
  */
 export const WELCOME = {
-  step: 3,
+  step: 6,
   pieces: [
     { id: 'welcomemat', price: 1_000 },
     { id: 'guestchairs', price: 3_000 },

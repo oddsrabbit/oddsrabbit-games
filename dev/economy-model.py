@@ -12,25 +12,25 @@ The game's tests port the same players (proposal §5), so the two should move
 together.
 """
 
-START = 100
+START = 200
 # Getting started (§2.1), by the day each step lands: steps 1–2 on day one,
 # 3–4 on day two, 5 with the third gift, 6 with bond level 3. All solo.
-STARTER_WEEK = {1: 170, 2: 240, 3: 200, 10: 250}
+STARTER_WEEK = {1: 340, 2: 480, 3: 400, 10: 500}
 # The goals after it (goals.ts) are left out: about 1,900 over months, well
 # under 1% of year one.
-STREAK_LUMP = {7: 50, 30: 200, 100: 750, 365: 2500}
-BOND_LUMP = {2: 50, 3: 75, 4: 100, 5: 150, 6: 200, 7: 300}
+STREAK_LUMP = {7: 100, 30: 400, 100: 1500, 365: 5000}
+BOND_LUMP = {2: 100, 3: 150, 4: 200, 5: 300, 6: 400, 7: 600}
 
-GIFT_BASE, GIFT_STEP, GIFT_MAX = 15, 2, 40  # daily gift: 15, +2 a streak day, max 40
-CARE_CLOVER, CARE_CAP = 2, 10
-# Finds: ~0.65 a day (awake ~3/4 of 144 steps x 0.6%), 2 clover each, 15 for
-# the 12% that are rare: about 2.3 a day, boosted.
-FIND_PER_DAY = 2.3
-# Wild visitors (wildlife.ts): ~1.3 a day, 3.9 clover each on average, boosted.
-CRITTER_PER_DAY = 1.3 * 3.88
-# Foraging (forage.ts): an 8-hour trip brings ~26 clover (boosted) plus
+GIFT_BASE, GIFT_STEP, GIFT_MAX = 30, 4, 80  # daily gift: 30, +4 a streak day, max 80
+CARE_CLOVER, CARE_CAP = 4, 10
+# Finds: ~0.65 a day (awake ~3/4 of 144 steps x 0.6%), 4 clover each, 30 for
+# the 12% that are rare: about 4.6 a day, boosted.
+FIND_PER_DAY = 4.6
+# Wild visitors (wildlife.ts): ~1.3 a day, 7.8 clover each on average, boosted.
+CRITTER_PER_DAY = 1.3 * 7.76
+# Foraging (forage.ts): an 8-hour trip brings ~40 clover (boosted) plus
 # berries and a find, which aren't counted. Players' `trips` a day below.
-FORAGE_TRIP = 26
+FORAGE_TRIP = 40
 SUPPORTER = 1.25
 
 # Friends: clover for the first FRIEND_PAID of each kind a day (§2.2).
@@ -38,9 +38,9 @@ FRIEND_PAID = 5
 # A visit pays the visitor and the host VISIT each, flat (never boosted), plus
 # WELCOME_STEP for each welcome piece that player has bought (their own level).
 # Gifts are things; a golden carrot (30) is left out of the model.
-VISIT, HOSTED = 5, 5
+VISIT, HOSTED = 10, 10
 WELCOME_PRICES = [1000, 3000, 6000, 12000, 25000]
-WELCOME_STEP = 3
+WELCOME_STEP = 6
 
 # Bond thresholds: today's up to level 7, then each gap grows by 20.
 BOND_TH = [0, 12, 35, 70, 120, 190, 280]
@@ -142,7 +142,7 @@ def run(p, days=365, supporter=False, meadow=True):
                 + CRITTER_PER_DAY + p.get('trips', 0) * FORAGE_TRIP)
         active = (base * rate + friends) * sup
         cycles = p['cycles'] * (1.25 if can else 1)
-        garden = plots * cycles * (4 + 2 * soil) * sup
+        garden = plots * cycles * (10 + 4 * soil) * sup  # sprouts: free seeds, 10 clover +4 a soil level
         boost = {k: BOOST * sum(1 for m in pieces if MEADOW[m][1] == k) for k in YARD}
         yard_out = sum(YARD[k][1] * c * (1 + boost[k]) for k, c in yard.items()) * 24 * sup
         income = active + garden + yard_out

@@ -50,22 +50,22 @@ export interface StarterStep { step: number; goals: StarterGoal[]; clover: numbe
 export const STARTER_STEPS: StarterStep[] = [
   // Step one can all be done in the first sitting. The lantern comes free in
   // storage: hanging it teaches arranging the room.
-  { step: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 100, patch: true },
+  { step: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 200, patch: true },
   // The first day: something to do (dress her, with step one's clover) while
   // she gets tired enough to nap, dusty enough to brush and sprouts grow (4 hours).
-  { step: 2, goals: ['dress', 'nap', 'groom', 'sprout', 'bake'], clover: 70 },
+  { step: 2, goals: ['dress', 'nap', 'groom', 'sprout', 'bake'], clover: 140 },
   // Where clover comes from: the clover sheet, the yard and foraging. All of
   // it can be done the same day: nothing here waits on the calendar.
-  { step: 3, goals: ['earn', 'yard', 'patch2', 'forage'], clover: 120 },
+  { step: 3, goals: ['earn', 'yard', 'patch2', 'forage'], clover: 240 },
   // Spending on her and her room, and what foraging turns up.
-  { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 120 },
+  { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 240 },
   // The daily round (the gift takes three days) and the meadow, with a piece
   // that pays: about 700 clover of spending.
-  { step: 5, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 200 },
+  { step: 5, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 400 },
   // The yard grows: the third patch opens beehives and the shed, which the
   // goals after Getting started (goals.ts) take up. With bond level 3, about
   // a week and a half in.
-  { step: 6, goals: ['patch3', 'gardenup', 'bond3'], clover: 250 },
+  { step: 6, goals: ['patch3', 'gardenup', 'bond3'], clover: 500 },
 ];
 
 /** `paid` holds claimed step numbers (saves from the "starter week" hold the same numbers as days). */

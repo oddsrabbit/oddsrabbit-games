@@ -12,9 +12,9 @@ const UTC = 'UTC';
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = (): PetState => newPet('econ-pet', 'Clover', 'snow', NOON, UTC);
 
-test('a new rabbit starts with 100 clover and no bonus', () => {
+test('a new rabbit starts with 200 clover and no bonus', () => {
   const s = pet();
-  assert.equal(s.clover, 100);
+  assert.equal(s.clover, 200);
   assert.equal(rate(s).total, 1);
 });
 
@@ -27,7 +27,7 @@ test('earn: the rate boosts active clover only; fractions carry over; totals kep
   assert.equal(earn(s, 'yard', 10), 10, 'the yard is flat');
   assert.equal(earn(s, 'bond', 50), 50, 'lump sums are flat');
   assert.equal(s.earned?.care, 12);
-  assert.equal(s.clover, 100 + 12 + 10 + 50);
+  assert.equal(s.clover, 200 + 12 + 10 + 50);
 });
 
 test('Supporters get 25% on everything but lump sums', () => {
@@ -56,21 +56,21 @@ test('bond level-ups and gift-streak milestones pay once each', () => {
   let s = pet();
   s.bond = 35;
   const lumps = settleLumps(s);
-  assert.deepEqual(lumps.map((l) => l.clover), [50, 75]);
+  assert.deepEqual(lumps.map((l) => l.clover), [100, 150]);
   assert.deepEqual(settleLumps(s), [], 'only once');
   // the 7th gift pays the 7-day milestone
   s.gift.streak = 6;
   const r = act(s, 'gift', NOON, UTC);
-  assert.ok(r.ok && r.lumps?.some((l) => l.what === '7-day gift streak' && l.clover === 50));
+  assert.ok(r.ok && r.lumps?.some((l) => l.what === '7-day gift streak' && l.clover === 100));
   s = r.ok ? r.state : s;
-  assert.equal(r.ok && r.clover, 32, '(15 + 2 × 6) at bond level 3: × 1.2');
+  assert.equal(r.ok && r.clover, 64, '(30 + 4 × 6) at bond level 3: × 1.2');
 });
 
-test('the gift grows 2 a day up to 40', () => {
+test('the gift grows 4 a day up to 80', () => {
   const s = pet();
   s.gift.streak = 40;
   const r = act(s, 'gift', NOON, UTC);
-  assert.ok(r.ok && r.clover === 40);
+  assert.ok(r.ok && r.clover === 80);
 });
 
 test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {
@@ -84,7 +84,7 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   assert.equal(starterReady(s), true);
   assert.equal(countOf(s, 'patch'), 0, 'nothing paid until claimed');
   let r = claimStarter(s, NOON);
-  assert.deepEqual(r.paid, { step: 1, clover: 100, patch: true });
+  assert.deepEqual(r.paid, { step: 1, clover: 200, patch: true });
   s = r.state;
   assert.equal(countOf(s, 'patch'), 1);
   assert.equal(claimStarter(s, NOON).paid, null, 'paid once');
@@ -125,7 +125,7 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   r = claimStarter(s, NOON);
   paid.push(r.paid!.clover);
   s = r.state;
-  assert.deepEqual(paid, [120, 120, 200, 250]);
+  assert.deepEqual(paid, [240, 240, 400, 500]);
   assert.equal(starterDone(s), true);
   assert.equal(starterReady(s), false);
 });
@@ -164,16 +164,16 @@ test('friend milestones pay once each, counting only friends it goes both ways w
   noteFriendship(s, 'f0', 'in', NOON, UTC);
   noteFriendship(s, 'f1', 'in', NOON, UTC);
   assert.equal(mutualFriends(s), 2);
-  assert.deepEqual(nextFriendMilestone(s), { friends: 3, clover: 250 });
+  assert.deepEqual(nextFriendMilestone(s), { friends: 3, clover: 500 });
   assert.deepEqual(settleLumps(s).filter((l) => l.what.endsWith('friends')), []);
   noteFriendship(s, 'f2', 'in', NOON, UTC);
   const before = s.clover;
-  assert.deepEqual(settleLumps(s).filter((l) => l.what.endsWith('friends')), [{ what: '3 friends', clover: 250 }]);
-  assert.equal(s.clover, before + 250);
+  assert.deepEqual(settleLumps(s).filter((l) => l.what.endsWith('friends')), [{ what: '3 friends', clover: 500 }]);
+  assert.equal(s.clover, before + 500);
   assert.deepEqual(settleLumps(s), [], 'only once');
-  assert.deepEqual(nextFriendMilestone(s), { friends: 5, clover: 500 });
+  assert.deepEqual(nextFriendMilestone(s), { friends: 5, clover: 1_000 });
   s.supporter = true;
   noteFriendship(s, 'f3', 'in', NOON, UTC);
   noteFriendship(s, 'f4', 'in', NOON, UTC);
-  assert.deepEqual(settleLumps(s).map((l) => l.clover), [500], 'a lump sum: no Supporter bonus');
+  assert.deepEqual(settleLumps(s).map((l) => l.clover), [1_000], 'a lump sum: no Supporter bonus');
 });

@@ -9,7 +9,7 @@ import { bestFriends, earn } from './economy';
 import { soilLevel } from './extras';
 import type { PetState } from './sim';
 import { starterDone } from './starter';
-import { countOf, yardOf } from './yard';
+import { BUILDINGS, countOf, yardOf, type BuildingId } from './yard';
 import { byId } from './decor';
 
 export type LaterGoalId =
@@ -26,20 +26,22 @@ export interface LaterGoal {
   progress: (s: PetState) => [number, number];
 }
 
+const perDay = (id: BuildingId): number => BUILDINGS[id].perHour * 24;
+
 export const LATER_GOALS: LaterGoal[] = [
-  { id: 'hive', text: 'Build your first beehive', how: 'In the yard, after 3 clover patches. It makes 24 clover a day.', clover: 100, progress: (s) => [countOf(s, 'hive'), 1] },
-  { id: 'set', text: 'Finish a set in her collection', how: 'Foraging and wild visitors bring finds. A set raises all the clover she earns.', clover: 100, progress: (s) => [COLLECTION_SETS.some((set) => setComplete(s.collection, set)) ? 1 : 0, 1] },
-  { id: 'patch5', text: 'Grow the yard to 5 clover patches', how: 'Each one makes 6 clover a day.', clover: 100, progress: (s) => [countOf(s, 'patch'), 5] },
-  { id: 'shed', text: 'Build the yard shed', how: 'The yard holds 36 hours of clover instead of 24.', clover: 120, progress: (s) => [yardOf(s).sheds, 1] },
-  { id: 'soil2', text: 'Enrich the garden soil to level 2', how: 'Richer soil makes every sprout harvest pay more.', clover: 150, progress: (s) => [soilLevel(s), 2] },
+  { id: 'hive', text: 'Build your first beehive', how: `In the yard, after 3 clover patches. It makes ${perDay('hive')} clover a day.`, clover: 200, progress: (s) => [countOf(s, 'hive'), 1] },
+  { id: 'set', text: 'Finish a set in her collection', how: 'Foraging and wild visitors bring finds. A set raises all the clover she earns.', clover: 200, progress: (s) => [COLLECTION_SETS.some((set) => setComplete(s.collection, set)) ? 1 : 0, 1] },
+  { id: 'patch5', text: 'Grow the yard to 5 clover patches', how: `Each one makes ${perDay('patch')} clover a day.`, clover: 200, progress: (s) => [countOf(s, 'patch'), 5] },
+  { id: 'shed', text: 'Build the yard shed', how: 'The yard holds 36 hours of clover instead of 24.', clover: 240, progress: (s) => [yardOf(s).sheds, 1] },
+  { id: 'soil2', text: 'Enrich the garden soil to level 2', how: 'Richer soil makes every sprout harvest pay more.', clover: 300, progress: (s) => [soilLevel(s), 2] },
   {
-    id: 'hivehelp', text: 'Put out a meadow piece that helps the beehives', how: 'The sunflower patch or the trellis arch: every hive makes 10% more.', clover: 150,
+    id: 'hivehelp', text: 'Put out a meadow piece that helps the beehives', how: 'The sunflower patch or the trellis arch: every hive makes 10% more.', clover: 300,
     progress: (s) => [(s.meadow ?? []).some((id) => byId(id)?.boost === 'hive') ? 1 : 0, 1],
   },
-  { id: 'hive3', text: 'Keep 3 beehives', how: 'Each extra one costs more, and makes 24 clover a day.', clover: 200, progress: (s) => [countOf(s, 'hive'), 3] },
-  { id: 'bestfriend', text: 'Become best friends with someone', how: 'Visit each other for about 2 weeks. Each best friend raises her clover rate.', clover: 150, progress: (s) => [bestFriends(s), 1] },
-  { id: 'hive5', text: 'Fill the yard with 5 beehives', how: 'Mushroom logs open after the fifth.', clover: 300, progress: (s) => [countOf(s, 'hive'), 5] },
-  { id: 'log', text: 'Build a mushroom log', how: 'The yard\'s biggest building: 48 clover a day.', clover: 500, progress: (s) => [countOf(s, 'log'), 1] },
+  { id: 'hive3', text: 'Keep 3 beehives', how: `Each extra one costs more, and makes ${perDay('hive')} clover a day.`, clover: 400, progress: (s) => [countOf(s, 'hive'), 3] },
+  { id: 'bestfriend', text: 'Become best friends with someone', how: 'Visit each other for about 2 weeks. Each best friend raises her clover rate.', clover: 300, progress: (s) => [bestFriends(s), 1] },
+  { id: 'hive5', text: 'Fill the yard with 5 beehives', how: 'Mushroom logs open after the fifth.', clover: 600, progress: (s) => [countOf(s, 'hive'), 5] },
+  { id: 'log', text: 'Build a mushroom log', how: `The yard's biggest building: ${perDay('log')} clover a day.`, clover: 1000, progress: (s) => [countOf(s, 'log'), 1] },
 ];
 
 /** How many goals are open at once. */
