@@ -136,12 +136,16 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
   return { w: W, h: H, px };
 }
 
-/** A pattern over the wall's own pixels (not the rim, soil or floor). */
+/**
+ * A pattern over the wall's own pixels (not the rim, soil or floor). Rows that
+ * stagger use whole row numbers: a fraction would land between pixels and
+ * paint nothing (as the daisy and clover papers did until 2026-10-06).
+ */
 function wallpaper(px: RGBA[][], id: string, isPaper: (c: RGBA) => boolean): void {
   const put = (x: number, y: number, c: RGBA) => { if (px[y]?.[x] && isPaper(px[y]![x]!)) px[y]![x] = c; };
   if (id === 'daisywall') {
     const petal = hex('FFFFFF'), mid = hex('F6D24A');
-    for (let y = 8; y < FLOOR_Y - 2; y += 9) for (let x = 4 + ((y / 9) % 2) * 5; x < SCENE_W - 3; x += 10) {
+    for (let y = 8; y < FLOOR_Y - 2; y += 9) for (let x = 4 + (Math.floor(y / 9) % 2) * 5; x < SCENE_W - 3; x += 10) {
       put(x, y, mid); put(x - 1, y, petal); put(x + 1, y, petal); put(x, y - 1, petal); put(x, y + 1, petal);
     }
   } else if (id === 'starrywall') {
@@ -153,7 +157,7 @@ function wallpaper(px: RGBA[][], id: string, isPaper: (c: RGBA) => boolean): voi
     }
   } else if (id === 'cloverwall') {
     const leaf = hex('86C95E'), dark = hex('4E8C3A');
-    for (let y = 7; y < FLOOR_Y - 2; y += 8) for (let x = 3 + ((y / 8) % 2) * 4; x < SCENE_W - 3; x += 8) {
+    for (let y = 7; y < FLOOR_Y - 2; y += 8) for (let x = 3 + (Math.floor(y / 8) % 2) * 4; x < SCENE_W - 3; x += 8) {
       put(x, y, dark); put(x - 1, y, leaf); put(x + 1, y, leaf); put(x, y - 1, leaf); put(x, y + 1, dark);
     }
   } else if (id === 'sunsetwall') {
