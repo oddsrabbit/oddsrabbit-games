@@ -90,7 +90,7 @@ MARKS = {'tier 1': _t1, 'through tier 2': _t1 + _t2, '+ fireplace': _t1 + _t2 + 
 # round once a year; the raffle is its expected cost to win all six prizes.
 SINKS = {
     'everyday decor': 13_670, 'guest book covers': 4_600, 'seasonal decor': 8_100, 'showpieces': 52_000, 'walls, floors, windows': 8_980,
-    'outfits': 13_540, 'toys': 2_630, 'meadow pieces': 12_700, 'rooms': 45_000,
+    'outfits': 13_540, 'toys': 2_630, 'meadow pieces': 5_650, 'rooms': 11_000,
     'garden upgrades and soil': 22_922, 'yard and sheds': 19_231, 'raffle': 3_907,
 }
 WELCOME_TOTAL = sum(WELCOME_PRICES)

@@ -245,8 +245,8 @@ export type ExtraRoom = 'nook' | 'loft';
 export const EXTRA_ROOMS: ExtraRoom[] = ['nook', 'loft'];
 export const ROOMS: Record<RoomId, { name: string; price: number; blurb: string; after?: RoomId }> = {
   main: { name: 'Burrow', price: 0, blurb: '' },
-  nook: { name: 'Nook', price: 15_000, blurb: 'A cozy nook dug out beside the burrow, with a window of its own.' },
-  loft: { name: 'Loft', price: 30_000, blurb: 'A loft up among the roots, with beams overhead.', after: 'nook' },
+  nook: { name: 'Nook', price: 3_000, blurb: 'A cozy nook dug out beside the burrow, with a window of its own.' },
+  loft: { name: 'Loft', price: 8_000, blurb: 'A loft up among the roots, with beams overhead.', after: 'nook' },
 };
 
 /** The rooms she has, in order. */
@@ -259,7 +259,7 @@ export function roomsOf(b: BurrowState): RoomId[] {
  * and friends' show only the main room. Rooms already dug, and the decor in
  * them, stay in the save for when they're back.
  */
-export const ROOMS_OPEN = false;
+export const ROOMS_OPEN = true;
 
 /** The rooms you can look round: the ones she has while ROOMS_OPEN, else just the main one. */
 export function openRoomsOf(b: BurrowState): RoomId[] {

@@ -34,6 +34,18 @@ more) makes finds and wild visitors 1.5 times as common and the daily gift a
 quarter bigger; the model leaves it out, so a player who keeps her thriving
 earns a little more than it says. Friends' visit care went from +8 to +15.
 
+**Also 2026‑10‑06, simplified:** the meadow's six helping pieces no longer
+boost the yard, and the five welcome pieces no longer add to visits: all
+thirteen meadow pieces are decor (150 to 1,500; friends sit at the chairs and
+the tea corner, and the friendship tree bears a fruit per friend). The yard is
+capped at 6 patches, 3 hives and 2 logs, so the last of each pays back in
+about four months; saves with more keep them. Rooms are on: the nook 3,000,
+the loft 8,000. Everything there is to buy is now about 166,000 (was about
+310,000), owned by day 321 for a casual player with no friends. The model
+also shows the catch: after the launch ladder (about day 80), months 3 and 4
+bring something new only every one to two weeks, so the game needs more
+mid-priced things to buy there.
+
 **Decisions already taken** (2026‑09‑25):
 
 - **Paced for a player who plays daily, alone.** A casual player with no
