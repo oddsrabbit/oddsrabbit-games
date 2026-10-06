@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Edge to edge: the page runs under the status bar and home indicator,
+         and the header row sits beside the app's floating back button. Must
+         come before the SDK script. See apps-sdk docs/game-header-guidelines.md. -->
+    <meta name="oddsrabbit-chrome" content="edge" />
+    <title>Word Rush</title>
+    <script>
+      // Apply the host's colorScheme before the stylesheet loads, so the first
+      // paint is already in the right theme. Without it, CSS falls back to
+      // prefers-color-scheme.
+      (function () {
+        var v = new URLSearchParams(location.search).get('colorScheme');
+        if (v === 'light' || v === 'dark') document.documentElement.dataset.colorScheme = v;
+      })();
+    </script>
+    <!-- Shared leaderboard styles first, so ours have the last word. Its JS is
+         bundled into main.js. -->
+    <link rel="stylesheet" href="../leaderboard-v1.css?v=__UI_VERSION__" />
+    <link rel="stylesheet" href="./styles.css?v=__BUILD_ID__" />
+    <script src="../sdk-v1.js?v=__SDK_VERSION__"></script>
+  </head>
+  <body>
+    <header class="bar">
+      <h1>Word Rush</h1>
+      <div class="bar-actions">
+        <button type="button" class="icon-btn" id="btn-sound" aria-label="Mute sound" aria-pressed="false">🔊</button>
+        <button type="button" class="icon-btn" id="btn-board" aria-label="Leaderboard">🏆</button>
+        <button type="button" class="icon-btn" id="btn-help" aria-label="How to play">?</button>
+      </div>
+    </header>
+    <main id="root" aria-live="polite"><p class="boot">Digging up today's board…</p></main>
+    <script type="module" src="./main.js?v=__BUILD_ID__"></script>
+  </body>
+</html>
