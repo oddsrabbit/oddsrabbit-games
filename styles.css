@@ -1111,3 +1111,5 @@ button.chip:active { transform: translateY(1px); }
 .sheet h2 img { vertical-align: -3px; }
 .sheet h3.sheet-h { margin: 14px 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
 .clover-ready li .btn { margin-left: auto; }
+/* Settings: each kind of reminder sits indented under the Reminders switch. */
+.menu-row.sub-row { padding-left: 28px; }

@@ -25,6 +25,8 @@ export interface Settings {
   rev: number;
   /** null = never asked. */
   reminders: 'on' | 'off' | null;
+  /** Reminder kinds switched off one by one in Settings (reminders.ts REMINDER_KEYS). Missing: none. */
+  quiet?: string[];
   /** Sound effects. Missing in saves from before sound existed, which means on. */
   sound?: boolean;
   /** Reminder key -> ISO fireAt last scheduled, to avoid re-sending the same one. */

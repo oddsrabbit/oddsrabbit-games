@@ -40,7 +40,7 @@ import {
 } from './social';
 import { guestsHere, guestTurns, type GuestTurn } from './guests';
 import { deviceTimeZone } from './localtime';
-import { desiredReminders, reconcile } from './reminders';
+import { desiredReminders, reconcile, REMINDER_KINDS } from './reminders';
 import { EAT_SWALLOW_MS, Scene, type Activity } from './render';
 import { newPetId } from './rng';
 import { pauseSound, play, resumeSound, setMuted } from './sound';
@@ -726,6 +726,9 @@ function buildBurrowScreen(): void {
   };
   acts.feed.append(feedBadge);
   const sound = h('button', { class: 'icon-btn', type: 'button', 'aria-pressed': 'true', 'aria-label': 'Sound' });
+  const gear = h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Settings', title: 'Settings' });
+  gear.innerHTML = GEAR;
+  gear.addEventListener('click', () => openSettings());
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite' });
   const goalBar = h('button', { class: 'goal-bar', type: 'button', hidden: true });
   goalBar.addEventListener('click', () => openShop({ select: pet.goal }));
@@ -740,7 +743,7 @@ function buildBurrowScreen(): void {
     h('header', { class: 'hud' },
       h('div', { class: 'hud-top' },
         who,
-        cloverChip(clover), arrange, sound),
+        cloverChip(clover), arrange, sound, gear),
       h('div', { class: 'needs' }, ...needEls),
       goalBar),
     stage,
@@ -1611,6 +1614,7 @@ function fmtDate(ms: number): string {
 const SPEAKER = '<path d="M4 9h3l5-4v14l-5-4H4z" fill="currentColor"></path>';
 const SPEAKER_ON = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${SPEAKER}<path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"></path></svg>`;
 const PENCIL = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-5L15 5l4 4L9 19z"></path><path d="M13 7l4 4"></path></svg>';
+const GEAR = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
 const SPEAKER_OFF = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">${SPEAKER}<path d="M16 9l5 6M21 9l-5 6"></path></svg>`;
 
 // ------------------------------------------------------------------ actions
@@ -2143,7 +2147,7 @@ async function maybeAskReminders(kind: 'nap' | 'bake' | 'forage'): Promise<void>
     h('div', { class: 'actions-col' },
       button('Yes, nudge me', 'btn primary', () => { settings.reminders = 'on'; saveSettings(); queueReconcile(); render(); close(); }),
       button('Not now', 'btn', () => { settings.reminders = 'off'; saveSettings(); render(); close(); })),
-    h('p', { class: 'note', text: `You can turn reminders on or off any time on ${pet.name}'s page, in the tab bar.` }),
+    h('p', { class: 'note', text: 'You can turn them off, or just some kinds, any time in Settings (the gear at the top).' }),
   ], { queue: true });
 }
 
@@ -4398,7 +4402,7 @@ function menuRow(label: string, sub: string, art: ItemArt | Node | null, onClick
 }
 
 /** A menu row that's an on/off switch. */
-function switchRow(label: string, sub: string, art: ItemArt | Node, on: boolean, onClick: () => void): HTMLButtonElement {
+function switchRow(label: string, sub: string, art: ItemArt | Node | null, on: boolean, onClick: () => void): HTMLButtonElement {
   const b = menuRow(label, sub, art, onClick, h('span', { class: `switch${on ? ' on' : ''}`, 'aria-hidden': 'true' }));
   b.setAttribute('aria-pressed', String(on));
   return b;
@@ -4449,7 +4453,7 @@ function renderHerPage(): void {
   const found = COLLECTIBLES.filter((c) => (pet.collection?.[c.id] ?? 0) > 0).length;
   const met = CRITTERS.filter((c) => pet.critters?.seen[c.id]).length;
   const pct = Math.round((rate(pet).total - 1) * 100);
-  const reminders = OR.capabilities.has('notifications.schedule') ? settings.reminders === 'on' : null;
+  const reminders = OR.capabilities.has('notifications.schedule') ? reminderSummary() : null;
   const sound = settings.sound !== false;
   const holiday = away();
   const sig = [pet.name, pet.coat, dressKey(dressOf(pet)), pet.daysVisited, bl.level, bl.into, w.owned.length, found, met, pct,
@@ -4496,13 +4500,7 @@ function renderHerPage(): void {
   speaker.innerHTML = sound ? SPEAKER_ON : SPEAKER_OFF;
   const settingsRows: HTMLElement[] = [switchRow('Sound', sound ? 'On' : 'Off', speaker, sound, () => toggleSound())];
   if (reminders !== null) {
-    settingsRows.push(switchRow('Reminders', reminders ? 'Nudges when she wakes, treats, the garden and gifts' : 'Off', 'moon', reminders, () => {
-      settings.reminders = reminders ? 'off' : 'on';
-      saveSettings();
-      toast(settings.reminders === 'on' ? "Reminders on. We'll nudge you now and then." : 'Reminders off.');
-      queueReconcile();
-      render();
-    }));
+    settingsRows.push(menuRow('Reminders', reminderSummary(), 'moon', () => openSettings()));
   }
   settingsRows.push(
     menuRow(holiday ? 'On holiday' : 'Going away?', holiday ? `Until ${fmtDate(pet.vacationUntilMs!)}. Bring her home early` : 'Pause her needs for a trip', 'suitcase', () => openVacation()),
@@ -4517,6 +4515,65 @@ function renderHerPage(): void {
       menuRow('Clover rate', `+${pct}% clover, from her bond, finds and best friends`, 'clover', () => openRate())),
     pageSection('Settings', null, h('div', { class: 'menu' }, ...settingsRows)),
   ]);
+}
+
+// ------------------------------------------------------------------ settings
+
+/** "Off", "All on" or "4 of 6 on", for her page's Reminders row. */
+function reminderSummary(): string {
+  if (settings.reminders !== 'on') return 'Off';
+  const on = REMINDER_KINDS.filter((k) => !settings.quiet?.includes(k.key)).length;
+  return on === REMINDER_KINDS.length ? 'All on' : on ? `${on} of ${REMINDER_KINDS.length} on` : 'Off';
+}
+
+/** The gear in the header: sound, and reminders, all of them or kind by kind. */
+function openSettings(): void {
+  openSheet((close) => {
+    const body = h('div', { class: 'menu' });
+    const fill = () => {
+      const sound = settings.sound !== false;
+      const speaker = h('span', { class: 'svg-ico' });
+      speaker.innerHTML = sound ? SPEAKER_ON : SPEAKER_OFF;
+      const rows: HTMLElement[] = [switchRow('Sound', sound ? 'On' : 'Off', speaker, sound, () => { toggleSound(); fill(); })];
+      if (OR.capabilities.has('notifications.schedule')) {
+        const on = settings.reminders === 'on';
+        rows.push(switchRow('Reminders', on ? 'Nudges now and then, the kinds below' : 'Off: no nudges at all', 'moon', on, () => {
+          settings.reminders = on ? 'off' : 'on';
+          saveSettings();
+          queueReconcile();
+          render();
+          fill();
+        }));
+        if (on) {
+          for (const k of REMINDER_KINDS) {
+            const kindOn = !settings.quiet?.includes(k.key);
+            const row = switchRow(k.label, k.sub, null, kindOn, () => {
+              const quiet = new Set(settings.quiet ?? []);
+              if (kindOn) quiet.add(k.key); else quiet.delete(k.key);
+              settings.quiet = [...quiet];
+              saveSettings();
+              queueReconcile();
+              render();
+              fill();
+            });
+            row.classList.add('sub-row');
+            rows.push(row);
+          }
+        }
+      }
+      // keep focus on the row that was tapped as the rows are rebuilt
+      const at = [...body.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement);
+      body.replaceChildren(...rows);
+      if (at >= 0) body.querySelectorAll('button')[at]?.focus();
+    };
+    fill();
+    return [
+      h('div', { class: 'eyebrow', text: 'Settings' }),
+      h('h2', { text: 'Sound and reminders' }),
+      body,
+      h('div', { class: 'actions-col' }, button('Done', 'btn', close)),
+    ];
+  }, { kind: 'settings' });
 }
 
 // ------------------------------------------------------------------ starting over

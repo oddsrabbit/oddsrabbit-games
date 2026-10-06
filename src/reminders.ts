@@ -14,6 +14,16 @@ import { DAY_MS, DAY_ROLLOVER_HOUR, GIFT_REMINDER_HOUR } from './tuning';
 export const REMINDER_KEYS = ['nap-done', 'treat-ready', 'daily-gift', 'misses-you', 'garden-ready', 'forage-home'] as const;
 export type ReminderKey = (typeof REMINDER_KEYS)[number];
 
+/** Each kind, as the Settings sheet lists it, in the order it lists them. */
+export const REMINDER_KINDS: { key: ReminderKey; label: string; sub: string }[] = [
+  { key: 'daily-gift', label: 'Daily gift', sub: 'In the morning, when her gift is ready' },
+  { key: 'forage-home', label: 'Home from foraging', sub: 'When she\'s back with her basket' },
+  { key: 'nap-done', label: 'Awake', sub: 'When she wakes up from a sleep' },
+  { key: 'treat-ready', label: 'Treat baked', sub: 'When a treat comes out of the oven' },
+  { key: 'garden-ready', label: 'Garden', sub: 'When something is ready to pick' },
+  { key: 'misses-you', label: 'Misses you', sub: 'After a day away, and when she\'s home from a holiday' },
+];
+
 export interface Reminder {
   key: ReminderKey;
   fireAtMs: number;
@@ -73,7 +83,8 @@ export async function reconcile(
   nowMs: number
 ): Promise<Record<string, string>> {
   const scheduled = { ...settings.scheduled };
-  const want = settings.reminders === 'on' ? desired : [];
+  const quiet = new Set(settings.quiet ?? []);
+  const want = settings.reminders === 'on' ? desired.filter((r) => !quiet.has(r.key)) : [];
   const wantKeys = new Set(want.map((r) => r.key));
 
   for (const key of Object.keys(scheduled)) {

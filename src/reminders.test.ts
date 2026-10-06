@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { CROPS, plant, startVacation } from './extras';
-import { desiredReminders } from './reminders';
+import { desiredReminders, reconcile } from './reminders';
+import { defaultSettings } from './store';
+import type { OddsRabbitGlobal } from '@oddsrabbit/apps-sdk';
 import { act, newPet } from './sim';
 import { DAY_MS, HOUR_MS } from './tuning';
 
@@ -70,4 +72,21 @@ test('on vacation, only a welcome-home note', () => {
   const r = desiredReminders(s, NOON + HOUR_MS, UTC);
   assert.deepEqual(keys(r), ['misses-you']);
   assert.equal(r[0]!.fireAtMs, NOON + 3 * DAY_MS);
+});
+
+test('kinds switched off in Settings are cancelled and never scheduled; the rest still are', async () => {
+  const calls: string[] = [];
+  const OR = { notifications: {
+    schedule: async (r: { key: string; fireAt: number }) => { calls.push(`+${r.key}`); return { fireAt: new Date(r.fireAt).toISOString() }; },
+    cancel: async (key: string) => { calls.push(`-${key}`); },
+  } } as unknown as OddsRabbitGlobal;
+  let s = newPet('p', 'Clover', 'snow', NOON, UTC);
+  s.needs.energy = 40;
+  const napped = act(s, 'nap', NOON, UTC);
+  assert.ok(napped.ok);
+  const want = desiredReminders(napped.state, NOON, UTC);
+  const settings = { ...defaultSettings(), reminders: 'on' as const, scheduled: { 'misses-you': new Date(NOON + DAY_MS).toISOString() }, quiet: ['misses-you'] };
+  const next = await reconcile(OR, settings, want, NOON);
+  assert.deepEqual(Object.keys(next), ['nap-done']);
+  assert.deepEqual(calls, ['-misses-you', '+nap-done']);
 });
