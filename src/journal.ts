@@ -7,20 +7,31 @@
 export interface JournalEntry { atMs: number; text: string; art?: string; first?: string }
 /**
  * A visit, kept in her guest book: who came (name and rabbit), when, what
- * they did (the visit's care kind) and the note they left, if any.
+ * they did (the visit's care kind), the note they left and the stamp they
+ * signed with, if any, and how their rabbit looked, for its picture.
  */
-export interface GuestEntry { visitUuid: string; atMs: number; from: string; rabbit: string; care: string; note?: string }
-export interface Journal { v: 1; rev: number; entries: JournalEntry[]; firsts: string[]; guestbook?: GuestEntry[] }
+export interface GuestEntry {
+  visitUuid: string; atMs: number; from: string; rabbit: string; care: string; note?: string; stamp?: string;
+  look?: { coat: string; ears?: string; head?: string | null; neck?: string | null };
+}
+/** `pinned`: signatures on her corkboard (guestbook.ts MAX_PINS), by visit. */
+export interface Journal { v: 1; rev: number; entries: JournalEntry[]; firsts: string[]; guestbook?: GuestEntry[]; pinned?: string[] }
 
 export const JOURNAL_MAX = 200;
 export const GUESTBOOK_MAX = 60;
 
-/** Sign the guest book: new visits only, newest first, the last GUESTBOOK_MAX. Returns the same journal if nothing's new. */
+/**
+ * Sign the guest book: new visits only, newest first, the last GUESTBOOK_MAX
+ * (and any pinned ones older than that, so a pin never goes missing).
+ * Returns the same journal if nothing's new.
+ */
 export function signGuestbook(j: Journal, visits: GuestEntry[]): Journal {
   const have = new Set((j.guestbook ?? []).map((g) => g.visitUuid));
   const fresh = visits.filter((v) => !have.has(v.visitUuid));
   if (!fresh.length) return j;
-  return { ...j, guestbook: [...fresh, ...(j.guestbook ?? [])].sort((a, b) => b.atMs - a.atMs).slice(0, GUESTBOOK_MAX) };
+  const pinned = new Set(j.pinned ?? []);
+  const all = [...fresh, ...(j.guestbook ?? [])].sort((a, b) => b.atMs - a.atMs);
+  return { ...j, guestbook: all.filter((g, i) => i < GUESTBOOK_MAX || pinned.has(g.visitUuid)) };
 }
 
 export function emptyJournal(): Journal {

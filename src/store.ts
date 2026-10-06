@@ -27,6 +27,8 @@ export interface Settings {
   reminders: 'on' | 'off' | null;
   /** Reminder kinds switched off one by one in Settings (reminders.ts REMINDER_KEYS). Missing: none. */
   quiet?: string[];
+  /** The stamp she signs friends' guest books with (guestbook.ts STAMPS). Missing: the heart. */
+  stamp?: string;
   /** Sound effects. Missing in saves from before sound existed, which means on. */
   sound?: boolean;
   /** Reminder key -> ISO fireAt last scheduled, to avoid re-sending the same one. */

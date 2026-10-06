@@ -137,6 +137,9 @@ export interface PetState {
   meadow?: string[];
   /** Friends' visits today that boosted her needs (only the first few do). */
   visitCare?: { day: string; count: number };
+  /** Guest book covers bought (guestbook.ts COVERS), and the one on it. */
+  covers?: string[];
+  cover?: string;
 }
 
 export type PetEvent =

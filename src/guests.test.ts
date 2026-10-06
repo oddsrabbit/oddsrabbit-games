@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { starterBurrow } from './decor';
-import { guestsHere, guestTurns } from './guests';
+import { carriedGifts, guestsHere, guestTurns } from './guests';
 import { newPet } from './sim';
 import { buildShowcase, type VisitIn } from './social';
 import { GUESTS, HOUR_MS } from './tuning';
@@ -44,4 +44,18 @@ test('the turns come out the same whatever order the inbox lists them in', () =>
   const one = guestTurns(visits, NOON + 20 * 60_000, 'UTC').map((t) => [t.visit.from.uuid, t.fromMs]);
   const two = guestTurns([...visits].reverse(), NOON + 20 * 60_000, 'UTC').map((t) => [t.visit.from.uuid, t.fromMs]);
   assert.deepEqual(one, two);
+});
+
+test('a guest carries their newest gift in; the rest, and gifts from anyone not coming, are loose', () => {
+  const gift = (id: string, from: string, min: number) => ({ giftUuid: id, from: { uuid: from }, sentAt: at(min) });
+  const turns = guestTurns([visit('a', 0), visit('b', 0), visit('c', 0)], NOON, 'UTC');
+  const gifts = [gift('old-a', 'a', -2000), gift('new-a', 'a', -20), gift('c1', 'c', -10), gift('z1', 'z', -5)];
+  const { carried, loose } = carriedGifts(gifts, turns, NOON);
+  assert.equal(carried.get('a')?.giftUuid, 'new-a');
+  assert.equal(carried.get('c')?.giftUuid, 'c1', 'c is waiting at the door: still carrying it');
+  assert.deepEqual(loose.map((g) => g.giftUuid).sort(), ['old-a', 'z1']);
+  // once their turn is over, an unopened gift is left loose
+  const later = carriedGifts(gifts, turns, NOON + 3 * HOUR_MS);
+  assert.equal(later.carried.size, 0);
+  assert.equal(later.loose.length, 4);
 });

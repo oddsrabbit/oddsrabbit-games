@@ -28,6 +28,12 @@ day 19, 28 and 307 (were 32, 47 and 452). Something new about every
 once the launch ladder is bought: that needs more mid-priced items, not
 more income.
 
+**Also 2026‑10‑06:** the corkboard (250) joined tier 2 and guest book covers
+(4,600 in all) joined the shop. **Thriving** (food, joy and clean all 60 or
+more) makes finds and wild visitors 1.5 times as common and the daily gift a
+quarter bigger; the model leaves it out, so a player who keeps her thriving
+earns a little more than it says. Friends' visit care went from +8 to +15.
+
 **Decisions already taken** (2026‑09‑25):
 
 - **Paced for a player who plays daily, alone.** A casual player with no

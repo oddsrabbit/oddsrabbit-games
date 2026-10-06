@@ -15,6 +15,7 @@ import { BUILDING_IDS, BUILDINGS, countOf, yardOf, type BuildingId } from './yar
 import { widgetSprites, type WidgetSprites } from './widgetSprites';
 import { trip } from './forage';
 import { COLLECTIBLES, COLLECTION_SETS, setComplete, type Collectible, type CollectionSet } from './collectibles';
+import { coverById, readKind, readPins, type PinShow } from './guestbook';
 
 /** Widget and friends' view of a rabbit. Field names are a contract with the widget; add, don't rename. */
 export interface ShowcaseData {
@@ -43,6 +44,10 @@ export interface ShowcaseData {
   missing?: string[];
   /** Her garden, for friends to look round. Missing from older snapshots. */
   garden?: GardenShow;
+  /** Notes she's pinned to her corkboard (guestbook.ts), for friends to read. Missing from older snapshots. */
+  pinned?: PinShow[];
+  /** Her guest book's cover (guestbook.ts COVERS). Missing: the classic. */
+  cover?: string;
   /** Her dug-out rooms' decor (decor.ts ROOMS), for friends to look round too. Only the rooms she has. */
   rooms?: Partial<Record<ExtraRoom, ShowItem[]>>;
   /**
@@ -132,7 +137,8 @@ export function friendGardenPet(d: ShowcaseData): PetState | null {
   return stub;
 }
 
-export function buildShowcase(pet: PetState, burrow: BurrowState): ShowcaseData {
+/** `pins`: the notes on her corkboard, as friends see them (main.ts pinsToShow). */
+export function buildShowcase(pet: PetState, burrow: BurrowState, pins?: PinShow[]): ShowcaseData {
   const nap = timer(pet, 'nap');
   const round = (n: number) => Math.round(n);
   return {
@@ -155,6 +161,8 @@ export function buildShowcase(pet: PetState, burrow: BurrowState): ShowcaseData 
     ...(({ wall, floor, window }) => ({ wall, floor, window }))(surfacesOf(burrow)),
     missing: COLLECTIBLES.filter((c) => !(pet.collection?.[c.id] ?? 0)).map((c) => c.id),
     garden: gardenShow(pet, burrow),
+    ...(pins?.length ? { pinned: pins } : {}),
+    ...(pet.cover && pet.cover !== 'classic' ? { cover: pet.cover } : {}),
     ...(() => {
       const sprites = widgetSprites(pet.coat, { head: pet.wardrobe?.head ?? null, neck: pet.wardrobe?.neck ?? null, ears: earsOf(pet) });
       return sprites ? { widget: { sprites } } : {};
@@ -210,6 +218,8 @@ export function readShowcase(raw: unknown): ShowcaseData | null {
     window: surface(d.window, 'window'),
     ...(d.garden ? { garden: readGarden(d.garden) } : {}),
     ...(d.rooms && typeof d.rooms === 'object' ? { rooms: Object.fromEntries(EXTRA_ROOMS.filter((r) => r in (d.rooms as object)).map((r) => [r, readItems((d.rooms as Record<string, unknown>)[r], MAX_ROOM_ITEMS)])) } : {}),
+    ...(Array.isArray(d.pinned) && readPins(d.pinned).length ? { pinned: readPins(d.pinned) } : {}),
+    ...(coverById(d.cover) ? { cover: d.cover as string } : {}),
     ...(Array.isArray(d.missing) ? { missing: COLLECTIBLES.filter((c) => (d.missing as unknown[]).includes(c.id)).map((c) => c.id) } : {}),
   };
 }
@@ -389,36 +399,13 @@ export function friendRank(f: { visitedYou: boolean; visited: boolean }): 0 | 1 
 }
 
 // ---------------------------------------------------------------- the guest book
-//
-// A visitor can leave a note: one of these lines, never their own words (the
-// platform only carries a short kind, and a line picked from a list needs no
-// moderation). It rides on the visit's kind after the care: `snack-cozy`.
-// `{name}` is the host's rabbit.
+// Notes, stamps, pins and covers live in guestbook.ts; these keep the old names.
 
-export const GUEST_NOTES = {
-  cozy: 'Your burrow is so cozy!',
-  sweet: '{name} is the sweetest.',
-  decor: "Love what you've done with the place.",
-  hello: 'Just popping in to say hello!',
-  garden: 'Your garden is looking lovely.',
-  again: "Can't wait to visit again!",
-} as const;
-export type GuestNote = keyof typeof GUEST_NOTES;
+export { GUEST_NOTES, noteText, visitKind, type GuestNote } from './guestbook';
 
-/** The kind to record for a visit: the care, and the note if there is one. */
-export function visitKind(care: VisitKind, note?: GuestNote | null): string {
-  return note ? `${care}-${note}` : care;
-}
-
-/** The note on a visit, if it has one we know. */
-export function noteOf(kind: unknown): GuestNote | null {
-  if (typeof kind !== 'string') return null;
-  const n = kind.split('-')[1];
-  return n && Object.prototype.hasOwnProperty.call(GUEST_NOTES, n) ? (n as GuestNote) : null;
-}
-
-export function noteText(note: GuestNote, hostRabbit: string): string {
-  return GUEST_NOTES[note].replace('{name}', hostRabbit);
+/** The note on a visit, if it has one we can read: a fixed note's key or a phrase's code. */
+export function noteOf(kind: unknown): string | null {
+  return readKind(kind).note;
 }
 
 /** A visit as the game uses it: the inbox row, trimmed. */

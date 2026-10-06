@@ -15,6 +15,11 @@ export const SHOP_ART = {
     '.p...y...r..', 'pyp.yry.rwr.', '.p...y...r..', '.g..gG..g.g.', '.Gg.G..gG.G.',
     'nnnnnnnnnnnn', 'nNnnnnnnnnNn', 'NNNNNNNNNNNN',
   ],
+  // the guest book's corkboard: a wooden frame, four notes pinned up
+  corkboard: [
+    'nnnnnnnnnnnnnn', 'nTTTTTTTTTTTTn', 'nTwrwwTTpprpTn', 'nTwwwwTTppppTn', 'nTwwwwTTppppTn', 'nTTTTTTTTTTTTn',
+    'nTyyryTbbrbbTn', 'nTyyyyTbbbbbTn', 'nTyyyyTbbbbbTn', 'nTTTTTTTTTTTTn', 'NNNNNNNNNNNNNN',
+  ],
   herbs: [
     '....n....', '...nnn...', '...UuU...', '..gGgGg..', '.gGgGgGg.', 'gGg.G.gGg', 'Gg..G..gG', '.G..g..G.',
   ],

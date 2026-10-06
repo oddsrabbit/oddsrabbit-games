@@ -32,3 +32,18 @@ export function guestTurns(visits: VisitIn[], nowMs: number, tz: string): GuestT
 export function guestsHere(turns: GuestTurn[], nowMs: number): GuestTurn[] {
   return turns.filter((t) => t.fromMs <= nowMs && nowMs < t.untilMs);
 }
+
+/**
+ * Gifts brought along on a visit: a friend whose turn hasn't ended carries
+ * their newest gift in (opened by tapping them); every other gift is loose,
+ * for the inbox sheet. A guest who hops home with it unopened leaves it loose.
+ */
+export function carriedGifts<G extends { from: { uuid: string }; sentAt: string }>(gifts: G[], turns: GuestTurn[], nowMs: number): { carried: Map<string, G>; loose: G[] } {
+  const coming = new Set(turns.filter((t) => t.untilMs > nowMs).map((t) => t.visit.from.uuid));
+  const carried = new Map<string, G>();
+  for (const g of [...gifts].sort((a, b) => Date.parse(b.sentAt) - Date.parse(a.sentAt))) {
+    if (coming.has(g.from.uuid) && !carried.has(g.from.uuid)) carried.set(g.from.uuid, g);
+  }
+  const held = new Set(carried.values());
+  return { carried, loose: gifts.filter((g) => !held.has(g)) };
+}

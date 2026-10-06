@@ -118,7 +118,9 @@ const FRIENDS = [
     data: { v: 1, name: 'Pip', coat: 'ginger', needs: { hunger: 70, happy: 80, energy: 60, clean: 75 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
       daysVisited: 23, bondLevel: 4, head: 'flowercrown', neck: null, missing: ['acorn', 'bat', 'marble'],
       garden: { plots: [{ crop: 'berry', plantedAtMs: now() - 9 * 3600e3, readyAtMs: now() - 3600e3 }, { crop: 'sprout', plantedAtMs: now() - 3600e3, readyAtMs: now() + 3 * 3600e3 }], yard: { patch: 4, hive: 1 }, sheds: 1, meadow: null },
-      items: [{ id: 'rug', x: 49, y: 106, flip: false }, { id: 'mushroom', x: 20, y: 104, flip: false }, { id: 'garland', x: 50, y: 12, flip: false }, { id: 'jar', x: 80, y: 110, flip: true }] } },
+      items: [{ id: 'rug', x: 49, y: 106, flip: false }, { id: 'mushroom', x: 20, y: 104, flip: false }, { id: 'garland', x: 50, y: 12, flip: false }, { id: 'jar', x: 80, y: 110, flip: true }, { id: 'corkboard', x: 20, y: 14, flip: false }],
+      // her corkboard: two notes from her guest book (guestbook.ts), on the berry cover
+      pinned: [{ r: 'Bun', n: 'n2014', s: 'acorn', c: 'silver' }, { r: 'Mochi', n: 'n1000', s: 'goldleaf', c: 'midnight' }], cover: 'berry' } },
   { uuid: '33333333-3333-4333-8333-333333333333', username: 'mochi.mama', avatar: null, updatedAt: new Date().toISOString(),
     data: { v: 1, name: 'Mochi', coat: 'midnight', needs: { hunger: 50, happy: 60, energy: 40, clean: 80 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
       daysVisited: 4, bondLevel: 1, head: 'beanie', neck: 'redscarf',
@@ -135,7 +137,8 @@ const EXTRA = [['Bun', 'silver', 'bun.bun'], ['Maple', 'cream', 'maple_leaf']].m
 const visitors = [...FRIENDS, ...EXTRA].slice(0, Math.max(0, Math.min(4, Number(q.get('guests') ?? 2))));
 const seenAt = q.get('seen') ? new Date(now() - Number(q.get('seen')) * 60e3).toISOString() : null;
 const visits = q.get('visits') === '0' ? [] : visitors.map((f, i) => ({
-  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack', 'pat', 'brush', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt,
+  // each with a note and a stamp (guestbook.ts): "Wow, your burrow is so cozy!", "Aww, <her> is adorable!", "Your fireplace is so cozy!"
+  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack-n1000-s07', 'pat-n2014-s1c', 'brush-n00u0-s03', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt,
   from: { uuid: f.uuid, username: f.username, avatar: null }, showcase: f.data, counts: true,
 }));
 const visitedToday = [];

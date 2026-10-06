@@ -36,7 +36,13 @@ export interface SceneModel {
   /** Tonight's moon phase, for the moon window. */
   moon?: number;
   /** Friends' rabbits in the burrow now (guests.ts), keyed by the friend's id so each keeps its place. */
-  guests?: { id: string; coat: Coat; dress?: Dress }[];
+  guests?: { id: string; coat: Coat; dress?: Dress; parcel?: boolean }[];
+  /**
+   * The Friends page's porch: a room full of everyone who came by lately,
+   * three deep on the floor, hopping about, chasing each other and doing
+   * binkies, rather than two guests pottering quietly.
+   */
+  lively?: boolean;
   /** Picks her favourite piece of decor, which changes day to day: her id and the date. */
   seed?: string;
   /** A wild visitor in the burrow (wildlife.ts CritterId; its art has the same name). */
@@ -87,8 +93,13 @@ const SPOT_MS = [20_000, 40_000] as const;
 const GUEST_Y = 110;
 /** How often a guest wanders somewhere else, give or take. */
 const GUEST_WANDER_MS = [6_000, 14_000] as const;
-/** A visiting rabbit's walk: where it is, where it's going, and when it last got a pat. */
-interface GuestWalk { x: number; targetX: number; facing: 1 | -1; hopPhase: number; nextWander: number; happyUntil: number; arriving: boolean }
+/** Lively, guests stand in three rows, back to front, so a room of six still fits. */
+const GUEST_ROWS = [103, 109, 115] as const;
+const LIVELY_WANDER_MS = [1_500, 4_500] as const;
+/** A binky: a high twisting leap, this long, now and then when lively. */
+const BINKY_LEAP_MS = 650;
+/** A visiting rabbit's walk: where it is (and which row), where it's going, its next binky, and when it last got a pat. */
+interface GuestWalk { x: number; y: number; targetX: number; facing: 1 | -1; hopPhase: number; nextWander: number; happyUntil: number; arriving: boolean; binkyAt: number; nextBinky: number; turned: boolean }
 
 export interface Box { x: number; y: number; w: number; h: number }
 
@@ -423,49 +434,79 @@ export class Scene {
   private drawGuests(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[]): void {
     const ctx = this.ctx;
     const guests = m.guests ?? [];
+    const lively = !!m.lively && !reduceMotion;
     this.guestOrder = guests.map((g) => g.id);
     for (const id of [...this.guestWalks.keys()]) if (!this.guestOrder.includes(id)) this.guestWalks.delete(id);
-    const asleep = m.mood === 'asleep';
+    const asleep = m.mood === 'asleep' && !m.lively;
+    const wander = lively ? LIVELY_WANDER_MS : GUEST_WANDER_MS;
     guests.forEach((g, i) => {
       let w = this.guestWalks.get(g.id);
       if (!w) {
-        const targetX = this.guestSpot(placed, g.id);
+        const y = m.lively ? GUEST_ROWS[i % GUEST_ROWS.length]! : GUEST_Y;
+        const targetX = this.guestSpot(placed, g.id, y, !!m.lively);
         const fromLeft = targetX < SCENE_W / 2;
         // from just past the wall, so the first hop is already in view
         const x = reduceMotion ? targetX : fromLeft ? -6 : SCENE_W + 6;
-        w = { x, targetX, facing: fromLeft ? -1 : 1, hopPhase: 0, nextWander: now + GUEST_WANDER_MS[0], happyUntil: 0, arriving: !reduceMotion };
+        w = { x, y, targetX, facing: fromLeft ? -1 : 1, hopPhase: 0, nextWander: now + wander[0] * (lively ? Math.random() : 1), happyUntil: 0, arriving: !reduceMotion,
+          binkyAt: -1e9, nextBinky: now + 3_000 + Math.random() * 6_000, turned: false };
         this.guestWalks.set(g.id, w);
       }
       const arrived = Math.abs(w.targetX - w.x) <= 0.5;
       if (arrived && !asleep && !m.decorating && now > w.nextWander) {
-        w.targetX = this.guestSpot(placed, g.id);
-        w.nextWander = now + GUEST_WANDER_MS[0] + Math.random() * (GUEST_WANDER_MS[1] - GUEST_WANDER_MS[0]);
+        // lively, they often go and find someone else
+        const friend = lively && Math.random() < 0.35 ? [...this.guestWalks.values()].filter((o) => o !== w)[Math.floor(Math.random() * (this.guestWalks.size - 1))] : undefined;
+        const near = friend ? Math.max(14, Math.min(SCENE_W - 14, Math.round(friend.x + (Math.random() < 0.5 ? -20 : 20)))) : null;
+        w.targetX = near !== null && this.roomAt(near, g.id, w.y) ? near : this.guestSpot(placed, g.id, w.y, !!m.lively);
+        w.nextWander = now + wander[0] + Math.random() * (wander[1] - wander[0]);
       }
+      // a binky, standing still: up, a twist in the air, and down facing the other way
+      if (lively && arrived && now > w.nextBinky) {
+        w.binkyAt = now;
+        w.nextBinky = now + 5_000 + Math.random() * 9_000;
+        if (Math.random() < 0.5) this.burst('heart', 1, now, { x: w.x, y: w.y - 30 });
+      }
+      const binkyT = (now - w.binkyAt) / BINKY_LEAP_MS;
+      const binky = binkyT >= 0 && binkyT < 1;
+      if (binky && binkyT > 0.5 && !w.turned) { w.facing = w.facing === 1 ? -1 : 1; w.turned = true; }
+      if (!binky) w.turned = false;
       const dx = w.targetX - w.x;
       if (Math.abs(dx) > 0.5 && !asleep) {
         if (reduceMotion) { w.x = w.targetX; w.hopPhase = 0; }
         else {
-          // bounding in, then pottering
-          const speed = w.arriving ? 0.9 : 0.3;
-          w.facing = dx > 0 ? -1 : 1; w.x += Math.sign(dx) * Math.min(Math.abs(dx), speed); w.hopPhase = (w.hopPhase + (w.arriving ? 0.16 : 0.09)) % 1;
+          // bounding in, then pottering (bouncier when lively)
+          const speed = w.arriving ? 0.9 : lively ? 0.6 : 0.3;
+          w.facing = dx > 0 ? -1 : 1; w.x += Math.sign(dx) * Math.min(Math.abs(dx), speed); w.hopPhase = (w.hopPhase + (w.arriving ? 0.16 : lively ? 0.14 : 0.09)) % 1;
         }
-      } else {
+      } else if (!binky) {
         w.hopPhase = 0;
         w.arriving = false;
         // standing about, they turn to look at her
-        w.facing = this.x > w.x ? -1 : 1;
+        if (!lively) w.facing = this.x > w.x ? -1 : 1;
       }
-      const face: Face = asleep ? 'asleep' : w.happyUntil > now ? 'happy' : 'content';
+    });
+    // back rows first, so the front row stands in front
+    const order = guests.map((g, i) => ({ g, i, w: this.guestWalks.get(g.id)! })).sort((a, b) => a.w.y - b.w.y);
+    for (const { g, i, w } of order) {
+      const binkyT = (now - w.binkyAt) / BINKY_LEAP_MS;
+      const binky = binkyT >= 0 && binkyT < 1;
+      const face: Face = asleep ? 'asleep' : w.happyUntil > now || binky ? 'happy' : 'content';
       const frame: Frame = asleep ? (!reduceMotion && Math.floor(now / 1500 + i) % 2 ? 1 : 0)
         : !reduceMotion && w.hopPhase === 0 && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
       const sp = this.rabbit(g.coat, face, frame, g.dress);
-      const hop = w.hopPhase ? Math.round(Math.sin(w.hopPhase * Math.PI) * 3) : 0;
-      const left = Math.round(w.x - RABBIT_W / 2), top = GUEST_Y - RABBIT_GROUND - hop;
+      const hop = binky ? Math.round(Math.sin(binkyT * Math.PI) * 8) : w.hopPhase ? Math.round(Math.sin(w.hopPhase * Math.PI) * (lively ? 4 : 3)) : 0;
+      const left = Math.round(w.x - RABBIT_W / 2), top = w.y - RABBIT_GROUND - hop;
       ctx.save();
       if (w.facing === 1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
       ctx.drawImage(sp.canvas, left, top);
       ctx.restore();
-    });
+      // a gift brought along: a parcel at their feet, in front, that bobs to be noticed
+      if (g.parcel) {
+        const p = this.item('gift');
+        const bob = !reduceMotion && Math.floor(now / 700 + i) % 3 === 0 ? 1 : 0;
+        const px = Math.round(w.x + (w.facing === 1 ? 7 : -7) - p.w / 2);
+        ctx.drawImage(p.canvas, px, w.y - p.h - bob + 1);
+      }
+    }
   }
 
   /**
@@ -474,23 +515,32 @@ export class Scene {
    * rabbit's width from her and the other guests. In a full room, in front of
    * a piece will do; failing that, wherever is furthest from everyone.
    */
-  private guestSpot(placed: { item: PlacedItem; def: DecorDef }[], id: string): number {
+  private guestSpot(placed: { item: PlacedItem; def: DecorDef }[], id: string, y = GUEST_Y, lively = false): number {
     const pieces = placed.filter((p) => p.def.zone === 'floor').map((p) => ({ x: p.item.x, w: this.item(p.def.art).w }));
-    // clear of her (where she is and where she's going) and the other guests
-    const others = [this.x, this.targetX, ...[...this.guestWalks].filter(([k]) => k !== id).map(([, w]) => w.targetX)];
-    const apart = (x: number) => others.every((o) => Math.abs(x - o) >= 18);
+    // clear of her (where she is and where she's going) and the other guests; lively, closer to those in other rows
+    const guests = [...this.guestWalks].filter(([k]) => k !== id).map(([, w]) => w);
+    const others = [this.x, this.targetX, ...guests.filter((w) => !lively || w.y === y).map((w) => w.targetX)];
+    const behind = lively ? guests.filter((w) => w.y !== y).map((w) => w.targetX) : [];
+    const apart = (x: number) => others.every((o) => Math.abs(x - o) >= (lively ? 20 : 18)) && behind.every((o) => Math.abs(x - o) >= 13);
     const clear = (x: number) => apart(x) && pieces.every((p) => Math.abs(x - p.x) >= p.w / 2 + 7);
     const floor: number[] = [];
     for (let x = 14; x <= SCENE_W - 14; x += 3) floor.push(x);
     const pick = (xs: number[]) => xs[Math.floor(Math.random() * xs.length)]!;
     const beside = pieces.flatMap((p) => [p.x - p.w / 2 - 8, p.x + p.w / 2 + 8]).map(Math.round).filter((x) => x >= 14 && x <= SCENE_W - 14 && clear(x));
     const open = floor.filter(clear);
-    if (beside.length && (Math.random() < 0.5 || !open.length)) return pick(beside);
+    // lively, they use the whole floor rather than gathering by the furniture
+    if (beside.length && !lively && (Math.random() < 0.5 || !open.length)) return pick(beside);
     if (open.length) return pick(open);
     const spaced = floor.filter(apart);
     if (spaced.length) return pick(spaced);
     const room = (x: number) => Math.min(...others.map((o) => Math.abs(x - o)));
     return floor.reduce((best, x) => (room(x) > room(best) ? x : best));
+  }
+
+  /** Whether a lively guest in row `y` can stand at `x`: clear of her, and of the others. */
+  private roomAt(x: number, id: string, y: number): boolean {
+    if (Math.abs(x - this.x) < 20 || Math.abs(x - this.targetX) < 20) return false;
+    return [...this.guestWalks].every(([k, w]) => k === id || Math.abs(x - w.targetX) >= (w.y === y ? 20 : 13));
   }
 
   private guestWalks = new Map<string, GuestWalk>();
@@ -549,7 +599,7 @@ export class Scene {
     const guests = m.guests ?? [];
     for (let i = 0; i < guests.length; i++) {
       const w = this.guestWalks.get(guests[i]!.id);
-      if (w && Math.abs(px - w.x) <= 13 && py >= GUEST_Y - 32 && py <= GUEST_Y) return i;
+      if (w && Math.abs(px - w.x) <= 13 && py >= w.y - 32 && py <= w.y) return i;
     }
     return null;
   }
@@ -559,7 +609,7 @@ export class Scene {
     const w = this.guestWalks.get(this.guestOrder[i] ?? '');
     if (!w) return;
     w.happyUntil = now + 1400;
-    this.burst('heart', 2, now, { x: w.x, y: GUEST_Y - 30 });
+    this.burst('heart', 2, now, { x: w.x, y: w.y - 30 });
   }
 
   /** Moving parts drawn over a piece: the fireplace's flames, the clocks' hands and pendulum. */

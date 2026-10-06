@@ -56,6 +56,8 @@ export const CATALOG: DecorDef[] = [
   { id: 'kettle', name: 'Tea kettle', price: 200, art: 'kettle', zone: 'floor', bond: 1, tier: 2 },
   { id: 'patchcushion', name: 'Patchwork cushion bed', price: 220, art: 'patchcushion', zone: 'floor', bond: 1, tier: 2, bed: true },
   { id: 'bunting', name: 'Bunting', price: 300, art: 'bunting', zone: 'hang', bond: 1, tier: 2 },
+  // the guest book's notes she pins up (guestbook.ts): tap it to read them; friends can too
+  { id: 'corkboard', name: 'Corkboard', price: 250, art: 'corkboard', zone: 'hang', bond: 1, tier: 2 },
   { id: 'lamp', name: 'Reading lamp', price: 350, art: 'lamp', zone: 'floor', bond: 1, tier: 2, glow: true },
   { id: 'bookshelf', name: 'Bookshelf nook', price: 400, art: 'bookshelf', zone: 'floor', bond: 1, tier: 2 },
   { id: 'hayloft', name: 'Hay loft bed', price: 550, art: 'hayloft', zone: 'floor', bond: 1, tier: 2, bed: true },

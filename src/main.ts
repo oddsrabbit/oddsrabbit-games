@@ -35,10 +35,14 @@ import { isOut, trip as tripOf, type Loot } from './forage';
 import { drawTicket, prizeWon, ticketsBought } from './raffle';
 import { addEntry, emptyJournal, mergeJournal, MILESTONE_DAYS, signGuestbook, type Journal } from './journal';
 import {
-  applyGift, applyVisits, buildShowcase, buyWelcome, careHint, friendNeeds, friendRank, findGiftKind, nextWelcome, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, GUEST_NOTES, noteOf, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
-  type GuestNote, type ShowcaseData, type VisitIn, type VisitKind,
+  applyGift, applyVisits, buildShowcase, buyWelcome, careHint, friendNeeds, friendRank, findGiftKind, nextWelcome, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
+  type ShowcaseData, type VisitIn, type VisitKind,
 } from './social';
-import { guestsHere, guestTurns, type GuestTurn } from './guests';
+import { carriedGifts, guestsHere, guestTurns, type GuestTurn } from './guests';
+import {
+  buyCover, coverById, coverOf, COVERS, isNote, MAX_PINS, OPENERS, phraseCode, phraseOf, PRAISE, readKind, stampsFor, subjectsFor,
+  subjectText, togglePin, useCover, type Phrase, type PinShow,
+} from './guestbook';
 import { deviceTimeZone } from './localtime';
 import { desiredReminders, reconcile, REMINDER_KINDS } from './reminders';
 import { EAT_SWALLOW_MS, Scene, type Activity } from './render';
@@ -808,6 +812,7 @@ function buildBurrowScreen(): void {
     if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { doAction('pet'); return; }
     // the wishing well: she makes a wish (just for the moment; nothing is paid)
     const piece = scene.hitTest(here(), x, y);
+    if (piece?.id === 'corkboard') { play('flip'); openOwnCorkboard(); return; }
     if (piece?.id === 'wishingwell' && !isOut(pet, now())) {
       scene.burst('sparkle', 3, performance.now(), { x: piece.x, y: piece.y - 20 });
       play('find');
@@ -1021,8 +1026,8 @@ function catchUp(showSummary: boolean): void {
   giveWelcomePieces();
   queueReconcile();
   queueShowcase();
-  void checkInbox();
-  void checkVisits();
+  // visits first: a friend's gift comes in with them
+  void checkVisits().then(() => checkInbox());
   render();
 }
 
@@ -1102,7 +1107,7 @@ function frame(t: number): void {
   }
   // on the Friends page only its porch shows the burrow (the main room); on Her page, nothing
   if (tab === 'friends') {
-    if (porch?.stage.isConnected) { lastFrame = t; porch.scene.draw(burrowModel(now(), 'main'), t); }
+    if (porch?.stage.isConnected) { lastFrame = t; porch.scene.draw({ ...burrowModel(now(), 'main'), guests: porchGuests(), lively: true }, t); }
     return;
   }
   if (!scene || tab === 'her') return;
@@ -1158,6 +1163,39 @@ function porchStage(): HTMLElement {
   new ResizeObserver(() => { if (stage.isConnected) fitScene(stage, canvas, sc); }).observe(stage);
   porch = { stage, scene: sc };
   return stage;
+}
+
+/** How far back the porch looks for friends who came by. */
+const RECENT_MS = 3 * 24 * HOUR_MS;
+/** The most on the porch at once. */
+const PORCH_MAX = 6;
+let recentCache: { book: unknown; minute: number; list: NonNullable<Journal['guestbook']> } | null = null;
+
+/** Friends who came by lately, one each, newest first: from the guest book, which remembers how their rabbit looked. */
+function recentVisitors(): NonNullable<Journal['guestbook']> {
+  const n = now();
+  const minute = Math.floor(n / 60_000);
+  if (recentCache && recentCache.book === journal.guestbook && recentCache.minute === minute) return recentCache.list;
+  const seen = new Set<string>();
+  const list = (journal.guestbook ?? []).filter((g) => {
+    if (n - g.atMs > RECENT_MS || !g.look || !(COATS as readonly string[]).includes(g.look.coat) || seen.has(g.from)) return false;
+    seen.add(g.from);
+    return true;
+  }).slice(0, PORCH_MAX);
+  recentCache = { book: journal.guestbook, minute, list };
+  return list;
+}
+
+/** Everyone who came by lately, in the Friends page's porch, with any parcel they're carrying. */
+function porchGuests(): { id: string; coat: Coat; dress: Dress; parcel?: boolean }[] {
+  const here = guestModels();
+  const ids = new Set(here.map((g) => g.id));
+  const fromUser = new Map(visitTurns.map((t) => [t.visit.from.username, t.visit.from.uuid]));
+  const rest = recentVisitors().filter((g) => !ids.has(fromUser.get(g.from) ?? '')).map((g) => ({
+    id: `p:${g.from}`, coat: g.look!.coat as Coat,
+    dress: { head: g.look!.head ?? null, neck: g.look!.neck ?? null, ears: (EARS as readonly string[]).includes(g.look!.ears ?? '') ? (g.look!.ears as Ears) : 'long' },
+  }));
+  return [...here, ...rest].slice(0, PORCH_MAX);
 }
 
 /** The wild visitor in the burrow now, if any (none while she's on holiday). */
@@ -4967,7 +5005,7 @@ function queueShowcase(): void {
 function publishShowcase(): void {
   if (!OR.user || !OR.capabilities.has('showcase.publish') || !pet) return;
   window.clearTimeout(showcaseTimer);
-  const d = buildShowcase(pet, burrow);
+  const d = buildShowcase(pet, burrow, pinsToShow());
   const sig = showcaseSignature(d);
   if (sig === lastShowcaseSig && Date.now() - lastShowcaseAt < 20 * 60_000) return;
   lastShowcaseSig = sig;
@@ -4975,38 +5013,72 @@ function publishShowcase(): void {
   void OR.showcase.publish(d as unknown as Record<string, unknown>).catch(() => { lastShowcaseSig = ''; });
 }
 
-/** Gifts from friends: open them all at once. */
+type GiftIn = Awaited<ReturnType<typeof OR.gifts.inbox>>[number];
+/** Gifts a guest brought in, by the friend's id: tap them to open it (guests.ts carriedGifts). */
+let carried = new Map<string, GiftIn>();
+
+/** Open gifts: claim each and pay it out. Returns how many opened and the clover they paid. */
+async function openGifts(gifts: GiftIn[]): Promise<{ opened: number; clover: number }> {
+  let opened = 0, clover = 0;
+  for (const g of gifts) {
+    try {
+      await OR.gifts.claim(g.giftUuid);
+    } catch (e) {
+      // claimed on another device, or expired: nothing to pay out
+      if (errCode(e) !== 'gifts/claimed' && errCode(e) !== 'gifts/not-found') toast("Couldn't open that one. Try again later.");
+      continue;
+    }
+    const paid = applyGift(pet, { kind: g.kind, from: g.from.uuid }, now(), tz);
+    pet = paid.state;
+    clover += paid.clover;
+    opened++;
+    const find = findOfGift(g.kind);
+    if (find) note(`${article(find.name).replace(/^./, (x) => x.toUpperCase())} from ${g.from.username}, for the shelf.`, find.id as ItemArt);
+    else note(`A gift from ${g.from.username}.`, (giftInfo(g.kind)?.art ?? 'gift') as ItemArt, `giftfrom:${g.from.uuid}`);
+    if (paid.completed) {
+      const set = paid.completed;
+      toast(`${set.name} set complete, thanks to ${g.from.username}!`, () => play('find'));
+      note(`Finished the ${set.name.toLowerCase()} set, with help from ${g.from.username}.`, 'sparkle', `set:${set.id}`);
+    }
+  }
+  if (opened) { payLumps(settleLumps(pet)); savePet(); play('gift'); haptic('success'); }
+  return { opened, clover };
+}
+
+/** A guest's parcel, opened by tapping them. */
+async function openCarried(fromUuid: string, rabbit: string): Promise<void> {
+  const g = carried.get(fromUuid);
+  if (!g) return;
+  carried.delete(fromUuid);
+  const r = await openGifts([g]);
+  if (r.opened) {
+    const info = giftInfo(g.kind);
+    toast(`${rabbit} brought you ${info ? info.name.replace(/^A /, 'a ') : 'a surprise'}!${r.clover ? ` +${r.clover} clover.` : ''}`);
+  }
+  render();
+}
+
+/**
+ * Gifts from friends. One a guest brought waits with them in the burrow
+ * (tap them to open it); the rest open together from a sheet.
+ */
 async function checkInbox(): Promise<void> {
   if (!OR.user || !OR.capabilities.has('gifts.send')) return;
-  const gifts = await OR.gifts.inbox().catch(() => []);
+  const all = await OR.gifts.inbox().catch(() => [] as GiftIn[]);
+  const split = carriedGifts(all, visitTurns, now());
+  const fresh = [...split.carried.keys()].filter((id) => !carried.has(id));
+  carried = split.carried;
+  const gifts = split.loose;
+  // say so once, for a guest already in (one at the door will be noticed when they hop in)
+  const inNow = guestsHere(visitTurns, now()).filter((t) => fresh.includes(t.visit.from.uuid));
+  if (inNow.length) toast(`${names(inNow.map((t) => t.data.name))} brought ${inNow.length === 1 ? 'a gift' : 'gifts'}. Tap ${inNow.length === 1 ? 'them' : 'one'} to open it.`);
+  render();
   if (!gifts.length || sheetPending('inbox')) return;
   openSheet((close) => {
     const open = button(gifts.length === 1 ? 'Open it' : `Open all ${gifts.length}`, 'btn primary', async () => {
       open.disabled = true;
-      let opened = 0, clover = 0;
-      for (const g of gifts) {
-        try {
-          await OR.gifts.claim(g.giftUuid);
-        } catch (e) {
-          // claimed on another device, or expired: nothing to pay out
-          if (errCode(e) !== 'gifts/claimed' && errCode(e) !== 'gifts/not-found') toast("Couldn't open that one. Try again later.");
-          continue;
-        }
-        const paid = applyGift(pet, { kind: g.kind, from: g.from.uuid }, now(), tz);
-        pet = paid.state;
-        clover += paid.clover;
-        opened++;
-        const find = findOfGift(g.kind);
-        if (find) note(`${article(find.name).replace(/^./, (x) => x.toUpperCase())} from ${g.from.username}, for the shelf.`, find.id as ItemArt);
-        else note(`A gift from ${g.from.username}.`, (giftInfo(g.kind)?.art ?? 'gift') as ItemArt, `giftfrom:${g.from.uuid}`);
-        if (paid.completed) {
-          const set = paid.completed;
-          toast(`${set.name} set complete, thanks to ${g.from.username}!`, () => play('find'));
-          note(`Finished the ${set.name.toLowerCase()} set, with help from ${g.from.username}.`, 'sparkle', `set:${set.id}`);
-        }
-      }
-      if (opened) payLumps(settleLumps(pet));
-      if (opened) { savePet(); play('gift'); haptic('success'); toast(`${opened === 1 ? 'Gift opened.' : `${opened} gifts opened.`}${clover ? ` +${clover} clover.` : ''}`); }
+      const { opened, clover } = await openGifts(gifts);
+      if (opened) toast(`${opened === 1 ? 'Gift opened.' : `${opened} gifts opened.`}${clover ? ` +${clover} clover.` : ''}`);
       render();
       close();
     });
@@ -5039,8 +5111,8 @@ function guestModelsHere(): GuestTurn[] {
   return burrowRoom === 'main' ? guestsHere(visitTurns, now()) : [];
 }
 
-function guestModels(): { id: string; coat: Coat; dress: Dress }[] {
-  return guestModelsHere().map(({ visit, data: d }) => ({ id: visit.from.uuid, coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears } }));
+function guestModels(): { id: string; coat: Coat; dress: Dress; parcel?: boolean }[] {
+  return guestModelsHere().map(({ visit, data: d }) => ({ id: visit.from.uuid, coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears }, ...(carried.has(visit.from.uuid) ? { parcel: true } : {}) }));
 }
 
 /**
@@ -5060,6 +5132,8 @@ function noticeGuests(): void {
   const came = ids.map((id) => byId.get(id)).filter((g): g is GuestTurn => !!g && !before.includes(g.visit.from.uuid)
     && g.fromMs > (g.visit.seenAt ? Date.parse(g.visit.seenAt) : n) + 1000);
   const names = (gs: GuestTurn[]) => gs.map((g) => g.data.name).join(' and ');
+  // a parcel nobody opened goes with the rest of the gifts
+  if (left.some((g) => carried.has(g.visit.from.uuid))) void checkInbox();
   // one line for a changeover: "Maple and Bun hopped home, and Pip hopped in."
   const parts = [left.length ? `${names(left)} waved goodbye and hopped home` : '', came.length ? `${names(came)} hopped in to visit` : ''].filter(Boolean);
   if (parts.length) toast(`${parts.join(', and ')}.`, came.length ? () => play('pet') : undefined);
@@ -5100,10 +5174,13 @@ async function checkVisits(): Promise<void> {
 /** Every visit in the inbox goes in her guest book (it keeps them past the inbox's week). */
 function signGuestbookFrom(visits: VisitIn[]): void {
   const next = signGuestbook(journal, visits.map((v) => {
-    const note = noteOf(v.kind);
+    const k = readKind(v.kind);
+    const d = readShowcase(v.showcase);
     return {
       visitUuid: v.visitUuid, atMs: Date.parse(v.visitedAt) || now(), from: v.from.username,
-      rabbit: readShowcase(v.showcase)?.name ?? v.from.username, care: String(v.kind).split('-')[0] ?? '', ...(note ? { note } : {}),
+      rabbit: d?.name ?? v.from.username, care: k.care, ...(k.note ? { note: k.note } : {}), ...(k.stamp ? { stamp: k.stamp } : {}),
+      // how their rabbit looked, for the picture: the snapshot is only kept a week
+      ...(d ? { look: { coat: d.coat, ears: d.ears, head: d.head, neck: d.neck } } : {}),
     };
   }));
   if (next === journal) return;
@@ -5120,20 +5197,178 @@ function openGuestbook(): void {
   showFriends('book');
 }
 
-/** One signature in the guest book: who, when, what they did, and their note. */
+/** A rabbit's picture for a signature: their rabbit as they looked, with the stamp they signed with in the corner. */
+function guestPicture(look: { coat?: string; ears?: string; head?: string | null; neck?: string | null } | undefined, stamp?: string): HTMLElement {
+  const coat = (COATS as readonly string[]).includes(look?.coat ?? '') ? (look!.coat as Coat) : null;
+  const ears = (EARS as readonly string[]).includes(look?.ears ?? '') ? (look!.ears as Ears) : 'long';
+  const pic = coat ? img(rabbitSprite(coat, 'happy', 0, { head: look?.head ?? null, neck: look?.neck ?? null, ears }), 1) : img(itemSprite('heart'), 2);
+  const st = stamp ? itemSprite(stamp as ItemArt) : null;
+  return h('span', { class: 'polaroid', 'aria-hidden': 'true' }, pic, st ? h('span', { class: 'stamp' }, img(st, fitScale(st, 16))) : null);
+}
+
+/** One signature in the guest book: their rabbit's picture and stamp, who, when, what they did, their note, and a pin. */
 function guestbookEntry(g: NonNullable<Journal['guestbook']>[number]): HTMLElement {
   const did = visitInfo(g.care)?.did;
-  const note = g.note && Object.prototype.hasOwnProperty.call(GUEST_NOTES, g.note) ? noteText(g.note as GuestNote, pet.name) : null;
-  return h('li', {},
+  const note = g.note && isNote(g.note) ? noteText(g.note, pet.name) : null;
+  const pinned = !!journal.pinned?.includes(g.visitUuid);
+  let pin: HTMLButtonElement | null = null;
+  if (note) {
+    pin = button(pinned ? 'Pinned' : 'Pin', pinned ? 'btn small primary pin-btn' : 'btn small pin-btn', () => pinNote(g.visitUuid));
+    pin.setAttribute('aria-pressed', String(pinned));
+    pin.setAttribute('aria-label', pinned ? `Take ${g.rabbit}'s note off the corkboard` : `Pin ${g.rabbit}'s note to the corkboard`);
+  }
+  return h('li', { class: `sig${pinned ? ' pinned' : ''}` },
+    guestPicture(g.look, g.stamp),
     h('span', { class: 'txt' },
       h('span', { class: 'nm', text: `${g.rabbit} (${g.from})` }),
       h('span', { class: 'meta', text: `${fmtDate(g.atMs)}${did ? ` · ${did}` : ''}` }),
-      note ? h('span', { class: 'quote', text: `“${note}”` }) : null));
+      note ? h('span', { class: 'quote', text: `“${note}”` }) : null),
+    pin);
+}
+
+/** Pin a note to her corkboard, or take it down. Friends see what's pinned once the corkboard is up. */
+function pinNote(visitUuid: string): void {
+  const before = journal.pinned ?? [];
+  const pinned = togglePin(before, visitUuid);
+  const pinning = pinned.includes(visitUuid);
+  journal = { ...journal, pinned, rev: journal.rev + 1 };
+  saver.queue(KEYS.journal, () => journal);
+  play('flip');
+  if (pinning && before.length >= MAX_PINS) toast(`The corkboard holds ${MAX_PINS}: the oldest note came down to make room.`);
+  else if (pinning && !corkboardUp()) toast('Pinned. Hang the corkboard (in the Shop) and friends can read it too.');
+  else toast(pinning ? 'Pinned to the corkboard.' : 'Taken down.');
+  queueShowcase();
+  friendsSig = '';
+  render();
+}
+
+const corkboardUp = (): boolean => burrow.items.some((i) => i.id === 'corkboard' && i.placed);
+
+/** Her pinned notes, as friends see them: only once the corkboard is up. */
+function pinsToShow(): PinShow[] {
+  if (!corkboardUp()) return [];
+  const book = journal.guestbook ?? [];
+  return (journal.pinned ?? []).map((u) => book.find((g) => g.visitUuid === u)).flatMap((g) => {
+    if (!g?.note || !isNote(g.note)) return [];
+    const c = (COATS as readonly string[]).includes(g.look?.coat ?? '') ? (g.look!.coat as Coat) : undefined;
+    return [{ r: g.rabbit.slice(0, 16), n: g.note, ...(g.stamp ? { s: g.stamp } : {}), ...(c ? { c } : {}) }];
+  });
+}
+
+/** A corkboard's notes, hers or a friend's: each with the visitor's rabbit and stamp, on the board's cover. */
+function openCorkboard(title: string, pins: { rabbit: string; text: string; stamp?: string; look?: { coat?: string } }[], cover: string, empty: string): void {
+  openSheet((close) => [
+    h('div', { class: 'eyebrow', text: 'Corkboard' }),
+    h('h2', { text: title }),
+    pins.length
+      ? h('ul', { class: `cork cover-${cover}` }, ...pins.map((p, i) => h('li', { class: `slip slip-${i % 4}` },
+        guestPicture(p.look, p.stamp), h('span', { class: 'txt' }, h('span', { class: 'quote', text: `“${p.text}”` }), h('span', { class: 'meta', text: p.rabbit })))))
+      : h('p', { text: empty }),
+    h('div', { class: 'actions-col' }, button('OK', 'btn', close)),
+  ]);
+}
+
+function openOwnCorkboard(): void {
+  const book = journal.guestbook ?? [];
+  const pins = (journal.pinned ?? []).map((u) => book.find((g) => g.visitUuid === u)).flatMap((g) =>
+    g?.note && isNote(g.note) ? [{ rabbit: g.rabbit, text: noteText(g.note, pet.name), ...(g.stamp ? { stamp: g.stamp } : {}), ...(g.look ? { look: g.look } : {}) }] : []);
+  openCorkboard(`${pet.name}'s corkboard`, pins, coverOf(pet), 'Nothing pinned yet. In the guest book (on the Friends tab), pin up to four notes friends left: anyone who visits can read them here.');
+}
+
+/** The guest book's covers: buy one with clover, or swap to one she has. */
+function openCovers(): void {
+  openLiveSheet((close, redraw) => {
+    const rows = COVERS.map((c) => {
+      const owned = c.price === 0 || !!pet.covers?.includes(c.id);
+      const using = coverOf(pet) === c.id;
+      const right = using ? h('span', { class: 'pill', text: 'On it' }) : owned ? h('span', { class: 'pill', text: 'Use' })
+        : h('span', { class: 'pr' }, img(itemSprite('clover'), 1), c.price.toLocaleString());
+      const b = menuRow(c.name, using ? 'On her guest book now' : owned ? 'Yours: tap to put it on' : 'A cover for her guest book and corkboard',
+        h('span', { class: `cover-swatch cover-${c.id}` }, img(itemSprite(c.art as ItemArt), 2)), () => {
+          if (using) return;
+          if (owned) { pet = useCover(pet, c.id); savePet(); play('flip'); queueShowcase(); friendsSig = ''; redraw(); return; }
+          const r = buyCover(pet, c.id);
+          if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? moreClover(c.price) : "Can't buy that one."); return; }
+          pet = r.state; savePet(); play('clover'); toast(`${c.name} cover on.`); queueShowcase(); friendsSig = ''; redraw();
+        }, right);
+      return b;
+    });
+    return [
+      h('div', { class: 'eyebrow', text: 'Guest book' }),
+      h('h2', { text: 'Covers' }),
+      h('p', { class: 'note', text: 'Friends see it on her corkboard too.' }),
+      h('div', { class: 'menu' }, ...rows),
+      h('div', { class: 'actions-col' }, button('Done', 'btn', close)),
+    ];
+  });
+}
+
+/** Writing a note for a friend's guest book: an opener, what it's about, and what to say, with a preview. */
+function openComposer(d: ShowcaseData, current: string | null, done: (code: string | null) => void): void {
+  const subjects = subjectsFor(d);
+  const ph: Phrase = phraseOf(current) ?? { o: 0, s: subjects[0] ?? 0, p: 0 };
+  openSheet((close) => {
+    const preview = h('p', { class: 'note-preview', 'aria-live': 'polite' });
+    const rows: { key: keyof Phrase; btns: { i: number; b: HTMLButtonElement }[] }[] = [];
+    // updated in place, so each row keeps where it's scrolled to
+    const sync = () => {
+      preview.textContent = `“${noteText(phraseCode(ph), d.name)}”`;
+      for (const r of rows) for (const { i, b } of r.btns) b.setAttribute('aria-pressed', String(ph[r.key] === i));
+    };
+    const row = (label: string, opts: { i: number; text: string }[], key: keyof Phrase) => {
+      const btns = opts.map((o) => {
+        const b = h('button', { class: 'note-chip', type: 'button', text: o.text });
+        b.addEventListener('click', () => { ph[key] = o.i; play('flip'); sync(); });
+        return { i: o.i, b };
+      });
+      rows.push({ key, btns });
+      return h('div', { class: 'compose-row' }, h('div', { class: 'pick-label', text: label }),
+        h('div', { class: 'note-chips', role: 'group', 'aria-label': label }, ...btns.map((x) => x.b)));
+    };
+    const shuffle = button('Surprise me', 'btn small', () => {
+      ph.o = Math.floor(Math.random() * OPENERS.length);
+      ph.s = subjects[Math.floor(Math.random() * subjects.length)] ?? 0;
+      ph.p = Math.floor(Math.random() * PRAISE.length);
+      play('flip');
+      sync();
+      for (const r of rows) r.btns.find((x) => x.i === ph[r.key])?.b.scrollIntoView({ block: 'nearest', inline: 'center' });
+    });
+    const kids = [
+      h('div', { class: 'eyebrow', text: `${d.name}'s guest book` }),
+      h('h2', { text: 'Write a note' }),
+      preview,
+      row('Start', OPENERS.map((t, i) => ({ i, text: t ? t.replace('{name}', d.name) : '(none)' })), 'o'),
+      row('About', subjects.map((i) => ({ i, text: subjectText(i, d.name) ?? '' })), 's'),
+      row('Say', PRAISE.map((t, i) => ({ i, text: t })), 'p'),
+      h('div', { class: 'actions-col' },
+        button('Sign with this', 'btn primary', () => { done(phraseCode(ph)); close(); }),
+        shuffle,
+        button(current ? 'No note' : 'Not now', 'btn', () => { if (current) done(null); close(); })),
+    ];
+    sync();
+    return kids;
+  });
+}
+
+/** Her stamp, the one she signs friends' guest books with: the free ones and anything she's collected. */
+function openStamps(current: string, done: (id: string) => void): void {
+  openSheet((close) => [
+    h('div', { class: 'eyebrow', text: 'Your stamp' }),
+    h('h2', { text: 'Sign with…' }),
+    h('p', { class: 'note', text: 'Every find and keepsake she collects is a stamp you can sign with.' }),
+    h('div', { class: 'stamp-grid', role: 'group', 'aria-label': 'Stamps' }, ...stampsFor(pet).map((id) => {
+      const sp = itemSprite(id as ItemArt);
+      const b = h('button', { class: 'stamp-btn', type: 'button', 'aria-pressed': String(id === current), 'aria-label': id }, img(sp, fitScale(sp, 28)));
+      b.addEventListener('click', () => { done(id); close(); });
+      return b;
+    })),
+    h('div', { class: 'actions-col' }, button('Cancel', 'btn', close)),
+  ]);
 }
 
 function visitLine(v: VisitIn, name: string): string {
   const info = visitInfo(v.kind);
-  const note = noteOf(v.kind);
+  const note = readKind(v.kind).note;
   // kept short for the one-line line: who they are in full is in the guest book
   return `${name} ${info ? info.did : 'came to visit'}.${note ? ` “${noteText(note, pet.name)}”` : ''}`;
 }
@@ -5142,6 +5377,7 @@ function greetGuest(i: number): void {
   const g = guestModelsHere()[i];
   if (!g || !scene) return;
   scene.cheerGuest(i, performance.now());
+  if (carried.has(g.visit.from.uuid)) { void openCarried(g.visit.from.uuid, g.data.name); return; }
   play('pet');
   heldLine = { text: visitLine(g.visit, g.data.name), until: performance.now() + LINE_HOLD_MS };
   setLine(ui.moodline, heldLine.text);
@@ -5225,6 +5461,46 @@ function openThriving(): void {
   ]);
 }
 
+/** A gift that can come along on a visit. `off`: why it can't, shown greyed. */
+interface GiftPick { kind: string; name: string; short: string; art: ItemArt; meta: string; wanted?: boolean; off?: string; after?: (p: PetState) => PetState | null }
+
+/** What she could bring a friend: spares they're missing first, then the pantry and a warm hello, then other spares. */
+function giftChoices(d: ShowcaseData): GiftPick[] {
+  const missing = new Set(d.missing ?? []);
+  const golden = pet.pantry?.golden ?? 0;
+  const spares = spareFinds(pet).map((c): GiftPick => ({
+    kind: findGiftKind(c.id), name: c.name, short: c.name, art: c.id as ItemArt, wanted: missing.has(c.id),
+    meta: missing.has(c.id) ? `${d.name} hasn't got one. You have ${pet.collection?.[c.id] ?? 0}.` : `A spare. You have ${pet.collection?.[c.id] ?? 0}.`,
+    after: (p) => giveFind(p, c.id),
+  }));
+  const SHORT: Record<string, string> = { golden: 'Golden carrot', berry: 'Strawberry', hug: 'Warm hello' };
+  const basics = GIFT_KINDS.map((k): GiftPick => ({
+    kind: k, name: GIFT_INFO[k].name, short: SHORT[k] ?? GIFT_INFO[k].name, art: GIFT_INFO[k].art as ItemArt,
+    meta: k === 'golden' ? `${GIFT_INFO[k].gives}. You have ${golden}.` : GIFT_INFO[k].gives,
+    ...(k === 'golden' ? { after: (p: PetState) => takeGolden(p), ...(golden < 1 ? { off: 'No golden carrots in the pantry. Grow one in the garden, or she might find one foraging.' } : {}) } : {}),
+  }));
+  // what she can't give right now (no golden carrot yet) goes last
+  return [...spares.filter((g) => g.wanted), ...basics.filter((g) => !g.off), ...spares.filter((g) => !g.wanted), ...basics.filter((g) => g.off)];
+}
+
+/** Send the gift that comes with a visit. A gift that can't go doesn't undo the visit: it just says so. */
+async function bringGift(f: Friend, g: GiftPick): Promise<boolean> {
+  try {
+    await OR.gifts.send({ toUserUuid: f.uuid, kind: g.kind });
+  } catch (e) {
+    const c = errCode(e);
+    toast(c === 'gifts/already-sent-today' ? `You've sent ${f.username} a gift today already, so it stayed home.`
+      : c === 'gifts/too-many' ? "That's all the gifts for today, so it stayed home." : "The gift couldn't go just now, so it stayed home.");
+    return false;
+  }
+  const given = g.after ? g.after(pet) ?? pet : pet;
+  pet = rewardGiftSent(given, f.uuid, now(), tz).state;
+  savePet();
+  friendsCache?.giftSent.add(f.uuid);
+  note(`Brought ${f.username} a gift.`, 'gift', 'gift:first');
+  return true;
+}
+
 /** A friend's burrow, read-only: their room, their rabbit, pottering about. */
 /** `onLeave`: after coming back home, as the Friends page does to see what changed. */
 function visitFriend(f: Friend, onLeave?: () => void): void {
@@ -5257,7 +5533,8 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
   // shows up in their burrow as you, and pays you a little.
   const canVisit = OR.capabilities.has('visits.record');
   let pick: VisitKind = hint?.kind ?? 'pat';
-  let pickedNote: GuestNote | null = null;
+  let pickedNote: string | null = null;
+  let stamp = settings.stamp && stampsFor(pet).includes(settings.stamp) ? settings.stamp : 'heart';
   const NEED_WORD: Record<VisitKind, string> = { pat: '+ joy', snack: '+ food', brush: '+ clean' };
   const care = VISIT_KINDS.map((k) => {
     const info = VISIT_INFO[k];
@@ -5267,30 +5544,50 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     b.addEventListener('click', () => { pick = k; play('flip'); sync(); });
     return b;
   });
-  const chips = (Object.keys(GUEST_NOTES) as GuestNote[]).map((n) => {
-    const b = h('button', { class: 'note-chip', type: 'button', 'aria-pressed': 'false', text: noteText(n, d.name) });
-    b.addEventListener('click', () => { pickedNote = pickedNote === n ? null : n; sync(); });
+  const noteBtn = h('button', { class: 'note-chip write', type: 'button' });
+  noteBtn.addEventListener('click', () => openComposer(d, pickedNote, (code) => { pickedNote = code; sync(); }));
+  const stampBtn = h('button', { class: 'stamp-chip', type: 'button' });
+  stampBtn.addEventListener('click', () => openStamps(stamp, (id) => { stamp = id; settings.stamp = id; saveSettings(); sync(); }));
+  // A gift comes along on the visit: something from her pantry, a warm hello, or a spare find (theirs to finish a set first).
+  const canGift = canVisit && OR.capabilities.has('gifts.send');
+  let pickedGift: GiftPick | null = null;
+  const giftPicks = canGift ? giftChoices(d) : [];
+  const giftChips = giftPicks.map((g) => {
+    const s = itemSprite(g.art);
+    const b = h('button', { class: `gift-chip${g.wanted ? ' wanted' : ''}`, type: 'button', 'aria-pressed': 'false', 'aria-label': `${g.name}. ${g.meta}` },
+      img(s, fitScale(s, 22)), h('span', { class: 'nm', text: g.short }));
+    if (g.off) setOff(b, g.off);
+    else b.addEventListener('click', () => { pickedGift = pickedGift === g ? null : g; play('flip'); sync(); });
     return b;
   });
+  const giftLine = h('div', { class: 'pick-label' }, 'Bring a gift · ', h('em', { text: 'optional' }));
+  const giftBox = h('div', { class: 'gift-chips', role: 'group', 'aria-label': `A gift for ${d.name}` }, ...giftChips);
+  if (canGift) void OR.gifts.sentToday().then((s) => { if (s.includes(f.uuid)) { giftLine.hidden = giftBox.hidden = true; pickedGift = null; sync(); } }).catch(() => undefined);
   const DO: Record<VisitKind, (name: string) => string> = { pat: (n) => `Pat ${n}`, snack: (n) => `Feed ${n}`, brush: (n) => `Brush ${n}` };
   const go = h('button', { class: 'btn primary grow', type: 'button' });
   go.addEventListener('click', () => void doVisit());
   let done = false;
   function sync(): void {
     care.forEach((b, i) => b.setAttribute('aria-pressed', String(VISIT_KINDS[i] === pick)));
-    chips.forEach((b, i) => b.setAttribute('aria-pressed', String((Object.keys(GUEST_NOTES) as GuestNote[])[i] === pickedNote)));
+    noteBtn.textContent = pickedNote ? `“${noteText(pickedNote, d.name)}”` : 'Write a note…';
+    noteBtn.setAttribute('aria-pressed', String(!!pickedNote));
+    const sp = itemSprite(stamp as ItemArt);
+    stampBtn.replaceChildren(img(sp, fitScale(sp, 22)));
+    stampBtn.setAttribute('aria-label', 'Your stamp. Change it');
+    giftChips.forEach((b, i) => b.setAttribute('aria-pressed', String(giftPicks[i] === pickedGift)));
     if (done) return;
-    go.textContent = `${DO[pick](d.name)}${paidVisitsLeft() ? ` · +${visitPay(pet)} clover` : ''}`;
+    go.textContent = `${DO[pick](d.name)}${pickedGift ? ' + gift' : ''}${paidVisitsLeft() ? ` · +${visitPay(pet)} clover` : ''}`;
   }
   sync();
   const careBox = h('div', { class: 'visit-pick' },
     h('div', { class: 'pick-label', text: `Do something for ${d.name}` }),
     h('div', { class: 'actions visit-care', role: 'group', 'aria-label': 'Care' }, ...care),
+    ...(giftChips.length ? [giftLine, giftBox] : []),
     h('div', { class: 'pick-label' }, 'Sign her guest book · ', h('em', { text: 'optional' })),
-    h('div', { class: 'note-chips', role: 'group', 'aria-label': 'A note for her guest book' }, ...chips));
+    h('div', { class: 'note-row' }, stampBtn, noteBtn));
   const visited = (line = `You've visited ${d.name} today.`) => {
     done = true;
-    for (const b of [...care, ...chips]) b.disabled = true;
+    for (const b of [...care, noteBtn, stampBtn, ...giftChips]) b.disabled = true;
     careBox.hidden = true;
     go.disabled = true;
     go.textContent = 'Visited today';
@@ -5302,7 +5599,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     const k = pick;
     go.disabled = true;
     try {
-      await OR.visits.record({ toUserUuid: f.uuid, kind: visitKind(k, pickedNote) });
+      await OR.visits.record({ toUserUuid: f.uuid, kind: visitKind(k, pickedNote, stamp) });
     } catch (e) {
       const c = errCode(e);
       play('nope');
@@ -5320,21 +5617,22 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     sc.react('happy', performance.now());
     play('pet');
     haptic('success');
-    const noted = pickedNote;
-    visited(`${VISIT_INFO[k].line(d.name)} ${f.username} will see your rabbit in their burrow${noted ? ', and your note' : ''}.`);
+    const noted = !!pickedNote;
+    const brought = pickedGift ? await bringGift(f, pickedGift) : false;
+    const extras = [brought ? 'your gift' : '', noted ? 'your note' : ''].filter(Boolean).join(' and ');
+    visited(`${VISIT_INFO[k].line(d.name)} ${f.username} will see your rabbit in their burrow${extras ? `, with ${extras}` : ''}.`);
     if (r.clover) toast(`+${r.clover} clover.`);
     note(`Visited ${d.name} and ${VISIT_INFO[k].did}.`, 'heart', `visitcare:${f.uuid}`);
     goal('friend');
     render();
   }
 
-  // A gift is a follow-up to the visit, not a rival to it: say when a spare would fill a gap on their shelf.
-  const giftBtn = button('Gift', 'btn small', () => sendGift(f, () => giftSent()));
-  const wanted = spareFinds(pet).find((c) => (d.missing ?? []).includes(c.id));
-  const giftLine = h('span', { class: 'sub', text: wanted ? `${d.name} hasn't found ${article(wanted.name).toLowerCase()} yet. You have ${pet.collection?.[wanted.id] ?? 0}.` : 'One gift a friend a day.' });
-  const giftRow = h('div', { class: 'also-gift' }, img(itemSprite('strawberry'), 2), h('span', { class: 'txt' }, h('b', { text: 'Also send a gift?' }), giftLine), giftBtn);
-  const giftSent = () => { giftBtn.disabled = true; giftBtn.textContent = 'Sent'; giftLine.textContent = `You sent ${f.username} a gift today.`; };
-  void OR.gifts.sentToday().then((s) => { if (s.includes(f.uuid)) giftSent(); }).catch(() => undefined);
+  // Hosts without visits still send gifts on their own.
+  const giftRow = !canVisit && OR.capabilities.has('gifts.send') ? (() => {
+    const giftBtn = button('Gift', 'btn small', () => sendGift(f, () => { giftBtn.disabled = true; giftBtn.textContent = 'Sent'; }));
+    void OR.gifts.sentToday().then((s) => { if (s.includes(f.uuid)) { giftBtn.disabled = true; giftBtn.textContent = 'Sent'; } }).catch(() => undefined);
+    return h('div', { class: 'also-gift' }, img(itemSprite('strawberry'), 2), h('span', { class: 'txt' }, h('b', { text: 'Send a gift?' }), h('span', { class: 'sub', text: 'One gift a friend a day.' })), giftBtn);
+  })() : null;
   // Their garden, for friends on a version that shares it: the same garden
   // scene, drawn from a stand-in pet, showing only what they've built.
   const gardenPet = friendGardenPet(d);
@@ -5370,6 +5668,14 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     }));
   stage.append(gcanvas);
   if (meters) stage.append(meters);
+  // their corkboard: the notes they've pinned from their guest book
+  const theirPins = d.items.some((i) => i.id === 'corkboard') ? d.pinned ?? [] : [];
+  const readTheirs = () => openCorkboard(`${d.name}'s corkboard`, theirPins.map((p) => ({ rabbit: p.r, text: noteText(p.n, d.name), ...(p.s ? { stamp: p.s } : {}), ...(p.c ? { look: { coat: p.c } } : {}) })),
+    d.cover ?? 'classic', `Nothing pinned up yet. Leave ${d.name} a note and it might end up here.`);
+  const corkRow = theirPins.length ? h('button', { class: 'also-gift cork-row', type: 'button' }, img(itemSprite('corkboard'), 2),
+    h('span', { class: 'txt' }, h('b', { text: 'Their corkboard' }), h('span', { class: 'sub', text: `${theirPins.length} ${theirPins.length === 1 ? 'note' : 'notes'} from their guest book` })),
+    h('span', { class: 'go', 'aria-hidden': 'true', text: '›' })) : null;
+  corkRow?.addEventListener('click', readTheirs);
   const wrap = h('div', { class: 'visit', role: 'dialog', 'aria-modal': 'true', 'aria-label': `Visiting ${d.name}` },
     h('header', { class: 'visit-top' },
       h('div', { class: 'who' }, title, h('div', { class: 'sub', text: `${f.username} · ${d.daysVisited} days · Bond ${d.bondLevel}` }))),
@@ -5380,6 +5686,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
       areaTabs,
       canVisit && !holiday ? careBox : null,
       h('div', { class: 'row2' }, back, canVisit && !holiday ? go : null),
+      corkRow,
       giftRow));
   document.body.append(wrap);
   visitingFriend = true;
@@ -5423,7 +5730,8 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     const r = canvas.getBoundingClientRect();
     const p = sc.toRoom(((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height);
     const b = sc.rabbitBox();
-    if (!holiday && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { sc.react('happy', performance.now()); play('pet'); }
+    if (!holiday && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) { sc.react('happy', performance.now()); play('pet'); return; }
+    if (view !== 'garden' && sc.hitTest(guestRooms[view] ?? guestRooms.main!, p.x, p.y)?.id === 'corkboard') readTheirs();
   });
   const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.scrim')) leave(); };
   document.addEventListener('keydown', onKey);
@@ -5686,7 +5994,7 @@ function renderFriendsPage(): void {
     // their needs wear down: look again every ten minutes
     Math.floor(n / 600_000), day,
     c ? `${c.friends?.map((f) => `${f.uuid}:${points(f.uuid)}:${cameBy(f.uuid)}`).join() ?? 'loading'}|${c.failed}|${[...c.giftSent].join()}|${[...c.visited].join()}` : 'none',
-    book.length, paidVisitsLeft(), visitPay(pet), hasUpgrade(pet, 'meadow'), socialOn(), mutualFriends(pet), pet.name, pet.coat, dressKey(dressOf(pet)),
+    book.length, recentVisitors().length, (journal.pinned ?? []).join(), coverOf(pet), paidVisitsLeft(), visitPay(pet), hasUpgrade(pet, 'meadow'), socialOn(), mutualFriends(pet), pet.name, pet.coat, dressKey(dressOf(pet)),
   ].join('|');
   if (sig === friendsSig) return;
   friendsSig = sig;
@@ -5708,6 +6016,8 @@ function renderFriendsPage(): void {
     return { f, visited, sent: c!.giftSent.has(f.uuid), came: cameBy(f.uuid), p: points(f.uuid), rank: friendRank({ visitedYou: cameBy(f.uuid), visited }) };
   }).sort((a, b) => a.rank - b.rank || b.p - a.p || a.f.data.name.localeCompare(b.f.data.name));
   type Info = (typeof info)[number];
+  // with visits, a gift is brought along on one (visitFriend); only a host without them sends gifts on their own
+  const giftsOnTheirOwn = !OR.capabilities.has('visits.record');
   const gift = (x: Info) => {
     const g = button(x.sent ? 'Gift sent' : 'Gift', x.sent ? 'btn small ghost' : 'btn small', () => sendGift(x.f, () => { c!.giftSent.add(x.f.uuid); friendsSig = ''; render(); }));
     if (!x.sent) g.prepend(img(itemSprite('strawberry'), 2));
@@ -5741,7 +6051,7 @@ function renderFriendsPage(): void {
     const out: Node[] = [];
     // Friends over or at the door: her burrow, live, with them in it. Otherwise
     // (the burrow is on Home already) your friends' doors, to go and visit.
-    if (visitTurns.some((t) => here.includes(t) || t.fromMs > n)) out.push(porchCard());
+    if (visitTurns.some((t) => here.includes(t) || t.fromMs > n) || recentVisitors().length) out.push(porchCard());
     else if (socialOn() && info.length) {
       const doors = [...info].sort((a, b) => a.rank - b.rank || Number(b.p >= best) - Number(a.p >= best) || b.p - a.p).slice(0, 8);
       out.push(lane([...doors.map((x): LaneDoor => {
@@ -5758,12 +6068,12 @@ function renderFriendsPage(): void {
     // new in the guest book: say so, with the newest note, right where you'll see it
     if (unread) {
       const fresh = book.slice(0, unread);
-      const noted = fresh.find((g) => g.note && Object.prototype.hasOwnProperty.call(GUEST_NOTES, g.note));
+      const noted = fresh.find((g) => g.note && isNote(g.note));
       const b = h('button', { class: 'book-news', type: 'button' },
         h('span', { class: 'ico' }, img(itemSprite('book'), 3)),
         h('span', { class: 'txt' },
           h('b', { text: unread === 1 ? `${fresh[0]!.rabbit} signed the guest book` : `${unread} new in the guest book` }),
-          noted ? h('span', { class: 'quote' }, h('q', { text: noteText(noted.note as GuestNote, pet.name) }), ` ${noted.rabbit}`)
+          noted ? h('span', { class: 'quote' }, h('q', { text: noteText(noted.note!, pet.name) }), ` ${noted.rabbit}`)
             : h('span', { text: names([...new Set(fresh.map((g) => g.rabbit))].slice(0, 3)) })),
         h('span', { class: 'go', 'aria-hidden': 'true', text: '›' }));
       b.addEventListener('click', () => showFriends('book'));
@@ -5852,7 +6162,7 @@ function renderFriendsPage(): void {
           flag)),
       hint ? h('span', { class: 'hint' }, img(itemSprite(VISIT_INFO[hint.kind].art as ItemArt), 2), `${d.name}'s ${hint.word}. ${hint.kind === 'snack' ? 'A snack' : hint.kind === 'pat' ? 'A pat' : 'A brush'} would help most.`) : null,
       friendHearts(x.p),
-      h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', 'btn small primary'), gift(x)));
+      h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', 'btn small primary'), giftsOnTheirOwn ? gift(x) : null));
   }
 
   /** Everyone, a row each, to search when there are lots. */
@@ -5868,7 +6178,7 @@ function renderFriendsPage(): void {
         h('span', { class: 'txt' },
           h('span', { class: 'nm', text: d.name }),
           h('span', { class: 'st' }, h('span', { class: 'user', text: `${x.f.username} · ` }), h('span', { class: x.came && !x.visited ? 'back' : x.p >= best ? 'best' : '', text: status }))),
-        h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', x.visited ? 'btn small ghost' : 'btn small primary'), x.sent ? null : gift(x)));
+        h('span', { class: 'btns' }, visitBtn(x, x.rank === 0 ? 'Visit back' : 'Visit', x.visited ? 'btn small ghost' : 'btn small primary'), x.sent || !giftsOnTheirOwn ? null : gift(x)));
       return li;
     });
     const list = h('ul', { class: 'list friends-rows' }, ...rows);
@@ -5901,23 +6211,51 @@ function renderFriendsPage(): void {
         h('p', { text: 'No signatures yet. When friends visit, they sign here, and some leave a note.' }),
         canShare ? button('Invite a friend', 'btn small primary', () => openInvite()) : null)];
     }
-    return [h('section', { class: 'page-section' },
+    const cover = coverOf(pet);
+    const pinnedIds = journal.pinned ?? [];
+    const pinned = pinnedIds.map((u) => book.find((g) => g.visitUuid === u)).filter((g): g is (typeof book)[number] => !!g);
+    const coverBtn = button('Cover', 'btn small', () => openCovers());
+    coverBtn.prepend(img(itemSprite((coverById(cover)?.art ?? 'book') as ItemArt), 2));
+    const out: Node[] = [h('div', { class: `book-cover cover-${cover}` },
+      h('span', { class: 'txt' }, h('b', { text: `${pet.name}'s guest book` }), h('span', { text: `${book.length} ${book.length === 1 ? 'visit' : 'visits'} · pin the best notes to her corkboard` })),
+      coverBtn)];
+    if (pinned.length) {
+      out.push(h('section', { class: 'page-section' },
+        h('div', { class: 'section-head' }, h('h3', { text: 'On the corkboard' }), h('span', { text: `${pinned.length} of ${MAX_PINS}` })),
+        corkboardUp() ? null : h('p', { class: 'meta', text: 'Hang the corkboard (in the Shop) and friends who visit can read these.' }),
+        h('ul', { class: `list guestbook cover-${cover}` }, ...pinned.map((g) => guestbookEntry(g)))));
+    }
+    out.push(h('section', { class: 'page-section' },
       h('div', { class: 'section-head' }, h('h3', { text: `${pet.name}'s visitors` }), h('span', { text: `${book.length} ${book.length === 1 ? 'visit' : 'visits'}` })),
-      h('ul', { class: 'list guestbook' }, ...book.map((g) => {
+      h('ul', { class: `list guestbook cover-${cover}` }, ...book.map((g) => {
         const li = guestbookEntry(g);
         if (g.atMs > bookNewSince) { li.classList.add('new'); li.prepend(h('span', { class: 'tag', text: 'New' })); }
         return li;
-      })))];
+      }))));
+    return out;
   }
 
   /** Her burrow, live, with whoever's over or at the door. */
   function porchCard(): HTMLElement {
     const gone = visitTurns.length - here.length - waiting.length;
+    const recent = recentVisitors();
+    if (!here.length && !waiting.length) {
+      const who = [...new Set(recent.map((g) => g.rabbit))];
+      return h('div', { class: 'at-place' },
+        porchStage(),
+        h('div', { class: 'body' },
+          h('span', { class: 'txt' }, h('b', { text: `${names(who.slice(0, 3))}${who.length > 3 ? ` and ${who.length - 3} more` : ''} came by` }),
+            h('small', { text: 'Friends who visited in the last few days' })),
+          h('span', { class: 'row' }, h('span', { class: 'btns' }, button('Guest book', 'btn small', () => showFriends('book'))))));
+    }
     const title = here.length ? `${names(here.map((t) => t.data.name))} ${here.length === 1 ? 'is' : 'are'} over`
       : `${names(waiting.map((t) => t.data.name))} ${waiting.length === 1 ? 'is' : 'are'} at the door`;
     const line = here.length && waiting.length ? `${names(waiting.map((t) => t.data.name))} ${waiting.length === 1 ? 'is' : 'are'} at the door, next in ${fmtLong(waiting[0]!.fromMs - n)}`
       : !here.length ? `Next one in ${fmtLong(waiting[0]!.fromMs - n)}`
-        : gone ? `${gone} hopped home`
+        : gone ? (() => {
+          const earlier = [...new Set(recent.map((g) => g.rabbit))].filter((r) => !here.some((t) => t.data.name === r));
+          return earlier.length ? `${names(earlier.slice(0, 3))} came by earlier` : `${gone} hopped home`;
+        })()
           : `${names(here.map((t) => `${t.data.name} ${visitInfo(t.visit.kind)?.did ?? 'came to visit'}`))}.`;
     const btns: HTMLButtonElement[] = [button('Who came', 'btn small', () => openVisitors())];
     if (here.length) btns.push(button('Say hi', 'btn small primary', () => sayHi(here[0]!)));
