@@ -373,7 +373,8 @@ function note(text: string, art?: ItemArt, first?: string): void {
 
 async function boot(): Promise<void> {
   await OR.whenReady();
-  saver = new Saver(OR, () => toast("Couldn't save just now. We'll try again."), othersHaventWritten);
+  // only when saving has kept failing for a while (store.ts QUIET_FAILURES): a blip as the app wakes retries quietly
+  saver = new Saver(OR, () => toast("Having trouble saving. Keep the game open and we'll keep trying."), othersHaventWritten);
 
   if (!OR.user && !PREVIEW) {
     renderSignIn();
@@ -390,11 +391,19 @@ async function boot(): Promise<void> {
  * A save that's there but can't be read is never treated as missing (see
  * store.ts): starting fresh would save over it.
  */
-async function loadAndStart(): Promise<void> {
-  await syncClockOrHold();
+/** Quiet tries at reaching her save on opening before saying so: the connection is often still waking up. */
+const LOAD_RETRIES_MS = [1_000, 2_000, 4_000];
+
+async function loadAndStart(attempt = 0): Promise<void> {
+  if (attempt === 0) await syncClockOrHold();
   const [p, b, s, j] = await Promise.all([loadPet(OR), loadBurrow(OR), loadSettings(OR), loadJournal(OR)]);
   if ([p, b, s, j].some((r) => r.kind === 'newer')) { stopForNewerVersion(); return; }
   const bad = [p, b, j].filter((r) => r.kind === 'error' || r.kind === 'broken');
+  // couldn't reach it: try again quietly a few times; a save that's there but unreadable won't mend by waiting
+  if (bad.length && !bad.some((r) => r.kind === 'broken') && attempt < LOAD_RETRIES_MS.length) {
+    await wait(LOAD_RETRIES_MS[attempt]!);
+    return loadAndStart(attempt + 1);
+  }
   if (bad.length) { renderCantLoad(bad.some((r) => r.kind === 'broken')); return; }
   // settings are only preferences: unreadable ones start over harmlessly
   settings = s.kind === 'ok' ? s.value : defaultSettings();

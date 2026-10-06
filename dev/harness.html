@@ -21,6 +21,7 @@
 //   nap=1                         seeded pet is asleep, two hours from waking
 //   holiday=1                     seeded pet is away on holiday for two days
 //   save=newer|broken             a save from a newer version, or one that can't be read
+//   flaky=N                       the first N storage reads and writes fail, as a connection waking up does
 //   date=2026-12-20               shift the clock to that date (seasons, weather, events)
 //   extras=1                      seeded pet also has a garden, finds, outfits, a journal, a visitor
 //   critter=fox                   which visitor is in the burrow with extras=1 (default robin)
@@ -178,10 +179,12 @@ frame.addEventListener('load', () => {
     if (b) b.click(); else console.log('no button', text);
   }, 1500 + i * 700));
 });
+let flaky = Number(q.get('flaky') ?? 0);
 window.addEventListener('message', (e) => {
   const r = e.data; if (!r || !r.correlationId) return;
   const ok = (result) => send({ type: 'response', correlationId: r.correlationId, ok: true, result });
   const p = r.payload || {};
+  if (r.type.startsWith('storage.') && flaky > 0) { flaky--; return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'network', message: 'offline' } }); }
   switch (r.type) {
     case 'storage.get': return ok(store[p.key] ?? null);
     case 'storage.set': store[p.key] = p.value; return ok(undefined);

@@ -119,6 +119,13 @@ export type BatchGuard = (docs: Map<string, unknown>) => Promise<Map<string, unk
 
 /** How long before a failed write is tried again: doubling from 5s up to a minute. */
 const RETRY_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
+/**
+ * Failures in a row before the player hears about it: a write that fails as
+ * the app wakes (the connection or sign-in still coming back) nearly always
+ * goes through on a retry, so only one still failing after about a minute
+ * and a quarter of retries (5 + 10 + 20 + 40 s) is worth a word.
+ */
+const QUIET_FAILURES = 4;
 
 /**
  * Coalesced writer: many changes in a burst become one write per key, and at
@@ -207,7 +214,7 @@ export class Saver {
         }
       }
       if (failed === null) { this.failures = 0; return; }
-      if (this.failures === 0) this.onError(failed);
+      if (this.failures === QUIET_FAILURES - 1) this.onError(failed);
       this.schedule(RETRY_MS[Math.min(this.failures, RETRY_MS.length - 1)]!);
       this.failures++;
     });

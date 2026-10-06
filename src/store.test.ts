@@ -91,7 +91,7 @@ test("an older version keeps a newer version's meadow pieces", () => {
   assert.deepEqual(next.meadow, ['birdbath', 'windmill']);
 });
 
-test('a failed write is tried again', async () => {
+test('a failed write is tried again, quietly, until it has failed for a while', async () => {
   const stored: Record<string, string> = {};
   let down = true;
   const storage = {
@@ -104,6 +104,11 @@ test('a failed write is tried again', async () => {
   saver.queue('v1:pet', () => pet());
   await saver.flush();
   assert.equal(stored['v1:pet'], undefined);
+  await saver.flush();
+  await saver.flush();
+  assert.equal(errors.length, 0, 'a blip retries without a word');
+  await saver.flush();
+  assert.equal(errors.length, 1, 'still failing on the fourth try: say so');
   await saver.flush();
   assert.equal(errors.length, 1, 'told once per run of failures');
   down = false;
