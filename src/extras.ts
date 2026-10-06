@@ -176,15 +176,35 @@ export interface Outfit {
   bond?: number;
 }
 /**
- * Outfits are for saving up: a few days' clover each, a week or more for the
- * seasonal ones. The bandana stays cheap so the first-day "dress her" goal
- * is reachable from the starting clover.
+ * Outfits: everyday accessories for a few dozen clover, so she can look like
+ * yours from the first day; the classics for a few days' clover; pieces to
+ * save up for in the second and third months; the seasonal ones a week or
+ * more. The bandana stays cheap so the first-day "dress her" goal is
+ * reachable from the starting clover.
  */
 export const OUTFITS: Outfit[] = [
   { id: 'bandana', name: 'Bandana', slot: 'neck', price: 40 },
   { id: 'bow', name: 'Ribbon bow', slot: 'head', price: 250 },
   { id: 'bell', name: 'Bell collar', slot: 'neck', price: 300 },
   { id: 'beanie', name: 'Knit beanie', slot: 'head', price: 450 },
+  // everyday accessories
+  { id: 'bluecollar', name: 'Blue collar', slot: 'neck', price: 10 },
+  { id: 'pinkcollar', name: 'Pink collar', slot: 'neck', price: 10 },
+  { id: 'bluebow', name: 'Blue bow', slot: 'head', price: 20 },
+  { id: 'pinkbow', name: 'Pink bow', slot: 'head', price: 20 },
+  { id: 'daisyclip', name: 'Daisy clip', slot: 'head', price: 25 },
+  { id: 'cloverclip', name: 'Clover clip', slot: 'head', price: 30 },
+  { id: 'berryclip', name: 'Strawberry clip', slot: 'head', price: 35 },
+  { id: 'bowtie', name: 'Bow tie', slot: 'neck', price: 40 },
+  { id: 'heartcharm', name: 'Heart charm', slot: 'neck', price: 45 },
+  { id: 'pearls', name: 'Pearl necklace', slot: 'neck', price: 60 },
+  // saving up: the second and third months
+  { id: 'greenscarf', name: 'Knitted scarf', slot: 'neck', price: 1000 },
+  { id: 'beret', name: 'Beret', slot: 'head', price: 1200 },
+  { id: 'sailor', name: 'Sailor collar', slot: 'neck', price: 1500 },
+  { id: 'tophat', name: 'Top hat', slot: 'head', price: 2000 },
+  { id: 'medal', name: 'Gold medal', slot: 'neck', price: 2500 },
+  { id: 'tiara', name: 'Tiara', slot: 'head', price: 3500 },
   { id: 'crown', name: 'Tiny crown', slot: 'head', price: 10000, bond: 10 },
   // seasonal
   { id: 'earmuffs', name: 'Earmuffs', slot: 'head', price: 0, limited: true, giftOnly: true },

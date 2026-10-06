@@ -34,6 +34,10 @@ const WALLS: Record<string, [string, string, string, string]> = {
   starrywall: ['2F3A66', '28325A', '3B4878', '1E2645'],
   cloverwall: ['CFE8B8', 'BFDDA5', 'DDF0CB', '8FB870'],
   sunsetwall: ['F7C58A', 'EFB277', 'FAD6A4', 'C97A5A'],
+  stripewall: ['FCE4EA', 'F6D3DC', 'FFF1F4', 'D49AA8'],
+  heartwall: ['FBEBD8', 'F2DDC4', 'FFF6EA', 'D2A986'],
+  ginghamwall: ['EAF2FA', 'DCE8F4', 'F6FAFE', '9DB6CF'],
+  stonewall: ['B8B2A4', 'A69F90', 'C9C3B5', '7E7868'],
 };
 const FLOORS: Record<string, [string, string, string]> = {
   plainfloor: ['A8744B', '8F6140', '7A5236'],
@@ -41,7 +45,12 @@ const FLOORS: Record<string, [string, string, string]> = {
   birchfloor: ['E3C9A0', 'D2B68A', 'A88A62'],
   cherryfloor: ['9C4A35', '873E2C', '5E2A1E'],
   checkerfloor: ['F4E3B5', 'C98A5A', 'A06A42'],
+  walnutfloor: ['7A5034', '6A452C', '4C301E'],
+  bluefloor: ['8FB3CF', '7DA2C0', '5E83A3'],
+  rosefloor: ['F3D2D2', 'D99A9A', 'B07070'],
 };
+/** Floors laid as tiles in two colours rather than as boards. */
+const TILED = new Set(['checkerfloor', 'rosefloor']);
 
 /** A room's wall and floor colours, as CSS hex: for backdrops drawn outside the scene (the shop's display). */
 export function roomColours(style: RoomStyle = PLAIN_ROOM): { wall: string; wallD: string; floor: string; floorD: string } {
@@ -58,7 +67,7 @@ export function drawBurrow(night: boolean, style: RoomStyle = PLAIN_ROOM): Pixel
   const fc = FLOORS[style.floor] ?? FLOORS.plainfloor!;
   const wall = hex(wc[0]), wall2 = hex(wc[1]), wall3 = hex(wc[2]), rim = hex(wc[3]);
   const floor = hex(fc[0]), floor2 = hex(fc[1]), plank = hex(fc[2]);
-  const checker = style.floor === 'checkerfloor';
+  const checker = TILED.has(style.floor);
   const isWall = (c: RGBA) => c === wall || c === wall2 || c === wall3 || c === rim;
   const px: RGBA[][] = Array.from({ length: H }, () => Array<RGBA>(W).fill(soil));
   const { cx, cy, rx, ry } = ROOM_ARCH;
@@ -159,6 +168,28 @@ function wallpaper(px: RGBA[][], id: string, isPaper: (c: RGBA) => boolean): voi
     const leaf = hex('86C95E'), dark = hex('4E8C3A');
     for (let y = 7; y < FLOOR_Y - 2; y += 8) for (let x = 3 + (Math.floor(y / 8) % 2) * 4; x < SCENE_W - 3; x += 8) {
       put(x, y, dark); put(x - 1, y, leaf); put(x + 1, y, leaf); put(x, y - 1, leaf); put(x, y + 1, dark);
+    }
+  } else if (id === 'stripewall') {
+    const stripe = hex('F3A6B3');
+    for (let y = 0; y < FLOOR_Y; y++) for (let x = 0; x < SCENE_W; x++) if (x % 8 < 3) put(x, y, stripe);
+  } else if (id === 'heartwall') {
+    const red = hex('E4566F'), dark = hex('B03550');
+    for (let y = 8; y < FLOOR_Y - 2; y += 10) for (let x = 5 + (Math.floor(y / 10) % 2) * 6; x < SCENE_W - 3; x += 12) {
+      put(x - 1, y - 1, red); put(x + 1, y - 1, red); put(x - 1, y, red); put(x, y, red); put(x + 1, y, red); put(x, y + 1, dark);
+    }
+  } else if (id === 'ginghamwall') {
+    const band = hex('C3D7EC'), cross = hex('9DB6CF');
+    for (let y = 0; y < FLOOR_Y; y++) for (let x = 0; x < SCENE_W; x++) {
+      const a = x % 8 < 4, b = y % 8 < 4;
+      if (a && b) put(x, y, cross); else if (a || b) put(x, y, band);
+    }
+  } else if (id === 'stonewall') {
+    const joint = hex('8E8878'), moss = hex('86C95E'), moss2 = hex('4E8C3A');
+    const rnd = lcg(33);
+    for (let y = 0; y < FLOOR_Y; y++) for (let x = 0; x < SCENE_W; x++) {
+      const row = Math.floor(y / 6), off = row % 2 ? 5 : 0;
+      if (y % 6 === 0 || (x + off) % 10 === 0) put(x, y, joint);
+      else if (y > FLOOR_Y - 14 && rnd() < 0.12) put(x, y, rnd() < 0.5 ? moss : moss2);
     }
   } else if (id === 'sunsetwall') {
     const bands = ['F3A6B3', 'F5B39E', 'F7C58A', 'F9D27A', 'F6D24A'].map((c) => hex(c));

@@ -78,7 +78,11 @@ TIER1 = [(c, 1) for c in (25, 30, 30, 35, 40, 45, 50, 60, 25, 30, 30, 45)]
 TOYS = [(c, 1) for c in (50, 80, 150, 250)]
 TIER2 = [(c, 1) for c in (150, 180, 200, 220, 250, 250, 280, 300, 350, 400, 450, 500, 550, 600, 700)]  # the corkboard is the second 250
 FIREPLACE, MOON_WINDOW = 2000, 3000
-LADDER = TIER1 + TOYS + TIER2 + [(FIREPLACE, 1), (MOON_WINDOW, 0)]
+# Everyday accessories (10-60), and things to save up for in months two and
+# three (2026-10-06): outfits, wallpapers and floors from 900 to 3,500.
+ACCESSORIES = [(c, 1) for c in (10, 10, 20, 20, 25, 30, 35, 40, 45, 60)]
+MID = [(c, 1) for c in (900, 1000, 1000, 1200, 1300, 1500, 1800, 2000, 2000, 2500, 2500, 2800, 3500)]
+LADDER = TIER1 + ACCESSORIES + TOYS + TIER2 + [(FIREPLACE, 1), (MOON_WINDOW, 0)] + MID
 
 _t1, _t2 = sum(c for c, _ in TIER1), sum(c for c, _ in TOYS + TIER2) + sum(ONE_OFF.values())
 MARKS = {'tier 1': _t1, 'through tier 2': _t1 + _t2, '+ fireplace': _t1 + _t2 + FIREPLACE,
@@ -90,8 +94,8 @@ MARKS = {'tier 1': _t1, 'through tier 2': _t1 + _t2, '+ fireplace': _t1 + _t2 + 
 # The welcome line only counts for players with friends. Seasonal decor comes
 # round once a year; the raffle is its expected cost to win all six prizes.
 SINKS = {
-    'everyday decor': 13_670, 'guest book covers': 4_600, 'seasonal decor': 8_100, 'showpieces': 52_000, 'walls, floors, windows': 8_980,
-    'outfits': 13_540, 'toys': 2_630, 'meadow pieces': 5_650, 'rooms': 11_000,
+    'everyday decor': 13_670, 'guest book covers': 4_600, 'seasonal decor': 8_100, 'showpieces': 52_000, 'walls, floors, windows': 21_280,
+    'outfits': 25_535, 'toys': 2_630, 'meadow pieces': 5_650, 'rooms': 11_000,
     'garden upgrades and soil': 22_922, 'yard and sheds': 19_231, 'raffle': 3_907,
 }
 WELCOME_TOTAL = sum(WELCOME_PRICES)

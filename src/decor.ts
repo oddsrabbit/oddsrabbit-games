@@ -139,6 +139,14 @@ export const SURFACES: SurfaceDef[] = [
   { id: 'cloverwall', name: 'Clover wallpaper', kind: 'wall', price: 1000, tier: 5, after: 'starrywall' },
   { id: 'checkerfloor', name: 'Checkered floor', kind: 'floor', price: 1200, tier: 5, after: 'cherryfloor' },
   { id: 'sunsetwall', name: 'Sunset wallpaper', kind: 'wall', price: 1500, tier: 5, after: 'cloverwall' },
+  // saving up, for the second and third months (2026-10-06)
+  { id: 'stripewall', name: 'Candy stripe wallpaper', kind: 'wall', price: 900, tier: 3 },
+  { id: 'walnutfloor', name: 'Walnut floorboards', kind: 'floor', price: 1000, tier: 3 },
+  { id: 'heartwall', name: 'Heart wallpaper', kind: 'wall', price: 1300, tier: 3 },
+  { id: 'bluefloor', name: 'Painted blue boards', kind: 'floor', price: 1800, tier: 3 },
+  { id: 'ginghamwall', name: 'Gingham wallpaper', kind: 'wall', price: 2000, tier: 3 },
+  { id: 'rosefloor', name: 'Rose tiles', kind: 'floor', price: 2500, tier: 3 },
+  { id: 'stonewall', name: 'Mossy stone wall', kind: 'wall', price: 2800, tier: 3 },
 ];
 export const surfaceById = (id: string): SurfaceDef | undefined => SURFACES.find((d) => d.id === id);
 const PLAIN: Record<SurfaceKind, string> = { wall: 'plainwall', floor: 'plainfloor', window: 'roundwindow' };
