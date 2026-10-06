@@ -120,7 +120,9 @@ export function timerLabel(ms: number): string {
 export function gardenView(pet: PetState, nowMs: number): GardenThing[] {
   const out: GardenThing[] = PLOT_SPOTS.map((spot, index) => ({ kind: 'plot' as const, index, spot, state: plotState(pet, index, nowMs) }));
   for (const id of BUILDING_IDS) {
-    BUILDING_SPOTS[id].forEach((spot, index) => out.push({ kind: 'building', id, index, spot, state: buildingState(pet, id, index) }));
+    // as many spots as can be built, or as were built before the cap
+    const shown = Math.max(maxOf(id), countOf(pet, id));
+    BUILDING_SPOTS[id].slice(0, shown).forEach((spot, index) => out.push({ kind: 'building', id, index, spot, state: buildingState(pet, id, index) }));
   }
   out.push({ kind: 'shed', spot: SHED_SPOT, state: shedState(pet) });
   return out.sort((a, b) => a.spot.y - b.spot.y);

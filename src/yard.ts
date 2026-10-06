@@ -24,14 +24,17 @@ export interface Building {
 
 // Front-loaded (docs/rabbit-pets-economy.md §2.6): the first of each kind
 // pays for itself fast (a patch in 14 days, a hive in 30, a log in 60), and
-// each further one costs more, so the last few are long-term goals. A whole
-// set costs about what it did before (10.5k, 20k and 88k).
+// each further one costs more. Capped (2026-10-06) where the last one still
+// pays back in about four months: 6 patches, 3 hives, 2 logs. A save with
+// more from before keeps them.
 export const BUILDINGS: Record<BuildingId, Building> = {
-  patch: { name: 'Clover patch', price: 84, perHour: 0.25, growth: 1.52, max: 10 },
-  hive: { name: 'Beehive', price: 720, perHour: 1, growth: 1.93, max: 5, requires: { building: 'patch', count: 3 } },
-  log: { name: 'Mushroom log', price: 2880, perHour: 2, growth: 1.99, max: 5, requires: { building: 'hive', count: 5 } },
+  patch: { name: 'Clover patch', price: 84, perHour: 0.25, growth: 1.52, max: 6 },
+  hive: { name: 'Beehive', price: 720, perHour: 1, growth: 1.93, max: 3, requires: { building: 'patch', count: 3 } },
+  log: { name: 'Mushroom log', price: 2880, perHour: 2, growth: 1.99, max: 2, requires: { building: 'hive', count: 3 } },
 };
 export const BUILDING_IDS = Object.keys(BUILDINGS) as BuildingId[];
+/** The most of each a yard can hold: the caps before 2026-10-06, which a save from then may have. */
+export const MOST_EVER: Record<BuildingId, number> = { patch: 10, hive: 5, log: 5 };
 
 /** The shed, bought up to twice: each stretches storage (YARD_STORAGE_HOURS). */
 export const SHED_PRICES = [1000, 3000] as const;

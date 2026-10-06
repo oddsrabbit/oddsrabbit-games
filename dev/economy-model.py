@@ -56,9 +56,9 @@ ONE_OFF = {'plot2': 300, 'plot3': 600, 'can': 1000}
 # The yard: flat producers, never boosted by the clover rate (Supporter aside).
 # name: (first price, clover an hour, price growth per copy, max copies, reveal)
 YARD = {
-    'patch': (84, 0.25, 1.52, 10, lambda y, soil: True),
-    'hive': (720, 1, 1.93, 5, lambda y, soil: y['patch'] >= 3),
-    'log': (2880, 2, 1.99, 5, lambda y, soil: y['hive'] >= 5),
+    'patch': (84, 0.25, 1.52, 6, lambda y, soil: True),
+    'hive': (720, 1, 1.93, 3, lambda y, soil: y['patch'] >= 3),
+    'log': (2880, 2, 1.99, 2, lambda y, soil: y['hive'] >= 3),
 }
 
 # The meadow (docs/rabbit-pets-garden.md §6): a gate, then outdoor decor. Until
@@ -91,7 +91,7 @@ MARKS = {'tier 1': _t1, 'through tier 2': _t1 + _t2, '+ fireplace': _t1 + _t2 + 
 SINKS = {
     'everyday decor': 13_670, 'guest book covers': 4_600, 'seasonal decor': 8_100, 'showpieces': 52_000, 'walls, floors, windows': 8_980,
     'outfits': 13_540, 'toys': 2_630, 'meadow pieces': 12_700, 'rooms': 45_000,
-    'garden upgrades and soil': 22_922, 'yard and sheds': 122_308, 'raffle': 3_907,
+    'garden upgrades and soil': 22_922, 'yard and sheds': 19_231, 'raffle': 3_907,
 }
 WELCOME_TOTAL = sum(WELCOME_PRICES)
 

@@ -42,9 +42,18 @@ test('three areas, each one burrow-width, left to right', () => {
   assert.equal(areaAt(-5), 'patch', 'clamped');
 });
 
-test('one spot per plot and per building a kind allows', () => {
+test('one spot per plot, and per building, as many as a yard from before the cap can have (10, 5, 5)', () => {
   assert.equal(PLOT_SPOTS.length, 5);
-  for (const id of BUILDING_IDS) assert.equal(BUILDING_SPOTS[id].length, BUILDINGS[id].max, id);
+  assert.deepEqual(BUILDING_IDS.map((id) => BUILDING_SPOTS[id].length), [10, 5, 5]);
+  for (const id of BUILDING_IDS) assert.ok(BUILDING_SPOTS[id].length >= BUILDINGS[id].max, id);
+});
+
+test('only as many spots show as can be built, unless more were built before the cap', () => {
+  const s = midGame();
+  const count = (p: typeof s, id: string) => gardenView(p, NOON).filter((t) => t.kind === 'building' && t.id === id).length;
+  assert.deepEqual(BUILDING_IDS.map((id) => count(s, id)), [6, 3, 2]);
+  s.yard = { ...s.yard!, counts: { patch: 10, hive: 5, log: 5 } };
+  assert.deepEqual(BUILDING_IDS.map((id) => count(s, id)), [10, 5, 5]);
 });
 
 test('every tap target sits wholly in its own area, and stands on the grass, not the path', () => {
@@ -85,9 +94,9 @@ test('a new rabbit: one empty bed, the rest locked; patches free to build; hives
 test('mid-game: buildings fill their spots in order, the rest are free or locked by kind', () => {
   const v = gardenView(midGame(), NOON);
   const of = (id: string) => v.filter((t): t is Extract<GardenThing, { kind: 'building' }> => t.kind === 'building' && t.id === id).sort((a, b) => a.index - b.index).map((t) => t.state);
-  assert.deepEqual(of('patch'), [...Array(5).fill('owned'), ...Array(5).fill('free')]);
-  assert.deepEqual(of('hive'), ['owned', 'owned', 'free', 'free', 'free']);
-  assert.deepEqual(of('log'), Array(5).fill('locked'), 'logs need 5 hives');
+  assert.deepEqual(of('patch'), [...Array(5).fill('owned'), 'free']);
+  assert.deepEqual(of('hive'), ['owned', 'owned', 'free']);
+  assert.deepEqual(of('log'), ['locked', 'locked'], 'logs need 3 hives');
   assert.deepEqual(stateOf(v, (t) => t.kind === 'shed'), ['free'], '3 patches open the shed');
   const plots = v.filter((t): t is Extract<GardenThing, { kind: 'plot' }> => t.kind === 'plot').sort((a, b) => a.index - b.index);
   assert.deepEqual(plots.map((p) => p.state), ['ready', 'growing', 'empty', 'locked', 'locked']);
@@ -110,11 +119,12 @@ test('a tap finds what stands there; bare grass and the meadow find nothing', ()
   const at = (x: number, y: number) => hitTest(s, x, y, NOON);
   const bed0 = PLOT_SPOTS[0]!;
   assert.deepEqual(at(bed0.x, bed0.y - 5), { kind: 'plot', index: 0, spot: bed0, state: 'ready' });
-  const hive3 = BUILDING_SPOTS.hive[3]!;
-  assert.deepEqual(at(hive3.x, hive3.y - 3), { kind: 'building', id: 'hive', index: 3, spot: hive3, state: 'free' });
-  const patch7 = BUILDING_SPOTS.patch[7]!;
-  const p = at(patch7.x - 5, patch7.y - 1);
-  assert.ok(p && p.kind === 'building' && p.id === 'patch' && p.index === 7);
+  const hive3 = BUILDING_SPOTS.hive[2]!;
+  assert.deepEqual(at(hive3.x, hive3.y - 3), { kind: 'building', id: 'hive', index: 2, spot: hive3, state: 'free' });
+  const patch6 = BUILDING_SPOTS.patch[5]!;
+  const p = at(patch6.x - 5, patch6.y - 1);
+  assert.ok(p && p.kind === 'building' && p.id === 'patch' && p.index === 5);
+  assert.equal(at(BUILDING_SPOTS.patch[7]!.x, BUILDING_SPOTS.patch[7]!.y - 1), null, 'past the cap: bare grass');
   assert.equal(at(SHED_SPOT.x, SHED_SPOT.y - 6)?.kind, 'shed');
   assert.equal(at(areaX('meadow') + 40, 100), null);
   assert.equal(at(5, 115), null, 'the corner of the veg patch');

@@ -3514,7 +3514,7 @@ function renderGarden(): void {
     line = perHour(pet)
       ? `The yard makes ${Math.round(perHour(pet) * 24)} clover a day. Tap a + to build.`
       : 'Tap a + to build a clover patch. It grows clover all day.';
-    chips.push(`${countOf(pet, 'patch')} of 10 patches`, `${countOf(pet, 'hive')} of 5 hives`);
+    chips.push(`${countOf(pet, 'patch')} of ${BUILDINGS.patch.max} patches`, `${countOf(pet, 'hive')} of ${BUILDINGS.hive.max} hives`);
   } else {
     line = meadowLine();
   }

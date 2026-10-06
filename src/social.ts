@@ -11,7 +11,7 @@ import { earn, friendPays, mutualFriends, noteFriendship } from './economy';
 import { DAY_ROLLOVER_HOUR, DECAY_AWAKE, FRIEND_CLOVER, HOUR_MS, VISIT_CARE } from './tuning';
 import { dayKey, isNewDay } from './localtime';
 import { CROPS, hasUpgrade, onVacation, outfitById, plots, type CropId } from './extras';
-import { BUILDING_IDS, BUILDINGS, countOf, yardOf, type BuildingId } from './yard';
+import { BUILDING_IDS, countOf, MOST_EVER, yardOf, type BuildingId } from './yard';
 import { widgetSprites, type WidgetSprites } from './widgetSprites';
 import { trip } from './forage';
 import { COLLECTIBLES, COLLECTION_SETS, setComplete, type Collectible, type CollectionSet } from './collectibles';
@@ -115,7 +115,7 @@ function readGarden(raw: unknown): GardenShow | undefined {
       const q = p as Record<string, unknown> | null;
       return q && typeof q.crop === 'string' && q.crop in CROPS ? { crop: q.crop as CropId, plantedAtMs: ms(q.plantedAtMs), readyAtMs: ms(q.readyAtMs) } : null;
     }),
-    yard: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.round(num(yard[id], 0, BUILDINGS[id].max, 0))]).filter(([, n]) => n)),
+    yard: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.round(num(yard[id], 0, MOST_EVER[id], 0))]).filter(([, n]) => n)),
     sheds: Math.round(num(g.sheds, 0, 2, 0)),
     ...(g.friends !== undefined ? { friends: Math.round(num(g.friends, 0, 999, 0)) } : {}),
     meadow: !Array.isArray(g.meadow) ? null : g.meadow.slice(0, MAX_ITEMS).flatMap((i: unknown) => {

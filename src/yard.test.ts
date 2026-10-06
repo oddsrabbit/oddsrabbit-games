@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { newPet, type PetState } from './sim';
 import { HOUR_MS } from './tuning';
-import { BUILDINGS, buyBuilding, buyShed, capacity, collect, giveBuilding, nextPrice, payback, perHour, stored } from './yard';
+import { BUILDING_IDS, BUILDINGS, buyBuilding, buyShed, capacity, collect, giveBuilding, nextPrice, payback, perHour, stored } from './yard';
 
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = (): PetState => newPet('yard-pet', 'Clover', 'snow', NOON, 'UTC');
@@ -63,7 +63,7 @@ test('the shed stretches storage to 36, then 48 hours', () => {
   assert.deepEqual(buyShed(s, NOON), { ok: false, reason: 'max' });
 });
 
-test('front-loaded: the first of each kind pays back fast, later ones slowly, and a full set costs about what it did', () => {
+test('front-loaded: the first of each kind pays back fast, and even the last pays back in about four months', () => {
   const s = pet();
   assert.deepEqual(payback(s, 'patch'), { perDay: 6, days: 14 });
   assert.equal(payback(s, 'hive').days, 30);
@@ -74,8 +74,9 @@ test('front-loaded: the first of each kind pays back fast, later ones slowly, an
     for (let i = 0; i < BUILDINGS[id].max; i++) { spent += nextPrice(t, id); t = giveBuilding(t, id, NOON); }
     return { spent, lastDays: Math.ceil(nextPrice({ ...t, yard: { ...t.yard!, counts: { [id]: BUILDINGS[id].max - 1 } } }, id) / payback(t, id).perDay) };
   };
-  assert.ok(Math.abs(full('patch').spent - 10_500) < 300);
-  assert.ok(Math.abs(full('hive').spent - 20_000) < 300);
-  assert.ok(Math.abs(full('log').spent - 88_000) < 500);
-  assert.ok(full('log').lastDays > 900, 'the last log is a long-term goal');
+  assert.deepEqual(BUILDING_IDS.map((id) => BUILDINGS[id].max), [6, 3, 2]);
+  assert.ok(Math.abs(full('patch').spent - 1_830) < 50);
+  assert.ok(Math.abs(full('hive').spent - 4_790) < 50);
+  assert.ok(Math.abs(full('log').spent - 8_610) < 50);
+  for (const id of BUILDING_IDS) assert.ok(full(id).lastDays > 100 && full(id).lastDays <= 120, `${id}: ${full(id).lastDays} days`);
 });

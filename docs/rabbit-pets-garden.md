@@ -7,6 +7,15 @@ mocks are on a canvas (<https://claude.ai/artifact/EnHx8N6a4gxHSkpNh4bd4R>),
 in the row "Chosen: A up close, B wide". The other rows are the four
 directions it was chosen from.
 
+**Changed 2026‑10‑06:** the meadow's pieces no longer help the yard (§6.5
+and the yard help in §6 are history). All thirteen outdoor pieces, the
+former welcome line included, are decor: friends who visited today sit at
+the guest chairs and the tea corner, and the friendship tree bears a fruit
+for each friend she's visited back and forth with. `pet.meadow` now lists
+every piece out in the meadow, for Getting started. The yard shows only as
+many spots as can be built (6 patches, 3 hives, 2 logs), or as many as a
+save from before the cap has.
+
 **Decisions already taken** (2026‑09‑25):
 
 - **The garden is a room, not a sheet.** The Garden tab in the tab bar
