@@ -1,7 +1,8 @@
 // Getting started (docs/rabbit-pets-economy.md §2.1): a checklist of six
 // steps, each paying a lump sum the player claims, and a free clover patch
-// for the first. Steps go in order and the next opens as soon as the last is
-// claimed. Some goals pace themselves (she has to be tired to nap, a crop
+// for the first. Steps go in order: two on her first day, then one a day
+// (each step's `day`), the next opening once the last is claimed and its day
+// has come. Some goals pace themselves (she has to be tired to nap, a crop
 // takes hours, the gift opens once a day, bond takes time). Anything done
 // early counts when its step opens. Pure, tested in economy.test.ts.
 
@@ -45,28 +46,32 @@ export const GOAL_TEXT: Record<StarterGoal, string> = {
   bond3: 'Reach bond level 3',
 };
 
-export interface StarterStep { step: number; goals: StarterGoal[]; clover: number; patch?: boolean }
+/** `day`: the day she's visited on which it opens at the earliest (her first day is 1). */
+export interface StarterStep { step: number; day: number; goals: StarterGoal[]; clover: number; patch?: boolean }
 
+// Two steps on the first day, then one more each day she's visited
+// (2026-10-06): finishing it all in a first sitting left nothing to come back
+// for. A step waiting for its day shows what it pays, so tomorrow has a reason.
 export const STARTER_STEPS: StarterStep[] = [
   // Step one can all be done in the first sitting. The lantern comes free in
   // storage: hanging it teaches arranging the room.
-  { step: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 200, patch: true },
+  { step: 1, day: 1, goals: ['feed', 'bed', 'toy', 'lantern'], clover: 200, patch: true },
   // The first day: something to do (dress her, with step one's clover) while
   // she gets tired enough to nap, dusty enough to brush and sprouts grow (4 hours).
-  { step: 2, goals: ['dress', 'nap', 'groom', 'sprout', 'bake'], clover: 140 },
+  { step: 2, day: 1, goals: ['dress', 'nap', 'groom', 'sprout', 'bake'], clover: 140 },
   // Where clover comes from: the clover sheet, the yard and foraging. All of
   // it can be done the same day: nothing here waits on the calendar.
-  { step: 3, goals: ['earn', 'yard', 'patch2', 'forage'], clover: 240 },
+  { step: 3, day: 2, goals: ['earn', 'yard', 'patch2', 'forage'], clover: 240 },
   // Spending on her and her room, and what foraging turns up.
-  { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 240 },
+  { step: 4, day: 3, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 240 },
   // The daily round (the gift takes three days) and the meadow, with a piece
   // in it: about 450 clover of spending. (The goal's id is from when the
   // piece had to be one that helped the yard.)
-  { step: 5, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 400 },
+  { step: 5, day: 4, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 400 },
   // The yard grows: the third patch opens beehives and the shed, which the
   // goals after Getting started (goals.ts) take up. With bond level 3, about
   // a week and a half in.
-  { step: 6, goals: ['patch3', 'gardenup', 'bond3'], clover: 500 },
+  { step: 6, day: 5, goals: ['patch3', 'gardenup', 'bond3'], clover: 500 },
 ];
 
 /** `paid` holds claimed step numbers (saves from the "starter week" hold the same numbers as days). */
@@ -111,29 +116,36 @@ export function goalDone(s: PetState, goal: StarterGoal): boolean {
   return (c[goal] ?? 0) > 0;
 }
 
-export type StepStatus = 'claimed' | 'open' | 'locked';
+/** `waiting`: the next step, still to open on a later day (its goals can be done already). */
+export type StepStatus = 'claimed' | 'open' | 'waiting' | 'locked';
 
-/** Every step, with how far along it is. Only the next unclaimed step is open. */
+/** Days until a step opens: 0 once it's open, 1 if it opens tomorrow. */
+export function daysUntil(s: PetState, step: StarterStep): number {
+  return Math.max(0, step.day - s.daysVisited);
+}
+
+/** Every step, with how far along it is. Only the next unclaimed step is open, and only from its day. */
 export function starterView(s: PetState): { step: StarterStep; done: boolean[]; status: StepStatus }[] {
   const st = starterOf(s);
-  const open = starterStep(s);
+  const next = starterStep(s);
   return STARTER_STEPS.map((step) => ({
     step,
     done: step.goals.map((g) => goalDone(s, g)),
-    status: st.paid.includes(step.step) ? 'claimed' : step.step === open ? 'open' : 'locked',
+    status: st.paid.includes(step.step) ? 'claimed' : step.step === next ? (daysUntil(s, step) ? 'waiting' : 'open') : 'locked',
   }));
 }
 
-/** The open step's goals are all done and its reward is waiting to be claimed. */
+/** The open step's goals are all done and its reward is waiting to be claimed (and its day has come). */
 export function starterReady(s: PetState): boolean {
   if (starterDone(s)) return false;
   const step = STARTER_STEPS.find((x) => x.step === starterStep(s))!;
-  return step.goals.every((g) => goalDone(s, g));
+  return !daysUntil(s, step) && step.goals.every((g) => goalDone(s, g));
 }
 
 /**
  * Claim the open step's reward, if its goals are all done; the next step
- * opens at once. One step per claim, so each reward gets its moment.
+ * opens straight away if its day has come, or on that day. One step per
+ * claim, so each reward gets its moment.
  */
 export function claimStarter(s: PetState, nowMs: number): { state: PetState; paid: { step: number; clover: number; patch: boolean } | null } {
   if (!starterReady(s)) return { state: s, paid: null };

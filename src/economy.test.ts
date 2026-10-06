@@ -4,7 +4,7 @@ import test from 'node:test';
 import { COLLECTIBLES } from './collectibles';
 import { bestFriends, earn, mutualFriends, nextFriendMilestone, noteFriendship, rate, settleLumps } from './economy';
 import { act, newPet, visit, type PetState } from './sim';
-import { claimStarter, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS } from './starter';
+import { claimStarter, daysUntil, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS } from './starter';
 import { DAY_MS, FRIEND_CLOVER } from './tuning';
 import { countOf } from './yard';
 
@@ -79,7 +79,7 @@ test('the gift grows 4 a day up to 80', () => {
   assert.ok(t.ok && t.clover === 100);
 });
 
-test('getting started: steps go in order, each waits to be claimed, and step one gives a clover patch', () => {
+test('getting started: steps go in order, each waits to be claimed and for its day, and step one gives a clover patch', () => {
   let s = pet();
   assert.equal(starterStep(s), 1);
   assert.deepEqual(starterView(s).map((v) => v.status), ['open', 'locked', 'locked', 'locked', 'locked', 'locked']);
@@ -94,7 +94,7 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   s = r.state;
   assert.equal(countOf(s, 'patch'), 1);
   assert.equal(claimStarter(s, NOON).paid, null, 'paid once');
-  // the next step opens straight away, no new day needed
+  // step two opens straight away: it's for the first day too
   assert.equal(starterStep(s), 2);
   assert.equal(starterView(s)[1]!.status, 'open');
   // goals done early count when their step opens, but each step is its own claim
@@ -103,7 +103,18 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   r = claimStarter(s, NOON);
   assert.equal(r.paid?.step, 2);
   s = r.state;
+  // step three is for the second day: waiting, though its goals can be done already
+  s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 2 } };
+  assert.equal(starterView(s)[2]!.status, 'waiting');
+  assert.equal(daysUntil(s, STARTER_STEPS[2]!), 1);
+  assert.equal(starterReady(s), false);
+  assert.equal(claimStarter(s, NOON).paid, null, 'not before its day');
+  s.daysVisited = 2;
+  assert.equal(starterView(s)[2]!.status, 'open');
+  s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 1 } };
   assert.equal(claimStarter(s, NOON).paid, null, 'step three wants a second patch');
+  // from here on, a day each: say she's been visited plenty
+  s.daysVisited = 10;
   // goals that count what she has: however it came about
   s.yard = { ...s.yard!, counts: { ...s.yard!.counts, patch: 2 } };
   s.toys = ['yarn'];
@@ -134,6 +145,10 @@ test('getting started: steps go in order, each waits to be claimed, and step one
   assert.deepEqual(paid, [240, 240, 400, 500]);
   assert.equal(starterDone(s), true);
   assert.equal(starterReady(s), false);
+});
+
+test('getting started: two steps on the first day, then one a day', () => {
+  assert.deepEqual(STARTER_STEPS.map((st) => st.day), [1, 1, 2, 3, 4, 5]);
 });
 
 test('getting started: no step before the last two waits on the calendar', () => {

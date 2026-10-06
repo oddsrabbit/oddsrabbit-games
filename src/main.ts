@@ -21,7 +21,7 @@ import {
 } from './extras';
 import { bestFriends, mutualFriends, nextFriendMilestone, rate, settleLumps, type Lump } from './economy';
 import { COLLECTION_SETS, setComplete } from './collectibles';
-import { claimStarter, GOAL_TEXT, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS, type StarterGoal, type StarterStep } from './starter';
+import { claimStarter, daysUntil, GOAL_TEXT, goalDone, markGoal, starterDone, starterReady, starterStep, starterView, STARTER_STEPS, type StarterGoal, type StarterStep } from './starter';
 import { claimGoal, goalsAllDone, goalsReady, LATER_GOALS, laterDone, openGoals, type LaterGoalId } from './goals';
 import {
   BUILDING_IDS, BUILDINGS, buyBuilding, buyShed, capacity, collect, countOf, nextPrice, perHour, SHED_REQUIRES, shedPrice, storageHours, stored,
@@ -322,7 +322,12 @@ function watchGoals(): void {
   starterWasReady = ready;
 }
 
-/** Pay the open step's reward; the next step opens straight away. */
+/** "tomorrow", or "in 2 days": when a waiting step opens (days she's visited, so a day away doesn't count). */
+function whenOpens(days: number): string {
+  return days === 1 ? 'tomorrow' : `in ${days} days`;
+}
+
+/** Pay the open step's reward; the next step opens straight away, or on its day. */
 function claimStep(): void {
   const r = claimStarter(pet, now());
   if (!r.paid) return;
@@ -330,7 +335,10 @@ function claimStep(): void {
   pet = r.state;
   savePet();
   play('gift');
-  toast(`+${d.clover} clover${d.patch ? ' and a clover patch for the yard' : ''}!`);
+  // the next step, if it's for another day: say what it pays, so tomorrow has a reason
+  const next = STARTER_STEPS.find((x) => x.step === d.step + 1);
+  const wait = next ? daysUntil(pet, next) : 0;
+  toast(`+${d.clover} clover${d.patch ? ' and a clover patch for the yard' : ''}!${wait ? ` Step ${next!.step} opens ${whenOpens(wait)}: +${next!.clover} clover.` : ''}`);
   note(`Getting started: step ${d.step} done.`, 'clover', `starter:${d.step}`);
   // the goals after it open now: ones already done wait quietly to be claimed
   if (starterDone(pet)) {
@@ -1556,12 +1564,12 @@ function render(): void {
     ui.cards.append(cardsBox);
   }
   const events = holiday ? [] : activeEvents(n, tz);
-  const starter = starterDone(pet) ? null : starterView(pet).find((d) => d.status === 'open');
+  const starter = starterDone(pet) ? null : starterView(pet).find((d) => d.status === 'open' || d.status === 'waiting');
   // after Getting started, the goals that follow it: the nearest open one, or what's ready
   const later = starterDone(pet) ? openGoals(pet) : [];
   const laterReady = later.filter((g) => laterDone(pet, g));
   const laterSig = later.length ? `g${later.map((g) => `${g.id}:${g.progress(pet).join('/')}`).join(',')}` : '';
-  const cardSig = [...events.map((e) => `${e.id}:${daysLeft(e, n, tz)}:${e.raffle && !prizeWon(pet, e) ? 'r' : ''}`), starter ? `s${starter.step.step}:${starter.done.filter(Boolean).length}` : '', laterSig].join('|');
+  const cardSig = [...events.map((e) => `${e.id}:${daysLeft(e, n, tz)}:${e.raffle && !prizeWon(pet, e) ? 'r' : ''}`), starter ? `s${starter.step.step}:${starter.status}:${starter.done.filter(Boolean).length}` : '', laterSig].join('|');
   if (cardsBox.dataset.sig !== cardSig) {
     cardsBox.dataset.sig = cardSig;
     const cards = events.map((e) => {
@@ -1577,21 +1585,24 @@ function render(): void {
     if (starter) {
       const done = starter.done.filter(Boolean).length;
       const all = starter.step.goals.length;
-      const ready = done === all;
+      const wait = starter.status === 'waiting' ? daysUntil(pet, starter.step) : 0;
+      const ready = done === all && !wait;
       const { step, clover } = starter.step;
-      // the prize rides on the card, and it turns green and bobs when it's ready to claim
+      // the prize rides on the card, and it turns green and bobs when it's ready to claim; a step
+      // waiting for its day says when it opens
       const card = h('button', {
-        class: `event-card starter-card-btn${ready ? ' claim' : ''}`, type: 'button',
+        class: `event-card starter-card-btn${ready ? ' claim' : ''}${wait ? ' waiting' : ''}`, type: 'button',
         'aria-label': ready
           ? `Getting started: step ${step} done. Claim ${clover} clover`
-          : `Getting started, step ${step} of ${STARTER_STEPS.length}: ${done} of ${all} done, for ${clover} clover`,
+          : wait ? `Getting started: step ${step} opens ${whenOpens(wait)}, for ${clover} clover`
+            : `Getting started, step ${step} of ${STARTER_STEPS.length}: ${done} of ${all} done, for ${clover} clover`,
       },
-      img(itemSprite(ready ? 'clover' : 'star'), 2),
+      img(itemSprite(ready ? 'clover' : wait ? 'moon' : 'star'), 2),
       h('span', { class: 'event-card-text' },
-        h('span', { class: 'event-card-name', text: ready ? `Step ${step} done!` : 'Getting started' }),
+        h('span', { class: 'event-card-name', text: ready ? `Step ${step} done!` : wait ? `Step ${step} opens ${whenOpens(wait)}` : 'Getting started' }),
         ready
           ? h('span', { class: 'event-card-sub', text: `Claim +${clover} clover` })
-          : h('span', { class: 'event-card-sub' }, `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))));
+          : h('span', { class: 'event-card-sub' }, wait ? 'Worth ' : `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))));
       card.addEventListener('click', () => openStarter());
       cards.push(card);
     }
@@ -4207,12 +4218,13 @@ function openStarter(): void {
   let slideFrom: number | null = null;
   openLiveSheet((close, redraw) => {
     const view = starterView(pet);
-    const openAt = Math.max(0, view.findIndex((v) => v.status === 'open'));
+    const openAt = Math.max(0, view.findIndex((v) => v.status === 'open' || v.status === 'waiting'));
     const cards = view.map(({ step, done, status }) => {
       const ready = status === 'open' && done.every(Boolean);
       let foot: Node;
       if (status === 'claimed') foot = h('div', { class: 'starter-foot', text: '✓ Claimed' });
       else if (status === 'locked') foot = h('div', { class: 'starter-foot', text: `Opens after step ${step.step - 1}` });
+      else if (status === 'waiting') foot = h('div', { class: 'starter-foot', text: `Opens ${whenOpens(daysUntil(pet, step))}. Anything you do before then counts.` });
       else {
         const claim = button(ready ? 'Claim' : `${done.filter(Boolean).length} of ${done.length} done`, 'btn primary', () => {
           slideFrom = openAt;
@@ -4226,7 +4238,7 @@ function openStarter(): void {
         h('div', { class: 'starter-head' }, h('h3', { text: `Step ${step.step}` }), prize(step)),
         h('ul', {}, ...step.goals.map((g, i) => {
           const hint = done[i] || status === 'claimed' ? null : goalHint(g);
-          const go = done[i] || status !== 'open' ? null : goalShortcut(g);
+          const go = done[i] || (status !== 'open' && status !== 'waiting') ? null : goalShortcut(g);
           return h('li', { class: done[i] || status === 'claimed' ? 'done' : '' },
             h('span', {}, `${done[i] || status === 'claimed' ? '✓' : '○'} ${GOAL_TEXT[g]}`, hint ? h('span', { class: 'hint', text: ` · ${hint}` }) : null),
             go ? button('Show me', 'btn small', () => { close(); go(); }) : null);
@@ -4332,7 +4344,7 @@ function openStarter(): void {
       track,
       h('div', { class: 'starter-dots' }, ...dots),
     ];
-    if (!starterDone(pet)) out.push(h('p', { class: 'note', text: 'Claim a step and the next one slides in. Anything you do early still counts.' }));
+    if (!starterDone(pet)) out.push(h('p', { class: 'note', text: 'Two steps today, then a new one each day you visit. Anything you do early still counts.' }));
     out.push(h('div', { class: 'actions-col' },
       starterDone(pet) ? button('See your next goals', 'btn primary', () => { close(); openLaterGoals(); }) : button('Ways to earn clover', 'btn', () => { close(); openCloverSheet(); }),
       button('Close', 'btn', close)));

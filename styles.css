@@ -1168,3 +1168,6 @@ button.chip:active { transform: translateY(1px); }
 .stamp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); gap: 8px; }
 .stamp-btn { height: 48px; display: flex; align-items: center; justify-content: center; background: var(--cream); border: 2px dashed var(--ink-2); border-radius: 8px; }
 .stamp-btn[aria-pressed="true"] { border: 3px solid var(--ink); background: #fff3c4; }
+/* Getting started: the next step, waiting for its day (starter.ts daysUntil) */
+.starter-card-btn.waiting { --ev: #ece4f6; }
+.starter-card.waiting { background: var(--paper); box-shadow: none; border-style: dashed; }

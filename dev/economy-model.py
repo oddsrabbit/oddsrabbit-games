@@ -14,8 +14,9 @@ together.
 
 START = 200
 # Getting started (§2.1), by the day each step lands: steps 1–2 on day one,
-# 3–4 on day two, 5 with the third gift, 6 with bond level 3. All solo.
-STARTER_WEEK = {1: 340, 2: 480, 3: 400, 10: 500}
+# then one a day (step 3 on day two, 4 on day three, 5 on day four), 6 with
+# bond level 3. All solo.
+STARTER_WEEK = {1: 340, 2: 240, 3: 240, 4: 400, 10: 500}
 # The goals after it (goals.ts) are left out: about 1,900 over months, well
 # under 1% of year one.
 STREAK_LUMP = {7: 100, 30: 400, 100: 1500, 365: 5000}
