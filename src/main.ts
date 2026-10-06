@@ -975,6 +975,19 @@ function goTab(t: Tab, opts: { arrange?: string | true } = {}): void {
   if (wasArranging && !decorating && !sheetStack.length) sheetQueue.shift()?.open();
 }
 
+/** The veg patch's beds that want you: ripe to pick, and empty (dug, nothing in them) to plant. */
+function gardenNeeds(n: number): { ripe: number; empty: number } {
+  const ps = plots(pet);
+  return { ripe: ps.filter((p) => p && p.readyAtMs <= n).length, empty: ps.filter((p) => !p).length };
+}
+
+/** "2 ready to pick", "1 bed empty", "2 ready · 1 empty": the Home chip's words. */
+function gardenChipText({ ripe, empty }: { ripe: number; empty: number }): string {
+  if (ripe && empty) return `${ripe} ready · ${empty} empty`;
+  if (ripe) return `${ripe} ready to pick`;
+  return `${empty} ${empty === 1 ? 'bed' : 'beds'} empty`;
+}
+
 /** Which tab is on, the badges, and her face and name on her tab. */
 function renderTabBar(n: number): void {
   for (const t of TABS) {
@@ -983,8 +996,9 @@ function renderTabBar(n: number): void {
       if (on) ui.tabs[t].setAttribute('aria-current', 'page'); else ui.tabs[t].removeAttribute('aria-current');
     }
   }
-  const ripe = plots(pet).filter((p) => p && p.readyAtMs <= n).length;
-  setToolBadge(ui.tabs.garden, ripe ? String(ripe) : '');
+  // beds that want you: ripe ones to pick, and empty ones to plant
+  const beds = gardenNeeds(n);
+  setToolBadge(ui.tabs.garden, beds.ripe + beds.empty ? String(beds.ripe + beds.empty) : '');
   setOff(ui.tabs.garden, away() ? `${pet.name} is on holiday. The garden will keep.` : null);
   const guests = guestsHere(visitTurns, n).length;
   const signed = unreadGuestbook();
@@ -1530,7 +1544,8 @@ function render(): void {
   const inYard = Math.floor(stored(pet, n));
   const guests = guestsHere(visitTurns, n);
   const thrives = !holiday && thriving(pet.needs);
-  const pillSig = `y${inYard}|v${guests.map((g) => g.visit.from.uuid).join(',')}|t${thrives}`;
+  const beds = holiday ? { ripe: 0, empty: 0 } : gardenNeeds(n);
+  const pillSig = `y${inYard}|v${guests.map((g) => g.visit.from.uuid).join(',')}|t${thrives}|b${beds.ripe},${beds.empty}`;
   if (eventsBox.dataset.sig !== pillSig) {
     eventsBox.dataset.sig = pillSig;
     const chips: Node[] = [];
@@ -1546,6 +1561,14 @@ function render(): void {
     if (thrives) {
       const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('sparkle'), 2), 'Thriving');
       chip.addEventListener('click', () => openThriving());
+      chips.push(chip);
+    }
+    if (beds.ripe || beds.empty) {
+      // the veg patch: what's ripe and what's empty, a tap away
+      const text = gardenChipText(beds);
+      const chip = h('button', { class: `tchip${beds.ripe ? ' ready' : ''}`, type: 'button', 'aria-label': `Garden: ${text}. Go to the veg patch` },
+        img(itemSprite(beds.ripe ? 'strawberry' : 'sprout'), 2), text);
+      chip.addEventListener('click', () => { goTab('garden'); goArea('patch'); });
       chips.push(chip);
     }
     if (inYard >= 1) {
@@ -2008,7 +2031,7 @@ function showAway(gap: number, events: PetEvent[], newDay: boolean, backFromHoli
     };
     const quick: HTMLButtonElement[] = [];
     if (inYard >= 1) quick.push(button('Go to the yard', 'btn', () => { close(); goTab('garden'); goArea('yard'); }));
-    if (ripe) quick.push(doing(ripe === 1 ? 'Pick it' : `Pick all ${ripe}`, 'Picked', () => pickAll()));
+    if (ripe) quick.push(doing(ripe === 1 ? 'Pick & replant' : `Pick & replant all ${ripe}`, 'Picked', () => pickAll()));
     if (giftReady(pet, now(), tz) && !away()) quick.push(doing('Open the daily gift', 'Opened', () => doAction('gift')));
     // her portrait as she is now: asleep, grumpy or pleased to see you
     const face = m === 'asleep' ? 'asleep' : m === 'grumpy' ? 'grumpy' : m === 'content' ? 'happy' : 'content';
@@ -3316,7 +3339,8 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
   if (hit.kind === 'plot') {
     if (hit.state === 'locked') { if (plotOffer(pet, hit.index) === 'next') confirmPlot(hit.index); else toast(plotLockReason(hit.index)); }
     else if (hit.state === 'empty') openSeeds(hit.index);
-    else if (hit.state === 'ready') pickPlot(hit.index);
+    // picked, the bed's empty: straight on to what to grow next, the same again first
+    else if (hit.state === 'ready') { const crop = pickPlot(hit.index); if (crop) openSeeds(hit.index, crop); }
     else {
       const p = plots(pet)[hit.index]!;
       toast(`${CROPS[p.crop].name}: ready in ${fmtDuration(p.readyAtMs - n)}.`);
@@ -3333,9 +3357,10 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
   renderGarden();
 }
 
-function pickPlot(i: number): boolean {
+/** Pick a ripe bed. `quiet`: no toast (Pick & replant says it all in one). Returns what was picked. */
+function pickPlot(i: number, quiet = false): CropId | null {
   const r = harvest(pet, i, now());
-  if (!r.ok) return false;
+  if (!r.ok) return null;
   pet = r.state;
   savePet();
   play('harvest');
@@ -3344,25 +3369,41 @@ function pickPlot(i: number): boolean {
   if (spot) gardenScene?.burst(CROP_ART[r.crop], 2, performance.now(), { x: spot.x, y: spot.y - 14 });
   const got = r.crop === 'sprout' ? `+${r.clover} clover.` : r.crop === 'berry' ? `${cropYield(pet, 'berry')} strawberries, in the pantry.`
     : cropYield(pet, 'golden') > 1 ? 'Two golden carrots, in the pantry. She always loves these.' : 'A golden carrot, in the pantry. She always loves these.';
-  toast(`Picked! ${got}`);
+  if (!quiet) toast(`Picked! ${got}`);
   note(`First ${CROPS[r.crop].name.toLowerCase()} from the garden.`, CROP_ART[r.crop], `harvest:${r.crop}`);
   if (r.crop === 'sprout') goal('sprout');
   queueReconcile();
   renderGarden();
-  return true;
+  return r.crop;
 }
 
+/** Pick every ripe bed and plant each with the same again, in one go. A bed whose seeds she can't afford is left empty. */
 function pickAll(): void {
   const n = now();
   const ready = plots(pet).map((p, i) => (p && p.readyAtMs <= n ? i : -1)).filter((i) => i >= 0);
-  for (const i of ready) pickPlot(i);
-  if (ready.length > 1) toast(`Picked ${ready.length} plots.`);
+  const clover = pet.clover;
+  let replanted = 0;
+  const empty: string[] = [];
+  for (const i of ready) {
+    const crop = pickPlot(i, true);
+    if (!crop) continue;
+    const r = plant(pet, i, crop, now());
+    if (r.ok) { pet = r.state; replanted++; } else empty.push(CROPS[crop].name.toLowerCase());
+  }
+  if (!ready.length) return;
+  savePet();
+  queueReconcile();
+  renderGarden();
+  const got = pet.clover - clover;
+  const beds = ready.length === 1 ? 'the bed' : `${ready.length} beds`;
+  toast(`Picked ${beds}${got > 0 ? `: +${got} clover` : ''}.${replanted ? ` ${replanted === ready.length ? 'Replanted' : `Replanted ${replanted}`}, the same again.` : ''}${empty.length ? ` Not enough clover to replant the ${empty[0]}.` : ''}`);
 }
 
-/** What to plant in plot `i`. */
-function openSeeds(i: number): void {
+/** What to plant in plot `i`. `last`: what was just picked there, offered first as the same again. */
+function openSeeds(i: number, last?: CropId): void {
   openLiveSheet((close) => {
-    const seeds = (Object.keys(CROPS) as CropId[]).map((c) => {
+    const order = (Object.keys(CROPS) as CropId[]).sort((a, b) => Number(b === last) - Number(a === last));
+    const seeds = order.map((c) => {
       const info = CROPS[c];
       const s = itemSprite(CROP_ART[c]);
       const b = h('button', {
@@ -3370,7 +3411,7 @@ function openSeeds(i: number): void {
         'aria-label': `${info.name}. ${info.seedCost ? `${info.seedCost} clover` : 'Free'}. Ready in ${fmtDuration(growMs(pet, c))}. Gives ${yields(c)}.`,
       },
       img(s, fitScale(s, 26)),
-      h('span', { class: 'nm', text: info.name }),
+      h('span', { class: 'nm', text: c === last ? `${info.name} again` : info.name }),
       h('span', { class: 'meta', text: `${fmtDuration(growMs(pet, c))} · ${yields(c)}` }),
       info.seedCost ? h('span', { class: 'pr' }, img(itemSprite('clover'), 1), String(info.seedCost)) : h('span', { class: 'pr', text: 'Free' }));
       b.addEventListener('click', () => {
@@ -3563,7 +3604,7 @@ function renderGarden(): void {
   // (Upgrades has the yard's buildings too; Forage goes at the end of every area's row but while arranging)
   const upgrades = actButton('Upgrades', 'leafy', () => openGardenUpgrades());
   const buttons = area === 'patch'
-    ? [actButton('Pick', 'strawberry', () => pickAll(), { badge: ready ? String(ready) : undefined, off: !ready && "Nothing's ripe yet. Tap a plot to see how long." }),
+    ? [actButton('Pick & replant', 'strawberry', () => pickAll(), { badge: ready ? String(ready) : undefined, off: !ready && "Nothing's ripe yet. Tap a plot to see how long." }),
       actButton('Plant', 'leafy', () => openSeeds(empty), { off: empty < 0 && 'Every plot is growing something.' }), upgrades]
     : area === 'yard'
       ? [actButton('Collect', 'clover', () => { collectYard(gardenUi?.claim.hidden ? undefined : gardenUi?.claim); renderGarden(); }, { badge: inYard >= 1 ? String(inYard) : undefined, off: inYard < 1 && (perHour(pet) ? 'Nothing to collect yet. The yard fills up every hour.' : 'Build a clover patch first: tap a + in the yard.') }),
