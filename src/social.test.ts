@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { CATALOG, digRoom, starterBurrow } from './decor';
 import { newPet, type PetState } from './sim';
-import { applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRank, buyWelcome, findGiftKind, GIFT_KINDS, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, giftInfo, giveFind, guestsToShow, noteOf, noteText, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, spareFinds, visitInfo, visitKind } from './social';
+import { applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRank, findGiftKind, GIFT_KINDS, takeGolden, visitPay, findOfGift, friendGardenPet, giftInfo, giveFind, guestsToShow, noteOf, noteText, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, spareFinds, visitInfo, visitKind } from './social';
 
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = () => newPet('p1', 'Clover', 'cocoa', NOON, 'UTC');
@@ -96,21 +96,16 @@ test('only the first 5 clover gifts a day pay, and sending one pays nothing', ()
   assert.equal(takeGolden(pet()), null);
 });
 
-test('a visit pays a flat 10 to the visitor, plus 6 for each welcome piece they have, for their first 5 a day', () => {
+test('a visit pays a flat 10 to the visitor, for their first 5 a day; welcome pieces bought before add nothing', () => {
   let s = pet();
   s.clover = 0;
   s.bond = 10_000; // a high clover rate: visits aren't boosted
   const got: number[] = [];
   for (let i = 0; i < 6; i++) { const r = rewardVisit(s, `f${i}`, NOON, 'UTC'); got.push(r.clover); s = r.state; }
   assert.deepEqual(got, [10, 10, 10, 10, 10, 0]);
-  const welcomed = { ...pet(), clover: 100_000 };
-  let w: PetState = welcomed;
-  for (let i = 0; i < 5; i++) { const r = buyWelcome(w); assert.ok(r.ok); w = r.state; }
-  assert.equal(welcomeLevel(w), 5);
-  assert.equal(visitPay(w), 40);
-  assert.equal(w.clover, 100_000 - 47_000);
-  assert.deepEqual(buyWelcome(w), { ok: false, reason: 'done' });
-  assert.equal(rewardVisit(w, 'f', NOON, 'UTC').clover, 40);
+  const w: PetState = { ...pet(), welcome: 5 };
+  assert.equal(visitPay(w), 10);
+  assert.equal(rewardVisit(w, 'f', NOON, 'UTC').clover, 10);
 });
 
 test('visits seen: the first 3 a day boost her, the first 5 pay the host, and odd senders pay nothing', () => {

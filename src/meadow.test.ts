@@ -1,15 +1,15 @@
 // The garden's meadow (docs/rabbit-pets-garden.md §6): outdoor pieces, where
-// they go, and the yard help from the ones placed there.
+// they go. All decor: none of them changes what anything pays.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { byId, CATALOG, clampToZone, isOutdoor, meadowHelpers, meadowItems, readBurrow, starterBurrow, ZONES, type BurrowState } from './decor';
+import { byId, CATALOG, clampToZone, isOutdoor, meadowItems, meadowPieces, readBurrow, starterBurrow, ZONES, type BurrowState } from './decor';
 import { buyUpgrade, hasUpgrade } from './extras';
 import { AREA_W } from './garden';
 import { newPet, type PetState } from './sim';
 import { buildShowcase } from './social';
 import { HOUR_MS, MEADOW } from './tuning';
-import { meadowPerDay, meadowShare, perHour, setMeadow, stored } from './yard';
+import { perHour, setMeadow, stored } from './yard';
 
 const NOON = Date.UTC(2026, 8, 24, 12, 0);
 const pet = (): PetState => newPet('meadow-pet', 'Clover', 'snow', NOON, 'UTC');
@@ -21,15 +21,12 @@ function fullYard(): PetState {
 }
 const OUTDOOR = CATALOG.filter(isOutdoor);
 
-test('eight outdoor pieces: six help one kind of building each, two per kind; two are for looks', () => {
-  // (and the five welcome pieces, bought in their own line: social.ts buyWelcome)
-  assert.equal(OUTDOOR.filter((d) => !d.welcome).length, 8);
-  assert.equal(OUTDOOR.filter((d) => d.welcome).length, 5);
-  const helps = OUTDOOR.filter((d) => d.boost).map((d) => d.boost);
-  assert.deepEqual(helps.sort(), ['hive', 'hive', 'log', 'log', 'patch', 'patch']);
-  assert.ok(byId('bench') && !byId('bench')!.boost && byId('fencelights')!.glow);
-  assert.ok(OUTDOOR.every((d) => !d.limited), 'no seasonal piece pays');
-  assert.ok(CATALOG.filter((d) => !isOutdoor(d)).every((d) => !d.boost), 'burrow decor stays cosmetic');
+test('thirteen outdoor pieces, all decor: none of them changes what anything pays', () => {
+  assert.equal(OUTDOOR.length, 13);
+  assert.ok(OUTDOOR.every((d) => !d.limited), 'none seasonal');
+  assert.ok(OUTDOOR.every((d) => d.price > 0 && d.price <= 1500), 'priced like decor');
+  assert.deepEqual(OUTDOOR.filter((d) => d.seats).map((d) => d.id).sort(), ['guestchairs', 'teacorner'], 'friends sit at these');
+  assert.ok(byId('fencelights')!.glow);
 });
 
 test('outdoor zones sit wholly in the meadow, the third area', () => {
@@ -49,36 +46,16 @@ test('the meadow gate is a garden upgrade, 300 clover', () => {
   assert.ok(r.ok && hasUpgrade(r.state, 'meadow') && r.state.clover === 0);
 });
 
-test('each helping piece adds 10% to every building of its kind; two stack; a piece counts once', () => {
+test("the yard makes what its buildings make, whatever's out in the meadow", () => {
   const s = fullYard();
   const base = perHour(s);
-  assert.equal(base, 10 * 0.25 + 5 * 1 + 5 * 2);
-  s.meadow = ['sunflowers'];
-  assert.ok(Math.abs(perHour(s) - (base + 5 * 1 * 0.1)) < 1e-9);
-  assert.ok(Math.abs(meadowPerDay(s, 'hive') - 2.4) < 1e-9);
-  s.meadow = ['sunflowers', 'trellis', 'sunflowers'];
-  assert.ok(Math.abs(meadowShare(s, 'hive') - 0.2) < 1e-9, 'a duplicate id counts once');
-  s.meadow = ['stones', 'birdbath', 'sunflowers', 'trellis', 'wheelbarrow', 'gnome'];
-  assert.ok(Math.abs(perHour(s) * 24 - 504) < 1e-9, 'everything placed: 420 a day becomes 504');
-  s.meadow = ['bench', 'fencelights', 'nonsense'];
-  assert.equal(perHour(s), base, 'looks-only and unknown pieces help nothing');
+  assert.equal(base, 10 * 0.25 + 5 * 1 + 5 * 2, 'a yard built before the cap keeps every building');
+  s.meadow = ['sunflowers', 'trellis', 'stones', 'birdbath', 'wheelbarrow', 'gnome'];
+  assert.equal(perHour(s), base);
+  assert.equal(stored(s, NOON + 2 * HOUR_MS), base * 2);
 });
 
-test('help starts when a piece is placed and never reaches back into storage already earned', () => {
-  let s = fullYard();
-  const before = stored(s, NOON + 2 * HOUR_MS);
-  s = setMeadow(s, ['sunflowers'], NOON + 2 * HOUR_MS);
-  assert.equal(stored(s, NOON + 2 * HOUR_MS), before, 'nothing changes at the moment it goes out');
-  const later = stored(s, NOON + 3 * HOUR_MS) - stored(s, NOON + 2 * HOUR_MS);
-  assert.ok(Math.abs(later - (17.5 + 0.5)) < 1e-9, 'the next hour earns 17.5 + 0.5 from the sunflowers');
-  // put away: back to the plain rate from then on
-  s = setMeadow(s, [], NOON + 3 * HOUR_MS);
-  const after = stored(s, NOON + 4 * HOUR_MS) - stored(s, NOON + 3 * HOUR_MS);
-  assert.ok(Math.abs(after - 17.5) < 1e-9);
-  assert.equal(setMeadow(s, [], NOON + 5 * HOUR_MS), s, 'no change, no new state');
-});
-
-test('the helpers are the placed outdoor pieces with a boost, each once', () => {
+test('pet.meadow notes every piece out in the meadow, each once, keeping ids from a newer version', () => {
   const b: BurrowState = starterBurrow();
   b.items.push(
     { uid: 'a', id: 'sunflowers', x: 230, y: 100, flip: false, placed: true },
@@ -86,8 +63,13 @@ test('the helpers are the placed outdoor pieces with a boost, each once', () => 
     { uid: 'c', id: 'gnome', x: 250, y: 90, flip: false, placed: false },
     { uid: 'd', id: 'bench', x: 240, y: 110, flip: false, placed: true },
   );
-  assert.deepEqual(meadowHelpers(b), ['sunflowers']);
+  assert.deepEqual(meadowPieces(b), ['bench', 'sunflowers']);
   assert.deepEqual(meadowItems(b).map((i) => i.uid), ['a', 'b', 'd']);
+  let s = pet();
+  s.meadow = ['futurepiece'];
+  s = setMeadow(s, meadowPieces(b));
+  assert.deepEqual(s.meadow, ['bench', 'futurepiece', 'sunflowers']);
+  assert.equal(setMeadow(s, meadowPieces(b)), s, 'no change, no new state');
 });
 
 test('saves keep outdoor pieces in their zones, and friends never see them in the burrow', () => {

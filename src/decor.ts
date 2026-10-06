@@ -33,10 +33,8 @@ export interface DecorDef {
   glow?: boolean;
   /** She sleeps on it. */
   bed?: boolean;
-  /** Placed in the meadow, it helps this kind of yard building (yard.ts perHour). */
-  boost?: 'patch' | 'hive' | 'log';
-  /** One of the welcome line's pieces (tuning.ts WELCOME), its place in it from 1: bought with buyWelcome, not sold like decor. */
-  welcome?: number;
+  /** In the meadow, this many visiting friends sit at it (garden-scene.ts). */
+  seats?: number;
 }
 
 export const CATALOG: DecorDef[] = [
@@ -88,18 +86,20 @@ export const CATALOG: DecorDef[] = [
   // the garden's meadow (docs/rabbit-pets-economy.md §2.6, "The meadow")
   { id: 'fencelights', name: 'Fence lights', price: 250, art: 'fencelights', zone: 'fence', bond: 1, glow: true },
   { id: 'bench', name: 'Garden bench', price: 350, art: 'bench', zone: 'lawn', bond: 1 },
-  { id: 'stones', name: 'Stepping stones', price: 400, art: 'stones', zone: 'lawn', bond: 1, boost: 'patch' },
-  { id: 'birdbath', name: 'Birdbath', price: 500, art: 'birdbath', zone: 'lawn', bond: 1, boost: 'patch' },
-  { id: 'sunflowers', name: 'Sunflower patch', price: 1200, art: 'sunflowers', zone: 'lawn', bond: 1, boost: 'hive' },
-  { id: 'trellis', name: 'Trellis arch', price: 1500, art: 'trellis', zone: 'lawn', bond: 1, boost: 'hive' },
-  { id: 'wheelbarrow', name: 'Wheelbarrow', price: 4000, art: 'wheelbarrow', zone: 'lawn', bond: 1, boost: 'log' },
-  { id: 'gnome', name: 'Garden gnome', price: 4500, art: 'gnome', zone: 'lawn', bond: 1, boost: 'log' },
-  // the welcome line: each makes every visit pay 3 more (social.ts visitPay). Prices are WELCOME's.
-  { id: 'welcomemat', name: 'Welcome mat', price: 1000, art: 'welcomemat', zone: 'lawn', bond: 1, welcome: 1 },
-  { id: 'guestchairs', name: 'Guest chairs', price: 3000, art: 'guestchairs', zone: 'lawn', bond: 1, welcome: 2 },
-  { id: 'teacorner', name: 'Tea corner', price: 6000, art: 'teatable', zone: 'lawn', bond: 1, welcome: 3 },
-  { id: 'lanternpath', name: 'Lantern path', price: 12000, art: 'lanternpath', zone: 'lawn', bond: 1, welcome: 4 },
-  { id: 'friendtree', name: 'Friendship tree', price: 25000, art: 'friendtree', zone: 'lawn', bond: 1, welcome: 5 },
+  // Decor only (2026-10-06): these used to make yard buildings produce more, and the welcome
+  // pieces used to raise what visits pay. Visiting friends sit at the chairs and the tea corner,
+  // and the friendship tree bears a fruit for each friend (garden-scene.ts).
+  { id: 'stones', name: 'Stepping stones', price: 150, art: 'stones', zone: 'lawn', bond: 1 },
+  { id: 'birdbath', name: 'Birdbath', price: 250, art: 'birdbath', zone: 'lawn', bond: 1 },
+  { id: 'gnome', name: 'Garden gnome', price: 200, art: 'gnome', zone: 'lawn', bond: 1 },
+  { id: 'sunflowers', name: 'Sunflower patch', price: 300, art: 'sunflowers', zone: 'lawn', bond: 1 },
+  { id: 'wheelbarrow', name: 'Wheelbarrow', price: 350, art: 'wheelbarrow', zone: 'lawn', bond: 1 },
+  { id: 'trellis', name: 'Trellis arch', price: 450, art: 'trellis', zone: 'lawn', bond: 1 },
+  { id: 'welcomemat', name: 'Welcome mat', price: 150, art: 'welcomemat', zone: 'lawn', bond: 1 },
+  { id: 'guestchairs', name: 'Guest chairs', price: 400, art: 'guestchairs', zone: 'lawn', bond: 1, seats: 2 },
+  { id: 'lanternpath', name: 'Lantern path', price: 600, art: 'lanternpath', zone: 'lawn', bond: 1 },
+  { id: 'teacorner', name: 'Tea corner', price: 700, art: 'teatable', zone: 'lawn', bond: 1, seats: 2 },
+  { id: 'friendtree', name: 'Friendship tree', price: 1500, art: 'friendtree', zone: 'lawn', bond: 1 },
   { id: 'candybasket', name: 'Candy basket', price: 0, art: 'candybasket', zone: 'floor', bond: 1, limited: true, giftOnly: true },
   { id: 'jackolantern', name: 'Jack-o-lantern', price: 350, art: 'jackolantern', zone: 'floor', bond: 1, limited: true, glow: true },
   { id: 'ghost', name: 'Friendly ghost mobile', price: 500, art: 'ghost', zone: 'hang', bond: 1, limited: true },
@@ -201,10 +201,16 @@ export function meadowItems(b: BurrowState): PlacedItem[] {
   return b.items.filter((i) => { const d = byId(i.id); return i.placed && !!d && isOutdoor(d); });
 }
 
-/** Ids of the helping pieces out in the meadow, each once: what pet.meadow should hold. */
-export function meadowHelpers(b: BurrowState): string[] {
-  return [...new Set(meadowItems(b).map((i) => i.id).filter((id) => !!byId(id)?.boost))].sort();
+/** Ids of the pieces out in the meadow, each once: what pet.meadow holds (for Getting started). */
+export function meadowPieces(b: BurrowState): string[] {
+  return [...new Set(meadowItems(b).map((i) => i.id))].sort();
 }
+
+/**
+ * The welcome pieces in the order they used to be bought (pet.welcome counted
+ * how many): a save from then gets each it paid for, once (main.ts giveWelcomePieces).
+ */
+export const WELCOME_BOUGHT = ['welcomemat', 'guestchairs', 'teacorner', 'lanternpath', 'friendtree'] as const;
 
 export function clampToZone(zone: Zone, x: number, y: number): { x: number; y: number } {
   const z = ZONES[zone];

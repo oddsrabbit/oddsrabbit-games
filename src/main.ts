@@ -10,7 +10,7 @@ import { drawRabbit, dressKey, type Dress, type Face, type Frame } from './art/r
 import { drawBurrow, moonPhase, roomColours, SCENE_H, SCENE_W, WALL_INSET, WINDOW, type RoomStyle } from './art/burrow';
 import { clockOffset, now, syncClock } from './clock';
 import {
-  addStarterLantern, addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, hasLantern, isOutdoor, meadowHelpers, meadowItems, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
+  addStarterLantern, addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, hasLantern, isOutdoor, meadowPieces, meadowItems, WELCOME_BOUGHT, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
   type BurrowState, type DecorDef, type PlacedItem, type SurfaceDef,
   canDig, digRoom, EXTRA_ROOMS, inRoom, openRoomsOf, ROOMS, ROOMS_OPEN, roomsOf, type ExtraRoom, type RoomId,
 } from './decor';
@@ -25,7 +25,7 @@ import { claimStarter, GOAL_TEXT, goalDone, markGoal, starterDone, starterReady,
 import { claimGoal, goalsAllDone, goalsReady, LATER_GOALS, laterDone, openGoals, type LaterGoalId } from './goals';
 import {
   BUILDING_IDS, BUILDINGS, buyBuilding, buyShed, capacity, collect, countOf, nextPrice, perHour, SHED_REQUIRES, shedPrice, storageHours, stored,
-  unlocked as buildingUnlocked, meadowPerDay, setMeadow, type BuildingId,
+  unlocked as buildingUnlocked, setMeadow, type BuildingId,
   payback,
 } from './yard';
 import { AREA_W, areaAt, AREAS, areaX, GROUND, hitTest, PLOT_SPOTS, STRIP_H, type AreaId } from './garden';
@@ -35,7 +35,7 @@ import { isOut, trip as tripOf, type Loot } from './forage';
 import { drawTicket, prizeWon, ticketsBought } from './raffle';
 import { addEntry, emptyJournal, mergeJournal, MILESTONE_DAYS, signGuestbook, type Journal } from './journal';
 import {
-  applyGift, applyVisits, buildShowcase, buyWelcome, careHint, friendNeeds, friendRank, findGiftKind, nextWelcome, takeGolden, visitPay, welcomeLevel, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
+  applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRank, findGiftKind, takeGolden, visitPay, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
   type ShowcaseData, type VisitIn, type VisitKind,
 } from './social';
 import { carriedGifts, guestsHere, guestTurns, type GuestTurn } from './guests';
@@ -53,7 +53,7 @@ import {
   FOOD_IDS, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
 } from './sim';
 import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
-import { THRIVING, BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, WELCOME, FRIEND_MILESTONES } from './tuning';
+import { THRIVING, BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, FRIEND_MILESTONES } from './tuning';
 import { dayKey, localParts } from './localtime';
 import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherName, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
 
@@ -3178,6 +3178,9 @@ function gardenModel(n: number): GardenModel {
     pet, nowMs: n, area, season: w.season, weather: w.weather, night: isNight(n, tz), moon: moonPhase(n),
     coat: pet.coat, dress: dressOf(pet), asleep: isAsleep(pet, n, tz), absent: isOut(pet, n) || away(), meadowOpen: hasUpgrade(pet, 'meadow'),
     items: meadowItems(burrow), selected: arranging ? gardenSel : null,
+    // everyone who came by today sits in the meadow, if there's somewhere to sit
+    guests: visitTurns.map(({ visit, data: d }) => ({ id: visit.from.uuid, coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears } })),
+    friends: mutualFriends(pet),
   };
 }
 
@@ -3296,7 +3299,7 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
     if (gated('meadow')) { confirmMeadow(() => goArea('meadow')); return; }
     const piece = pieceAt(x, y);
     const def = piece ? byId(piece.id) : undefined;
-    if (def) toast(def.boost ? `${def.name}: ${BOOST_LINE[def.boost].toLowerCase()}.` : `${def.name}.`);
+    if (def) toast(def.seats ? `${def.name}: visiting friends sit here.` : def.id === 'friendtree' ? `${def.name}: a fruit for each friend you visit back and forth.` : `${def.name}.`);
     return;
   }
   if (hit.kind === 'plot') {
@@ -3515,10 +3518,6 @@ function renderGarden(): void {
   } else {
     line = meadowLine();
   }
-  if (area === 'yard') {
-    const help = BUILDING_IDS.reduce((sum, id) => sum + meadowPerDay(pet, id) * countOf(pet, id), 0);
-    if (help > 0) chips.push(`Meadow +${Math.round(help)} a day`);
-  }
   // "she", not her name, to keep it short (the chip and the Collect button say what's waiting)
   if (asleep) line = `She's asleep. ${line}`;
   else if (isOut(pet, n)) line = `She's out foraging. ${line}`;
@@ -3569,21 +3568,22 @@ function renderGarden(): void {
 }
 
 // ------------------------------------------------------------------ the meadow
-// The garden's third area: outdoor decor, six pieces of which help the yard
-// (docs/rabbit-pets-garden.md §6, yard.ts meadowShare).
+// The garden's third area: outdoor decor (docs/rabbit-pets-garden.md §6).
+// Visiting friends sit at its chairs and tea corner.
 
 let arranging = false;
 let gardenSel: string | null = null;
 
-const BOOST_LINE: Record<'patch' | 'hive' | 'log', string> = {
-  patch: 'Clover patches make 10% more',
-  hive: 'Beehives make 10% more',
-  log: 'Mushroom logs make 10% more',
-};
+/** What a meadow piece does besides look nice, for the shop. */
+function meadowWhat(d: DecorDef): string {
+  if (d.seats) return 'Visiting friends sit here.';
+  if (d.id === 'friendtree') return 'A fruit for each friend you visit back and forth.';
+  return d.glow ? 'Glows at night.' : 'Just for looks.';
+}
 
 /** Bring pet.meadow in line with what's placed in the meadow; saves only if it changed. */
 function syncMeadow(): void {
-  const next = setMeadow(pet, meadowHelpers(burrow), now());
+  const next = setMeadow(pet, meadowPieces(burrow));
   if (next === pet) return;
   pet = next;
   savePet();
@@ -3637,9 +3637,9 @@ function putOut(item: PlacedItem): void {
 /** Everything the meadow can have: buy it, put it out, or see it's out. */
 function openMeadowShop(): void {
   openLiveSheet((close, redraw) => {
-    const rows = CATALOG.filter((d) => isOutdoor(d) && !d.welcome).map((def) => {
+    const rows = CATALOG.filter((d) => isOutdoor(d)).sort((a, b) => a.price - b.price).map((def) => {
       const mine = burrow.items.find((i) => i.id === def.id);
-      const what = def.boost ? `${BOOST_LINE[def.boost]}.` : 'Just for looks.';
+      const what = meadowWhat(def);
       const s = itemSprite(def.art);
       let right: HTMLElement;
       if (mine?.placed) right = pill('Out', 'soft');
@@ -3658,7 +3658,7 @@ function openMeadowShop(): void {
           putOut(item);
           play('clover');
           haptic('success');
-          toast(def.boost ? `${def.name} out in the meadow. ${BOOST_LINE[def.boost]}.` : `${def.name} out in the meadow.`);
+          toast(`${def.name} out in the meadow.`);
           note(`Got ${article(def.name)} for the meadow.`, 'flower', `decor:${def.id}`);
           redraw();
           renderGarden();
@@ -3668,32 +3668,10 @@ function openMeadowShop(): void {
       return h('div', { class: 'shop-row' }, h('span', { class: 'ico' }, img(s, fitScale(s, 28))),
         h('span', { class: 'txt' }, h('span', { class: 'nm', text: def.name }), h('span', { class: 'sub', text: what })), right);
     });
-    // the welcome line, in order: what each adds to a visit, for you
-    const next = nextWelcome(pet);
-    const welcome = CATALOG.filter((d) => d.welcome).sort((a, b) => a.welcome! - b.welcome!).map((def) => {
-      const have = welcomeLevel(pet) >= def.welcome!;
-      const state = have ? { owned: 'Yours' } : next?.id === def.id ? { price: def.price } : { locked: `After the ${CATALOG.find((d) => d.welcome === def.welcome! - 1)!.name.toLowerCase()}` };
-      return shopRow(def.name, `Every visit, made or received, pays you ${WELCOME.step} more clover.`, state, () => {
-        const r = buyWelcome(pet);
-        if (!r.ok) { play('nope'); toast(r.reason === 'broke' ? moreClover(def.price) : 'You have them all.'); return; }
-        pet = r.state;
-        savePet();
-        giveWelcomePieces();
-        play('clover');
-        haptic('success');
-        toast(`${def.name} out in the meadow. Visits now pay you ${visitPay(pet)} clover.`);
-        note(`Put out ${article(def.name)} for visiting friends.`, def.art, `decor:${def.id}`);
-        redraw();
-        renderGarden();
-      }, def.art);
-    });
     return [
       h('div', { class: 'eyebrow', text: 'The meadow' }),
-      h('h2', { text: 'Welcome friends' }),
-      h('p', { class: 'note', text: `A visit pays you ${visitPay(pet)} clover, whether you visit a friend or they visit you (the first ${FRIEND_CLOVER.paidPerDay} of each a day). Each of these adds ${WELCOME.step} more. They only pay off if friends visit.` }),
-      h('div', { class: 'shop-list' }, ...welcome),
       h('h2', { text: 'For the meadow' }),
-      h('p', { class: 'note', text: 'A piece helps while it’s out anywhere in the meadow. Where it stands is up to you: Arrange to move things.' }),
+      h('p', { class: 'note', text: 'Where each piece stands is up to you: Arrange to move things. Friends who visit sit at the chairs and the tea corner.' }),
       h('div', { class: 'shop-list' }, ...rows),
       h('div', { class: 'actions-col' }, button('Done', 'btn primary', close)),
     ];
@@ -3760,9 +3738,7 @@ function meadowButtons(): HTMLButtonElement[] {
 function meadowLine(): string {
   if (!hasUpgrade(pet, 'meadow')) return `Past the gate: the meadow. Open it for ${MEADOW.gate} clover.`;
   if (arranging) return gardenSel ? 'Drag it where you like.' : 'Tap a piece to move it.';
-  const help = BUILDING_IDS.reduce((sum, id) => sum + meadowPerDay(pet, id) * countOf(pet, id), 0);
-  if (help > 0) return `The meadow adds ${Math.round(help)} clover a day to the yard.`;
-  return meadowItems(burrow).length ? 'A lovely spot. Some pieces help the yard, too.' : 'Nothing in the meadow yet. Try the shop.';
+  return meadowItems(burrow).length ? 'A lovely spot for friends to sit when they visit.' : 'Nothing in the meadow yet. Try the shop.';
 }
 
 // ------------------------------------------------------------------ toys
@@ -4368,9 +4344,8 @@ function openStarter(): void {
 function laterShortcut(id: LaterGoalId): (() => void) | null {
   const inGarden = (a: AreaId) => () => { goTab('garden'); goArea(a); };
   switch (id) {
-    case 'hive': case 'patch5': case 'shed': case 'hive3': case 'hive5': case 'log': return inGarden('yard');
+    case 'hive': case 'patch5': case 'shed': case 'hive3': case 'log': return inGarden('yard');
     case 'soil2': return () => { goTab('garden'); openGardenUpgrades('garden'); };
-    case 'hivehelp': return () => { goTab('garden'); goArea('meadow'); if (!gated('meadow')) openMeadowShop(); };
     case 'set': return () => { goTab('garden'); if (!isOut(pet, now())) openForage(); };
     case 'bestfriend': return () => goTab('friends');
   }
@@ -4477,7 +4452,7 @@ let herSig = '';
 function bondPerks(level: number): { rate: number; bonus: number; unlocks: string[] } {
   const rate = RATE.bondEarly * Math.min(level - 1, 6) + RATE.bondLate * Math.max(0, level - 7);
   const unlocks = [
-    ...CATALOG.filter((d) => d.bond === level && !d.giftOnly && !d.limited && !d.welcome).map((d) => d.name),
+    ...CATALOG.filter((d) => d.bond === level && !d.giftOnly && !d.limited && !isOutdoor(d)).map((d) => d.name),
     ...SURFACES.filter((d) => d.bond === level).map((d) => d.name),
     ...OUTFITS.filter((o) => o.bond === level && !o.giftOnly).map((o) => o.name),
   ].map((n) => n.toLowerCase());
@@ -4910,14 +4885,16 @@ function buyTicket(e: SeasonalEvent, redrawEvent: () => void): void {
 }
 
 /**
- * Her welcome pieces in the meadow, one for each she's bought (welcomeLevel,
- * kept with her). Each has a fixed uid, so a level bought on another device
- * brings its piece here too, and never twice.
+ * Welcome pieces bought back when they raised what visits paid (pet.welcome
+ * counted them, in WELCOME_BOUGHT's order): each goes in the meadow once.
+ * Each has a fixed uid, so a piece bought on another device comes here too,
+ * and never twice.
  */
 function giveWelcomePieces(): void {
   let added = false;
-  for (const def of CATALOG.filter((d) => d.welcome && d.welcome <= welcomeLevel(pet))) {
+  for (const def of WELCOME_BOUGHT.slice(0, Math.max(0, pet.welcome ?? 0)).map((id) => byId(id)).filter((d): d is DecorDef => !!d)) {
     const uid = `welcome-${def.id}`;
+    if (burrow.items.some((i) => i.id === def.id && i.uid !== uid)) continue;
     if (burrow.items.some((i) => i.uid === uid)) continue;
     const item: PlacedItem = { uid, id: def.id, x: 0, y: 0, flip: false, placed: false };
     burrow.items.push(item);
@@ -5715,7 +5692,7 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
       gscene.draw({
         pet: gardenPet, nowMs: n, area: garea, season: w.season, weather: w.weather, night: isNight(n, tz), moon: moonPhase(n),
         coat: d.coat, dress: { head: d.head, neck: d.neck, ears: d.ears }, asleep, absent: holiday || out, meadowOpen: !!d.garden?.meadow,
-        items: (d.garden?.meadow ?? []).map((it, i) => ({ uid: `m${i}`, ...it, placed: true })), selected: null, guest: true,
+        items: (d.garden?.meadow ?? []).map((it, i) => ({ uid: `m${i}`, ...it, placed: true })), selected: null, guest: true, friends: d.garden?.friends ?? 0,
       }, t);
       nudgeGarden(gcanvas, gscene, gscale);
       return;
@@ -6130,9 +6107,9 @@ function renderFriendsPage(): void {
         button('Invite a friend', 'btn small primary', () => openInvite())));
     }
 
-    // the meadow's welcome pieces make every visit pay more
-    if (hasUpgrade(pet, 'meadow') && nextWelcome(pet)) {
-      out.push(h('div', { class: 'menu' }, menuRow('Welcome friends', `Put something out in the meadow and every visit pays ${WELCOME.step} more clover`, 'welcomemat', () => {
+    // somewhere for friends to sit: the meadow's chairs and tea corner
+    if (hasUpgrade(pet, 'meadow') && !meadowItems(burrow).some((i) => byId(i.id)?.seats)) {
+      out.push(h('div', { class: 'menu' }, menuRow('Somewhere for friends to sit', 'Put out guest chairs or a tea corner in the meadow, and visiting friends sit there', 'guestchairs', () => {
         goTab('garden');
         if (tab !== 'garden') return;
         goArea('meadow');

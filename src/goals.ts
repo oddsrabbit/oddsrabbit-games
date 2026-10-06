@@ -14,7 +14,7 @@ import { byId } from './decor';
 
 export type LaterGoalId =
   | 'hive' | 'set' | 'patch5' | 'shed' | 'soil2'
-  | 'hivehelp' | 'hive3' | 'bestfriend' | 'hive5' | 'log';
+  | 'hive3' | 'bestfriend' | 'log';
 
 export interface LaterGoal {
   id: LaterGoalId;
@@ -34,13 +34,8 @@ export const LATER_GOALS: LaterGoal[] = [
   { id: 'patch5', text: 'Grow the yard to 5 clover patches', how: `Each one makes ${perDay('patch')} clover a day.`, clover: 200, progress: (s) => [countOf(s, 'patch'), 5] },
   { id: 'shed', text: 'Build the yard shed', how: 'The yard holds 36 hours of clover instead of 24.', clover: 240, progress: (s) => [yardOf(s).sheds, 1] },
   { id: 'soil2', text: 'Enrich the garden soil to level 2', how: 'Richer soil makes every sprout harvest pay more.', clover: 300, progress: (s) => [soilLevel(s), 2] },
-  {
-    id: 'hivehelp', text: 'Put out a meadow piece that helps the beehives', how: 'The sunflower patch or the trellis arch: every hive makes 10% more.', clover: 300,
-    progress: (s) => [(s.meadow ?? []).some((id) => byId(id)?.boost === 'hive') ? 1 : 0, 1],
-  },
   { id: 'hive3', text: 'Keep 3 beehives', how: `Each extra one costs more, and makes ${perDay('hive')} clover a day.`, clover: 400, progress: (s) => [countOf(s, 'hive'), 3] },
   { id: 'bestfriend', text: 'Become best friends with someone', how: 'Visit each other for about 2 weeks. Each best friend raises her clover rate.', clover: 300, progress: (s) => [bestFriends(s), 1] },
-  { id: 'hive5', text: 'Fill the yard with 5 beehives', how: 'Mushroom logs open after the fifth.', clover: 600, progress: (s) => [countOf(s, 'hive'), 5] },
   { id: 'log', text: 'Build a mushroom log', how: `The yard's biggest building: ${perDay('log')} clover a day.`, clover: 1000, progress: (s) => [countOf(s, 'log'), 1] },
 ];
 

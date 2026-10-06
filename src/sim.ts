@@ -91,7 +91,7 @@ export interface PetState {
   // ---- Update 1. All optional: saves from before them simply lack the field.
   // (Older saves may also hold `careCounts` and `marking`, from a marking she
   // earned on day 7; that's gone, and the fields are kept as they are.)
-  /** Welcome pieces bought, 0 to 5 (tuning.ts WELCOME): each raises what visits pay her. */
+  /** Welcome pieces bought back when they raised what visits pay (decor.ts WELCOME_BOUGHT): each still comes with her. */
   welcome?: number;
   /** Festival raffle tickets bought, by event id (raffle.ts). */
   raffle?: Record<string, number>;
@@ -133,7 +133,7 @@ export interface PetState {
   toys?: string[];
   /** What the player is saving up for, pinned in the shop: `decor:fireplace`… */
   goal?: string | null;
-  /** Helping pieces placed in the garden's meadow (decor.ts meadowHelpers), for yard.ts perHour. */
+  /** Pieces out in the garden's meadow (decor.ts meadowPieces), for Getting started. */
   meadow?: string[];
   /** Friends' visits today that boosted her needs (only the first few do). */
   visitCare?: { day: string; count: number };

@@ -38,7 +38,7 @@ export const GOAL_TEXT: Record<StarterGoal, string> = {
   find: 'Find something for her collection',
   streak3: 'Open the daily gift 3 times',
   meadow: 'Open the meadow, past the yard',
-  meadowhelp: 'Put out a meadow piece that helps the yard (try the stepping stones)',
+  meadowhelp: 'Put something out in the meadow (try the stepping stones)',
   pin: 'Pick something in the Shop to save up for',
   patch3: 'Build a third clover patch (beehives and the shed come next)',
   gardenup: 'Buy a garden upgrade',
@@ -60,7 +60,8 @@ export const STARTER_STEPS: StarterStep[] = [
   // Spending on her and her room, and what foraging turns up.
   { step: 4, goals: ['friend', 'newtoy', 'surface', 'find'], clover: 240 },
   // The daily round (the gift takes three days) and the meadow, with a piece
-  // that pays: about 700 clover of spending.
+  // in it: about 450 clover of spending. (The goal's id is from when the
+  // piece had to be one that helped the yard.)
   { step: 5, goals: ['streak3', 'meadow', 'meadowhelp', 'pin'], clover: 400 },
   // The yard grows: the third patch opens beehives and the shed, which the
   // goals after Getting started (goals.ts) take up. With bond level 3, about

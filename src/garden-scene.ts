@@ -7,6 +7,7 @@
 
 import { drawCloverPatch, drawField, drawFirefly, drawGarden, drawGardenShade, drawSeedPacket, drawSignpost, drawSpot, drawTag } from './art/garden';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
+import { SHOP_ART } from './art/shop';
 import { resizeCanvas, toSprite, type Sprite } from './art/pixels';
 import { drawRabbit, dressKey, K_GARDEN, RABBIT_GROUND, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type PlacedItem } from './decor';
@@ -39,7 +40,20 @@ export interface GardenModel {
   selected: string | null;
   /** A friend's garden, visiting: only what they've built, no "+" spots or plots for sale. */
   guest?: boolean;
+  /** Friends visiting now: they sit at the meadow's seats (guest chairs, the tea corner), if there are any. */
+  guests?: { id: string; coat: Coat; dress?: Dress }[];
+  /** Friends she's visited back and forth with: the friendship tree bears one fruit each. */
+  friends?: number;
 }
+
+/** The friendship tree's fruit, in the order they come: where its art has them. */
+const TREE_FRUIT: { x: number; y: number }[] = (SHOP_ART.friendtree as readonly string[])
+  .flatMap((row, y) => [...row].flatMap((c, x) => (c === 'r' ? [{ x, y }] : [])))
+  .sort((a, b) => (a.x * 7 + a.y * 13) % 11 - (b.x * 7 + b.y * 13) % 11);
+/** Leaf green, for a fruit not grown yet (items.ts palette 'g'). */
+const LEAF = '#86C95E';
+/** Where friends sit at a seat, from its middle: either side of it, so the piece still shows. */
+const SEAT_DX: Record<string, number[]> = { guestchairs: [-14, 14], teacorner: [-16, 16] };
 
 /** A meadow piece's box in strip pixels: lawn pieces stand on their point, fence pieces hang from it. */
 export function pieceBox(item: PlacedItem, art: { w: number; h: number }): { x: number; y: number; w: number; h: number } {
@@ -270,7 +284,8 @@ export class GardenScene {
     for (const i of fence) this.drawPiece(i);
     const layers: { y: number; draw: () => void }[] = [
       ...gardenView(m.pet, m.nowMs).filter((t) => !m.guest || built(t)).map((t) => ({ y: t.spot.y, draw: () => this.drawThing(m, t, now) })),
-      ...m.items.filter((i) => byId(i.id)?.zone === 'lawn').map((i) => ({ y: i.y, draw: () => this.drawPiece(i) })),
+      ...m.items.filter((i) => byId(i.id)?.zone === 'lawn').map((i) => ({ y: i.y, draw: () => this.drawPiece(i, m) })),
+      ...this.seated(m).map((g) => ({ y: g.y + 0.5, draw: () => this.drawGuest(g, now) })),
     ];
     for (const l of layers.sort((a, b) => a.y - b.y)) l.draw();
     this.drawRabbit(m, now);
@@ -310,17 +325,46 @@ export class GardenScene {
     return this.sprite(`item:${art}`, () => toSprite(drawItem(art)));
   }
 
-  private drawPiece(item: PlacedItem): void {
+  private drawPiece(item: PlacedItem, m?: GardenModel): void {
     const s = this.pieceArt(item);
     const b = pieceBox(item, s);
     const ctx = this.ctx;
+    ctx.save();
     if (item.flip) {
-      ctx.save();
       ctx.translate(b.x * 2 + s.w, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(s.canvas, b.x, b.y);
-      ctx.restore();
-    } else ctx.drawImage(s.canvas, b.x, b.y);
+    }
+    ctx.drawImage(s.canvas, b.x, b.y);
+    // the friendship tree: a fruit for each friend, the rest of the spots still leaves
+    if (item.id === 'friendtree') {
+      ctx.fillStyle = LEAF;
+      for (const f of TREE_FRUIT.slice(Math.max(0, m?.friends ?? 0))) ctx.fillRect(b.x + f.x, b.y + f.y, 1, 1);
+    }
+    ctx.restore();
+  }
+
+  /** Friends visiting now, each at a seat in the meadow, as many as there are seats. */
+  private seated(m: GardenModel): { id: string; coat: Coat; dress?: Dress; x: number; y: number; facing: 1 | -1 }[] {
+    const guests = m.guests ?? [];
+    if (!guests.length) return [];
+    // one at each piece before anyone doubles up
+    const seats = m.items.filter((i) => SEAT_DX[i.id]).sort((a, b) => a.x - b.x)
+      .flatMap((i, n) => SEAT_DX[i.id]!.map((dx, k) => ({ x: i.x + dx, y: i.y, facing: (dx < 0 ? -1 : 1) as 1 | -1, order: k * 100 + n })))
+      .sort((a, b) => a.order - b.order);
+    return guests.slice(0, seats.length).map((g, i) => ({ ...g, ...seats[i]! }));
+  }
+
+  /** A visiting friend sat at a seat: facing the middle of it, blinking now and then. */
+  private drawGuest(g: { id: string; coat: Coat; dress?: Dress; x: number; y: number; facing: 1 | -1 }, now: number): void {
+    const frame: Frame = !reduceMotion && Math.floor(now / 1300 + g.x) % 5 === 0 ? 2 : 0;
+    const s = this.sprite(`rabbit:${g.coat}:happy:${frame}:${dressKey(g.dress)}`, () => toSprite(drawRabbit(g.coat, 'happy', frame, g.dress, K_GARDEN)));
+    const left = Math.round(g.x - s.w / 2), top = g.y - RABBIT_GROUND;
+    const ctx = this.ctx;
+    ctx.save();
+    // the art faces right: on the left of a seat they face it, on the right they're turned round
+    if (g.facing === 1) { ctx.translate(left * 2 + s.w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(s.canvas, left, top);
+    ctx.restore();
   }
 
   /** A marching dashed outline, like the burrow's. */

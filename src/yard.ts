@@ -7,7 +7,7 @@
 import { byId } from './decor';
 import { earn } from './economy';
 import type { PetState } from './sim';
-import { HOUR_MS, MEADOW, YARD_STORAGE_HOURS } from './tuning';
+import { HOUR_MS, YARD_STORAGE_HOURS } from './tuning';
 
 export type BuildingId = 'patch' | 'hive' | 'log';
 
@@ -54,41 +54,24 @@ export const countOf = (s: PetState, id: BuildingId): number => yardOf(s).counts
 
 export function perHour(s: PetState): number {
   const y = yardOf(s);
-  return BUILDING_IDS.reduce((sum, id) => sum + BUILDINGS[id].perHour * (1 + meadowShare(s, id)) * (y.counts[id] ?? 0), 0);
+  return BUILDING_IDS.reduce((sum, id) => sum + BUILDINGS[id].perHour * (y.counts[id] ?? 0), 0);
 }
 
-/**
- * How much the meadow adds to each building of a kind, as a share of its own
- * output: MEADOW.boost for each helping piece out in the meadow, each piece
- * counted once. A per-building amount, so it's flat like the rest of the yard.
- */
-export function meadowShare(s: PetState, id: BuildingId): number {
-  return [...new Set(s.meadow ?? [])].filter((m) => byId(m)?.boost === id).length * MEADOW.boost;
-}
-
-/** Clover a day the meadow adds to one building of a kind, for the yard's line. */
-export const meadowPerDay = (s: PetState, id: BuildingId): number => BUILDINGS[id].perHour * 24 * meadowShare(s, id);
-
-/** What the next one of a kind would make a day (with the meadow's help), and how many days until it has paid for itself. */
+/** What the next one of a kind would make a day, and how many days until it has paid for itself. */
 export function payback(s: PetState, id: BuildingId): { perDay: number; days: number } {
-  const perDay = BUILDINGS[id].perHour * 24 * (1 + meadowShare(s, id));
+  const perDay = BUILDINGS[id].perHour * 24;
   return { perDay, days: Math.ceil(nextPrice(s, id) / perDay) };
 }
 
 /**
- * Set which helping pieces are out in the meadow (decor.ts meadowHelpers),
- * after something was placed or put away. Storage fills at the old rate up to
- * now and the new rate from now, as when a building is bought.
+ * Note which pieces are out in the meadow (decor.ts meadowPieces), for
+ * Getting started. A newer version's pieces, which this one can't see, are kept.
  */
-export function setMeadow(s: PetState, helpers: string[], nowMs: number): PetState {
-  // a newer version's helping pieces aren't in `helpers` (this version can't see them); keep them
+export function setMeadow(s: PetState, pieces: string[]): PetState {
   const newer = (s.meadow ?? []).filter((id) => !byId(id));
-  const next = [...new Set([...helpers, ...newer])].sort();
+  const next = [...new Set([...pieces, ...newer])].sort();
   if (JSON.stringify(next) === JSON.stringify([...(s.meadow ?? [])].sort())) return s;
-  const state = clone(s);
-  accrue(state, nowMs);
-  state.meadow = next;
-  return state;
+  return { ...s, meadow: next };
 }
 
 export function storageHours(s: PetState): number {

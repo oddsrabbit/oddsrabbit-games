@@ -84,10 +84,10 @@ test("an older version keeps a newer pet's fields and timers", () => {
   assert.ok(fed.ok && (fed.state as typeof s).hatColour === 'teal');
 });
 
-test("an older version keeps a newer version's meadow helpers", () => {
+test("an older version keeps a newer version's meadow pieces", () => {
   const s = pet();
   s.meadow = ['sunflowers', 'windmill'];
-  const next = setMeadow(s, ['birdbath'], NOON);
+  const next = setMeadow(s, ['birdbath']);
   assert.deepEqual(next.meadow, ['birdbath', 'windmill']);
 });
 

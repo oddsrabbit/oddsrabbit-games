@@ -7,8 +7,8 @@
 
 import { bondLevel, COATS, earsOf, newPet, timer, type Coat, type Ears, type Needs, type PetState } from './sim';
 import { byId, clampToZone, EXTRA_ROOMS, isOutdoor, itemRoom, meadowItems, roomsOf, surfaceById, surfacesOf, type BurrowState, type ExtraRoom, type RoomId, type SurfaceKind } from './decor';
-import { earn, friendPays, noteFriendship } from './economy';
-import { DAY_ROLLOVER_HOUR, DECAY_AWAKE, FRIEND_CLOVER, HOUR_MS, VISIT_CARE, WELCOME } from './tuning';
+import { earn, friendPays, mutualFriends, noteFriendship } from './economy';
+import { DAY_ROLLOVER_HOUR, DECAY_AWAKE, FRIEND_CLOVER, HOUR_MS, VISIT_CARE } from './tuning';
 import { dayKey, isNewDay } from './localtime';
 import { CROPS, hasUpgrade, onVacation, outfitById, plots, type CropId } from './extras';
 import { BUILDING_IDS, BUILDINGS, countOf, yardOf, type BuildingId } from './yard';
@@ -89,6 +89,8 @@ export interface GardenShow {
   yard: Partial<Record<BuildingId, number>>;
   sheds: number;
   meadow: { id: string; x: number; y: number; flip: boolean }[] | null;
+  /** Friends she's visited back and forth with, for the fruit on her friendship tree. Missing from older snapshots. */
+  friends?: number;
 }
 
 function gardenShow(pet: PetState, burrow: BurrowState): GardenShow {
@@ -98,6 +100,7 @@ function gardenShow(pet: PetState, burrow: BurrowState): GardenShow {
     yard: Object.fromEntries(BUILDING_IDS.map((id) => [id, countOf(pet, id)]).filter(([, n]) => n)),
     sheds: y.sheds,
     meadow: hasUpgrade(pet, 'meadow') ? meadowItems(burrow).map((i) => ({ id: i.id, x: i.x, y: i.y, flip: i.flip })) : null,
+    friends: mutualFriends(pet),
   };
 }
 
@@ -114,6 +117,7 @@ function readGarden(raw: unknown): GardenShow | undefined {
     }),
     yard: Object.fromEntries(BUILDING_IDS.map((id) => [id, Math.round(num(yard[id], 0, BUILDINGS[id].max, 0))]).filter(([, n]) => n)),
     sheds: Math.round(num(g.sheds, 0, 2, 0)),
+    ...(g.friends !== undefined ? { friends: Math.round(num(g.friends, 0, 999, 0)) } : {}),
     meadow: !Array.isArray(g.meadow) ? null : g.meadow.slice(0, MAX_ITEMS).flatMap((i: unknown) => {
       const it = i as Record<string, unknown>;
       const def = it && typeof it.id === 'string' ? byId(it.id) : undefined;
@@ -254,28 +258,8 @@ export function takeGolden(s: PetState): PetState | null {
   return state;
 }
 
-// ---------------------------------------------------------------- the welcome line
-
-export const welcomeLevel = (s: PetState): number => Math.max(0, Math.min(WELCOME.pieces.length, s.welcome ?? 0));
-
-/** What a visit pays her, made or received: flat, plus her welcome pieces. */
-export const visitPay = (s: PetState): number => FRIEND_CLOVER.visit + WELCOME.step * welcomeLevel(s);
-
-/** The next welcome piece to buy, or null once she has them all. */
-export function nextWelcome(s: PetState): (typeof WELCOME.pieces)[number] | null {
-  return WELCOME.pieces[welcomeLevel(s)] ?? null;
-}
-
-/** Buy the next welcome piece (its decor goes in the meadow: main.ts). */
-export function buyWelcome(s: PetState): { ok: true; state: PetState; piece: string } | { ok: false; reason: 'done' | 'broke' } {
-  const next = nextWelcome(s);
-  if (!next) return { ok: false, reason: 'done' };
-  if (s.clover < next.price) return { ok: false, reason: 'broke' };
-  const state = JSON.parse(JSON.stringify(s)) as PetState;
-  state.clover -= next.price;
-  state.welcome = welcomeLevel(s) + 1;
-  return { ok: true, state, piece: next.id };
-}
+/** What a visit pays her, made or received: flat (the welcome pieces don't add to it any more). */
+export const visitPay = (_s: PetState): number => FRIEND_CLOVER.visit;
 
 /** A gift's info from its kind as a friend sent it, or null for one we don't know. */
 export function giftInfo(kind: unknown): (typeof GIFT_INFO)[GiftKind] | null {

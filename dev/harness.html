@@ -92,7 +92,9 @@ if (seed && q.get('rich')) {
   const t = now();
   const p = JSON.parse(store['v1:pet']);
   Object.assign(p, {
-    clover: 20000, bond: 400, upgrades: ['plot2', 'plot3', 'can'], soilLevel: 2, toys: ['yarn', 'box'],
+    clover: 20000, bond: 400, upgrades: ['plot2', 'plot3', 'can', 'meadow'], soilLevel: 2, toys: ['yarn', 'box'],
+    // three friends visited back and forth: three fruit on the friendship tree
+    friends: Object.fromEntries(['a', 'b', 'c'].map((k) => [k, { points: 4, in: 'x', out: 'x' }])),
     yard: { counts: { patch: 5, hive: 2 }, sheds: 1, stored: 40.5, atMs: t - 3600e3 }, paid: ['bond:2', 'bond:3', 'bond:4', 'bond:5', 'bond:6', 'bond:7'],
   });
   store['v1:pet'] = JSON.stringify(p);
@@ -101,6 +103,9 @@ if (seed && q.get('rich')) {
     { uid: 'c', id: 'bookshelf', x: 86, y: 99, flip: false, placed: true }, { uid: 'd', id: 'bunting', x: 56, y: 12, flip: false, placed: true },
     { uid: 'e', id: 'lamp', x: 52, y: 100, flip: false, placed: true }, { uid: 'f', id: 'rug', x: 46, y: 108, flip: false, placed: true },
     { uid: 'g', id: 'clock', x: 64, y: 99, flip: false, placed: true },
+    // the meadow: somewhere for visiting friends to sit, and the friendship tree
+    { uid: 'm1', id: 'guestchairs', x: 230, y: 108, flip: false, placed: true }, { uid: 'm2', id: 'teacorner', x: 262, y: 112, flip: false, placed: true },
+    { uid: 'm3', id: 'friendtree', x: 214, y: 96, flip: false, placed: true },
   ], surfaces: { owned: ['starrywall', 'oakfloor', 'moonwindow'], wall: 'starrywall', floor: 'oakfloor', window: 'moonwindow' } });
   if (q.get('rooms')) {
     // the nook and the loft dug out, a few pieces in each

@@ -145,7 +145,7 @@ export const SUPPORTER_BONUS = 1.25;
 /**
  * Clover between friends (social.ts). Always flat: what it says is what you
  * get, never boosted by the clover rate. A visit pays the visitor and the
- * host `visit` each, plus WELCOME.step for each welcome piece that player has.
+ * host `visit` each.
  * Gifts are things, not clover, except a golden carrot, which becomes
  * `goldenGift` for the friend. `legacyBundle` is what a clover bundle from a
  * friend on an older version pays now that bundles aren't sent.
@@ -213,11 +213,8 @@ export const PEBBLE_CHANCE = 0.006;
 
 export const MAX_TREATS = 3;
 
-/**
- * The garden's meadow (docs/rabbit-pets-economy.md §2.6): the gate's price, and
- * how much of a building's own output each helping piece adds to it.
- */
-export const MEADOW = { gate: 300, boost: 0.1 } as const;
+/** The garden's meadow (docs/rabbit-pets-economy.md §2.6): the gate's price. Its pieces are decor only. */
+export const MEADOW = { gate: 300 } as const;
 
 /**
  * Wild visitors (wildlife.ts). Chance per 10-minute step that one drops by
@@ -252,18 +249,3 @@ export const FORAGE = {
  */
 export const RAFFLE = { ticket: 100, odds: 0.1, guaranteeBy: 10 } as const;
 
-/**
- * The welcome line (social.ts): five pieces for the meadow, bought in order.
- * Each adds `step` to every visit you make or get (your own level counts,
- * never your friend's). Only worth buying if friends visit.
- */
-export const WELCOME = {
-  step: 6,
-  pieces: [
-    { id: 'welcomemat', price: 1_000 },
-    { id: 'guestchairs', price: 3_000 },
-    { id: 'teacorner', price: 6_000 },
-    { id: 'lanternpath', price: 12_000 },
-    { id: 'friendtree', price: 25_000 },
-  ],
-} as const;

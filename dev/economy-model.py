@@ -39,8 +39,9 @@ FRIEND_PAID = 5
 # WELCOME_STEP for each welcome piece that player has bought (their own level).
 # Gifts are things; a golden carrot (30) is left out of the model.
 VISIT, HOSTED = 10, 10
-WELCOME_PRICES = [1000, 3000, 6000, 12000, 25000]
-WELCOME_STEP = 6
+# The welcome line no longer adds to visits (2026-10-06): its pieces are meadow decor.
+WELCOME_PRICES = []
+WELCOME_STEP = 0
 
 # Bond thresholds: today's up to level 7, then each gap grows by 20.
 BOND_TH = [0, 12, 35, 70, 120, 190, 280]
@@ -60,17 +61,13 @@ YARD = {
     'log': (2880, 2, 1.99, 5, lambda y, soil: y['hive'] >= 5),
 }
 
-# The meadow (docs/rabbit-pets-garden.md §6): a gate, then outdoor pieces that
-# each add BOOST of a building's own output to every building of their kind,
-# flat (a per-building amount, not a multiplier on the rate). Two per kind.
-# The bench and fence lights are for looks and aren't modelled.
+# The meadow (docs/rabbit-pets-garden.md §6): a gate, then outdoor decor. Until
+# 2026-10-06 six of its pieces each added BOOST of a building's output; now
+# none do, so MEADOW (piece: (price, building it helps)) is empty and the
+# pieces are counted with the other decor in SINKS.
 MEADOW_GATE = 300
 BOOST = 0.10
-MEADOW = {  # piece: (price, building it helps)
-    'stones': (400, 'patch'), 'birdbath': (500, 'patch'),
-    'sunflowers': (1200, 'hive'), 'trellis': (1500, 'hive'),
-    'wheelbarrow': (4000, 'log'), 'gnome': (4500, 'log'),
-}
+MEADOW = {}  # its pieces stopped helping the yard on 2026-10-06: decor only
 
 # The launch ladder's price milestones (§3.1): cumulative clover earned.
 # The launch ladder (§3.1): (price, first day it can be bought). Everything is
