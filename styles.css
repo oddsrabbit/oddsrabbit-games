@@ -690,11 +690,28 @@ button { font: inherit; color: inherit; }
 .player.is-turn .player-score { color: var(--up-ink); }
 .player-name { font-weight: 600; font-size: 13px; line-height: 1.1; }
 .player-score { font-size: 12px; color: var(--muted); line-height: 1.1; }
-/* Three or four players: avatar and score only, full list on tap. */
-.players.is-compact { cursor: pointer; overflow: hidden; }
-.players.is-compact .player { gap: 5px; padding-right: 8px; }
-.players.is-compact .player-name { display: none; }
-.players.is-compact .player-score { color: var(--ink); font-weight: 700; font-size: 13px; }
+/* Three or four players: the bar has room for about two pills once the
+   host's back-button lane and our three buttons are out, so the third score
+   was cut in half and the fourth was off the edge. They get their own row
+   under the bar instead, one equal column per seat, the name cut short before
+   the score is. Full list on tap. */
+.bar-spacer { flex: 1; }
+.bar .players ~ .bar-spacer { display: none; }
+.players.is-compact {
+  flex: none; display: grid; grid-template-columns: repeat(var(--seats, 4), minmax(0, 1fr));
+  gap: 6px; overflow: visible; cursor: pointer;
+}
+.players.is-compact .player { min-width: 0; gap: 6px; padding: 3px 8px 3px 3px; border-radius: 12px; }
+.players.is-compact .lb-avatar, .players.is-compact .avatar-fallback { width: 24px; height: 24px; font-size: 12px; }
+.players.is-compact .player-text { min-width: 0; }
+.players.is-compact .player-name { overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.players.is-compact .player-score { color: var(--ink); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.players.is-compact .player.is-turn .player-score { color: var(--up-ink); }
+/* The narrowest phones: the score matters more than the face. */
+@media (max-width: 359px) {
+  .players.is-compact .lb-avatar, .players.is-compact .avatar-fallback { display: none; }
+  .players.is-compact .player { padding-left: 8px; }
+}
 .players-list { display: grid; gap: 8px; }
 .players-list .player { border-radius: 12px; }
 
@@ -912,6 +929,20 @@ button.chip-bag::after { content: " ›"; }
 .move-pts { font-weight: 700; color: var(--turn); font-variant-numeric: tabular-nums; }
 .move-pts.is-none { color: var(--muted); font-weight: 400; }
 .move-pts.is-loss { color: var(--danger); }
+/* What happened since your own last move, set off from the rest. */
+.moves-divider {
+  padding: 10px 0 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted);
+}
+.moves-divider:first-child { padding-top: 0; }
+.move-row.is-new .move-who { color: var(--ink); font-weight: 600; }
+/* The last-move line opens the whole log. */
+.last-move.is-link { cursor: pointer; }
+.last-move.is-link::after { content: " ›"; color: var(--muted); font-weight: 700; }
+.last-move .more { color: var(--muted); white-space: nowrap; }
+/* Kept on the count's line rather than wrapping on its own. */
+.last-move.has-more::after { content: none; }
+.last-move .more::after { content: " ›"; font-weight: 700; }
 
 /* Score and rule violations no longer share one anonymous grey line. */
 .preview { margin: 0; min-height: 22px; font-size: 14px; text-align: center; }

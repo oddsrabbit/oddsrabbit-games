@@ -1584,13 +1584,19 @@
     return sub;
   }
 
-  // Two players fit as name-and-score pills. Three or four would scroll off
-  // the header, hiding whose turn it is, so they shrink to avatar and score
-  // and the full list opens on tap.
+  // Two players fit in the bar as name-and-score pills. Three or four don't:
+  // next to the host's back-button lane and our three buttons there is room
+  // for about two, and the rest were clipped, scores and all. So they move to
+  // a row of their own under the bar, a column each, and the full list opens
+  // on tap.
   function renderPlayers(view) {
     clear(els.players);
     var compact = view.players.length > 2;
     els.players.classList.toggle("is-compact", compact);
+    els.players.style.setProperty("--seats", String(view.players.length));
+    var bar = els.screens.match.querySelector(".bar");
+    if (compact && els.players.parentNode === bar) bar.parentNode.insertBefore(els.players, bar.nextSibling);
+    else if (!compact && els.players.parentNode !== bar) bar.insertBefore(els.players, bar.firstChild);
     if (compact) {
       els.players.setAttribute("role", "button");
       els.players.setAttribute("tabindex", "0");
@@ -1762,8 +1768,25 @@
   // What just happened, in words. `lastMove` carries the squares and the
   // points; the word itself is only readable off the board the move was
   // applied to, which is exactly what the view we just received holds.
+  // On the match screen the line also opens the move log, and at a table of
+  // three or four it says how much else happened since your own last move:
+  // the line only has room for the latest.
   function renderLastMove(view) {
-    els.lastMove.hidden = !writeLastMove(els.lastMove, view);
+    var shown = writeLastMove(els.lastMove, view);
+    els.lastMove.hidden = !shown;
+    var log = shown && movesOf(view).length > 0;
+    els.lastMove.classList.toggle("is-link", log);
+    if (log) {
+      els.lastMove.setAttribute("role", "button");
+      els.lastMove.setAttribute("tabindex", "0");
+      var others = view.status === "active" ? movesSinceMine(view).length - 1 : 0;
+      if (others > 0) els.lastMove.appendChild(el("span", "more", " · +" + others + " more"));
+      els.lastMove.classList.toggle("has-more", others > 0);
+    } else {
+      els.lastMove.classList.remove("has-more");
+      els.lastMove.removeAttribute("role");
+      els.lastMove.removeAttribute("tabindex");
+    }
   }
 
   // Writes the last move into `target`; false when there is nothing to say.
@@ -2459,6 +2482,17 @@
     });
   }
 
+  // The other players' moves since the viewer's own last one (all of them,
+  // before the viewer has moved), oldest first.
+  function movesSinceMine(view) {
+    var me = meIn(view);
+    var moves = movesOf(view);
+    if (!me) return [];
+    var lastMine = -1;
+    moves.forEach(function (mv) { if (mv.seat === me.seat) lastMine = mv.ply; });
+    return moves.filter(function (mv) { return mv.ply > lastMine && mv.seat !== me.seat; });
+  }
+
   function describeMove(mv) {
     if (mv.type === "place") {
       return (mv.words.join(", ") || "A word") + (mv.count === Rules.RACK ? " · bingo" : "");
@@ -2479,9 +2513,22 @@
       cancelLabel: "Close",
       build: function (body) {
         var list = el("ol", "moves-list");
+        // In a game still going, what the others did since your last move
+        // comes first under its own heading: that is what a player opening
+        // the log at a table of three or four wants to catch up on.
+        var fresh = {};
+        if (m.status === "active") movesSinceMine(m).forEach(function (mv) { fresh[mv.ply] = true; });
+        var anyFresh = Object.keys(fresh).length > 0;
+        var anyOld = moves.some(function (mv) { return !fresh[mv.ply]; });
+        if (anyFresh) list.appendChild(el("li", "moves-divider", "Since your last move"));
+        var dividedOld = false;
         moves.slice().reverse().forEach(function (mv) {
           var player = m.players.filter(function (p) { return p.seat === mv.seat; })[0];
-          var row = el("li", "move-row");
+          if (anyFresh && anyOld && !fresh[mv.ply] && !dividedOld) {
+            list.appendChild(el("li", "moves-divider", "Earlier"));
+            dividedOld = true;
+          }
+          var row = el("li", "move-row" + (fresh[mv.ply] ? " is-new" : ""));
           row.appendChild(el("span", "move-who", player ? nameOf(player) : "Someone"));
           row.appendChild(el("span", "move-what" + (mv.type === "place" ? " is-word" : ""), describeMove(mv)));
           // The move's own delta: a placement's points (plus everyone else's
@@ -3573,6 +3620,12 @@
     els.overBack.addEventListener("click", backToList);
     els.rematchButton.addEventListener("click", rematch);
     els.movesButton.addEventListener("click", showMoves);
+    els.lastMove.addEventListener("click", function () {
+      if (els.lastMove.classList.contains("is-link")) showMoves();
+    });
+    els.lastMove.addEventListener("keydown", function (e) {
+      if ((e.key === "Enter" || e.key === " ") && els.lastMove.classList.contains("is-link")) { e.preventDefault(); showMoves(); }
+    });
     els.chipBag.addEventListener("click", showTiles);
     els.signIn.addEventListener("click", function () {
       var code = peekJoin();

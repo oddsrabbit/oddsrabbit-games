@@ -31,6 +31,8 @@
 //   idle=days       every turn counts as having started this many days ago,
 //                   to show Nudge (1+) and End game (14+)
 //   chat=0          host without matches.chat / matches.chatSend
+//   four=1          add a four-player game a few moves in, with three-digit
+//                   scores (the player row, the Moves log), opened first
 // Chat: the first game opens with a few messages from @pip_fan, one unread.
 // An opponent answers whatever you send 2.5 s later (not with opp=none), and
 // a message containing "spam" is refused the way the platform would.
@@ -201,6 +203,21 @@ if (q.get('busy') === '1') {
   b.turn = 1; b.turnStartedAt = new Date(Date.now() - 2 * 86400e3).toISOString();
   b.players[0].score = 45; b.players[1].score = 67;
   newMatch([PEOPLE[1]], 'tiles', 3, 5 * 3600e3, true);
+}
+if (q.get('four') === '1') {
+  const g = newMatch([PEOPLE[0], PEOPLE[1], PEOPLE[2]], 'tiles', 0, 30 * 60e3);
+  g.players[0].rack.splice(0, 4, 'C', 'A', 'R', 'T');
+  place(g, 0, [{ row: 7, col: 6, letter: 'C' }, { row: 7, col: 7, letter: 'A' }, { row: 7, col: 8, letter: 'R' }, { row: 7, col: 9, letter: 'T' }]);
+  g.players[1].rack.splice(0, 2, 'H', 'T');
+  place(g, 1, [{ row: 6, col: 7, letter: 'H' }, { row: 8, col: 7, letter: 'T' }]);
+  pass(g, 2);
+  g.players[3].rack.splice(0, 2, 'O', 'X');
+  place(g, 3, [{ row: 8, col: 9, letter: 'O' }, { row: 9, col: 9, letter: 'X' }]);
+  g.players[0].score += 112; g.players[1].score += 140; g.players[2].score += 98; g.players[3].score += 127;
+  // Shown first in the list, so open=1 opens it.
+  const rest = Object.values(matches).filter((x) => x !== g);
+  for (const k of Object.keys(matches)) delete matches[k];
+  [g, ...rest].forEach((x) => { matches[x.uuid] = x; });
 }
 if (q.get('finished') === '1') {
   const f = newMatch([PEOPLE[0], STRANGER], 'tiles-wild', 0, 9 * 86400e3);
