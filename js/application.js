@@ -124,6 +124,7 @@
     nudgeButton: $(".nudge-button"),
     claimButton: $(".claim-button"),
     lastMove: $(".last-move"),
+    recentMoves: $(".recent-moves"),
     lobbyPanel: $(".lobby-panel"),
     lobbyLead: $(".lobby-lead"),
     lobbyCode: $(".lobby-code"),
@@ -393,6 +394,8 @@
     // backgrounded WebView, and ResizeObserver is not everywhere). The frame
     // callback stays as a follow-up for hosts that defer layout.
     if (name === "match" && board) {
+      fitRecentMoves();
+      markPlayerEdges();
       board.resize();
       applyPendingFocus();
       requestAnimationFrame(function () {
@@ -1474,6 +1477,8 @@
     renderBoard(view, focus);
     renderPreview();
     renderOver(view, wasActive && view.status === "finished");
+    // The rack, preview and notices above settle the board's height.
+    fitRecentMoves();
   }
 
   // What the last placement scored: its words plus any bingo. Not
@@ -1584,19 +1589,15 @@
     return sub;
   }
 
-  // Two players fit in the bar as name-and-score pills. Three or four don't:
-  // next to the host's back-button lane and our three buttons there is room
-  // for about two, and the rest were clipped, scores and all. So they move to
-  // a row of their own under the bar, a column each, and the full list opens
-  // on tap.
+  // Name-and-score pills in the bar, however many players. Next to the
+  // host's back-button lane and our buttons there is room for about two, so
+  // three or four scroll sideways (swipe, or drag with a mouse), with the
+  // edge that has more behind it faded, and whoever is on turn is scrolled
+  // into view when the turn moves. The full list opens on tap.
   function renderPlayers(view) {
     clear(els.players);
     var compact = view.players.length > 2;
-    els.players.classList.toggle("is-compact", compact);
-    els.players.style.setProperty("--seats", String(view.players.length));
-    var bar = els.screens.match.querySelector(".bar");
-    if (compact && els.players.parentNode === bar) bar.parentNode.insertBefore(els.players, bar.nextSibling);
-    else if (!compact && els.players.parentNode !== bar) bar.insertBefore(els.players, bar.firstChild);
+    els.players.classList.toggle("is-many", compact);
     if (compact) {
       els.players.setAttribute("role", "button");
       els.players.setAttribute("tabindex", "0");
@@ -1608,20 +1609,69 @@
       els.players.removeAttribute("tabindex");
       els.players.removeAttribute("aria-label");
     }
+    var onTurn = null;
     view.players.forEach(function (p) {
       var card = el("div", "player" + (view.turnSeat === p.seat ? " is-turn" : "") + (p.isSelf ? " is-self" : ""));
       card.appendChild(avatar(p.username, p.avatar));
       var col = el("div", "player-text");
       col.appendChild(el("div", "player-name", nameOf(p)));
-      col.appendChild(el("div", "player-score", compact ? String(p.score) : playerDetail(view, p)));
+      col.appendChild(el("div", "player-score", playerDetail(view, p)));
       card.appendChild(col);
       els.players.appendChild(card);
+      if (view.turnSeat === p.seat) onTurn = card;
     });
+    // Only when the turn moves, or a new match opens: not on every refresh,
+    // which would yank the strip back while someone is looking along it.
+    var turnKey = view.matchUuid + ":" + view.turnSeat;
+    if (compact && onTurn && state.playersTurnKey !== turnKey) {
+      state.playersTurnKey = turnKey;
+      var left = onTurn.offsetLeft - els.players.offsetLeft;
+      if (left < els.players.scrollLeft || left + onTurn.offsetWidth > els.players.scrollLeft + els.players.clientWidth) {
+        els.players.scrollLeft = Math.max(0, left - 18);
+      }
+    }
+    markPlayerEdges();
+  }
+
+  function markPlayerEdges() {
+    var s = els.players;
+    var many = s.classList.contains("is-many");
+    s.classList.toggle("more-left", many && s.scrollLeft > 1);
+    s.classList.toggle("more-right", many && s.scrollLeft + s.clientWidth < s.scrollWidth - 1);
+  }
+
+  // Touch scrolls the strip natively. A mouse has no sideways swipe, so a
+  // press-and-drag scrolls it, and the click that ends a drag doesn't also
+  // open the players list.
+  function bindPlayerDrag() {
+    var s = els.players, drag = null;
+    s.addEventListener("scroll", markPlayerEdges, { passive: true });
+    s.addEventListener("pointerdown", function (e) {
+      if (e.pointerType !== "mouse" || e.button !== 0 || !s.classList.contains("is-many")) return;
+      drag = { x: e.clientX, left: s.scrollLeft, moved: false, id: e.pointerId };
+    });
+    s.addEventListener("pointermove", function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) < 5) return;
+      if (!drag.moved) { drag.moved = true; s.classList.add("is-dragging"); s.setPointerCapture(e.pointerId); }
+      s.scrollLeft = drag.left - dx;
+    });
+    function end(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (drag.moved) state.playersDragged = Date.now();
+      s.classList.remove("is-dragging");
+      drag = null;
+    }
+    s.addEventListener("pointerup", end);
+    s.addEventListener("pointercancel", end);
   }
 
   function showPlayers() {
     var m = state.match;
     if (!m || m.players.length <= 2) return;
+    // The click at the end of a mouse drag along the strip.
+    if (state.playersDragged && Date.now() - state.playersDragged < 300) return;
     openDialog({
       title: "Players",
       confirmLabel: null,
@@ -1768,9 +1818,8 @@
   // What just happened, in words. `lastMove` carries the squares and the
   // points; the word itself is only readable off the board the move was
   // applied to, which is exactly what the view we just received holds.
-  // On the match screen the line also opens the move log, and at a table of
-  // three or four it says how much else happened since your own last move:
-  // the line only has room for the latest.
+  // On the match screen the line also opens the move log. Under it, the
+  // moves before it, as many as fit (fitRecentMoves).
   function renderLastMove(view) {
     var shown = writeLastMove(els.lastMove, view);
     els.lastMove.hidden = !shown;
@@ -1779,14 +1828,58 @@
     if (log) {
       els.lastMove.setAttribute("role", "button");
       els.lastMove.setAttribute("tabindex", "0");
-      var others = view.status === "active" ? movesSinceMine(view).length - 1 : 0;
-      if (others > 0) els.lastMove.appendChild(el("span", "more", " · +" + others + " more"));
-      els.lastMove.classList.toggle("has-more", others > 0);
     } else {
-      els.lastMove.classList.remove("has-more");
       els.lastMove.removeAttribute("role");
       els.lastMove.removeAttribute("tabindex");
     }
+  }
+
+  var RECENT_MAX = 6;
+
+  // The moves before the last one, newest first, in whatever room the board
+  // leaves over. The board is square, so on a tall phone its box is taller
+  // than it is wide and the spare height is just margin around it; the list
+  // takes rows of that and stops before the board would have to shrink. On
+  // a short phone that is none at all. Whatever the others did since your
+  // last move that didn't fit is counted on the last-move line ("+2 more").
+  // Run again whenever the screen's height may have changed.
+  function fitRecentMoves() {
+    var view = state.match;
+    var list = els.recentMoves;
+    clear(list);
+    var more = els.lastMove.querySelector(".more");
+    if (more) more.parentNode.removeChild(more);
+    els.lastMove.classList.remove("has-more");
+    if (!view || els.lastMove.hidden || !els.lastMove.classList.contains("is-link")) { list.hidden = true; return; }
+
+    var moves = movesOf(view);
+    var earlier = moves.slice(0, -1).reverse().slice(0, RECENT_MAX);
+    earlier.forEach(function (mv) {
+      var player = view.players.filter(function (p) { return p.seat === mv.seat; })[0];
+      var row = el("li", "move-row");
+      row.appendChild(el("span", "move-who", player ? nameOf(player) : "Someone"));
+      row.appendChild(el("span", "move-what" + (mv.type === "place" ? " is-word" : ""), describeMove(mv)));
+      row.appendChild(el("span", "move-pts" + (mv.score > 0 ? "" : mv.score < 0 ? " is-loss" : " is-none"), formatDelta(mv.score)));
+      list.appendChild(row);
+    });
+    list.hidden = !earlier.length || view.status !== "active";
+    // Hidden screen: no boxes to measure. show() runs this again once it's up.
+    var wrap = els.boardWrap;
+    if (!list.hidden && wrap.clientWidth) {
+      while (list.lastChild && wrap.clientHeight < wrap.clientWidth) list.removeChild(list.lastChild);
+      list.hidden = !list.lastChild;
+    }
+
+    var shown = list.hidden ? 0 : list.children.length;
+    var missed = view.status === "active" ? movesSinceMine(view).length - 1 - shown : 0;
+    if (missed > 0) {
+      els.lastMove.appendChild(el("span", "more", " · +" + missed + " more"));
+      els.lastMove.classList.add("has-more");
+    }
+  }
+
+  function formatDelta(score) {
+    return score > 0 ? "+" + score : score < 0 ? "−" + (-score) : "—";
   }
 
   // Writes the last move into `target`; false when there is nothing to say.
@@ -2533,8 +2626,7 @@
           row.appendChild(el("span", "move-what" + (mv.type === "place" ? " is-word" : ""), describeMove(mv)));
           // The move's own delta: a placement's points (plus everyone else's
           // leftover tiles when it goes out), or what a game-ending pass cost.
-          var pts = mv.score > 0 ? "+" + mv.score : mv.score < 0 ? "−" + (-mv.score) : "—";
-          row.appendChild(el("span", "move-pts" + (mv.score > 0 ? "" : mv.score < 0 ? " is-loss" : " is-none"), pts));
+          row.appendChild(el("span", "move-pts" + (mv.score > 0 ? "" : mv.score < 0 ? " is-loss" : " is-none"), formatDelta(mv.score)));
           list.appendChild(row);
         });
         body.appendChild(list);
@@ -3620,6 +3712,8 @@
     els.overBack.addEventListener("click", backToList);
     els.rematchButton.addEventListener("click", rematch);
     els.movesButton.addEventListener("click", showMoves);
+    bindPlayerDrag();
+    els.recentMoves.addEventListener("click", showMoves);
     els.lastMove.addEventListener("click", function () {
       if (els.lastMove.classList.contains("is-link")) showMoves();
     });
@@ -3646,7 +3740,12 @@
     els.boardCanvas.addEventListener("blur", function () { if (board) board.setCursor(null); });
 
     document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", function () { if (board && state.screen === "match") board.resize(true); });
+    window.addEventListener("resize", function () {
+      if (state.screen !== "match") return;
+      fitRecentMoves();
+      markPlayerEdges();
+      if (board) board.resize(true);
+    });
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state.screen === "list") loadList(true);
     });

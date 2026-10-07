@@ -207,9 +207,6 @@
     <section class="screen screen-match" hidden>
       <header class="bar">
         <div class="players"></div>
-        <!-- Holds the buttons to the right when three or four players move the
-             strip out of the bar and into its own row underneath. -->
-        <span class="bar-spacer" aria-hidden="true"></span>
         <!-- Shown only on hosts with matches.chat, and once someone else is
              at the table. The badge is the unread count from the chat poll. -->
         <button type="button" class="chat-button icon-button" aria-label="Chat" hidden>
@@ -244,6 +241,9 @@
         </div>
       </div>
       <p class="last-move" hidden></p>
+      <!-- The moves before that one, newest first: as many as fit in the room
+           the board leaves over (none on a short phone). -->
+      <ol class="recent-moves" hidden></ol>
 
       <!-- Waiting room. A lobby is not a game with an empty board in it, so
            the board and rack stay out of the way until someone sits down. -->
