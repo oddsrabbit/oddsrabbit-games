@@ -1834,18 +1834,24 @@
     }
   }
 
-  var RECENT_MAX = 6;
+  // Rows of the recent-moves box: three at most, so it reads as a glance at
+  // what happened rather than a wall of text, and fewer when three don’t fit.
+  var RECENT_ROWS = [3, 2, 1];
 
-  // The moves before the last one, newest first, in whatever room the board
-  // leaves over. The board is square, so on a tall phone its box is taller
-  // than it is wide and the spare height is just margin around it; the list
-  // takes rows of that and stops before the board would have to shrink. On
-  // a short phone that is none at all. Whatever the others did since your
-  // last move that didn't fit is counted on the last-move line ("+2 more").
-  // Run again whenever the screen's height may have changed.
+  // Every move before the last one, newest first, in a short box that
+  // scrolls, fading at whichever edge has more behind it. It only takes room
+  // the board leaves over: the board is square, so on a tall phone its box is
+  // taller than it is wide and the spare height is just margin around it. On
+  // a short phone there is none, the box stays hidden, and whatever the
+  // others did since your last move is counted on the last-move line instead
+  // ("+2 more"). Run again whenever the screen's height may have changed.
   function fitRecentMoves() {
     var view = state.match;
     var list = els.recentMoves;
+    // Rebuilt on every refresh: keep the reader's place unless a move came in.
+    var key = view ? view.matchUuid + ":" + (view.lastMove ? view.lastMove.ply : "") : "";
+    var keepTop = list.dataset.key === key ? list.scrollTop : 0;
+    list.dataset.key = key;
     clear(list);
     var more = els.lastMove.querySelector(".more");
     if (more) more.parentNode.removeChild(more);
@@ -1853,29 +1859,63 @@
     if (!view || els.lastMove.hidden || !els.lastMove.classList.contains("is-link")) { list.hidden = true; return; }
 
     var moves = movesOf(view);
-    var earlier = moves.slice(0, -1).reverse().slice(0, RECENT_MAX);
+    var earlier = moves.slice(0, -1).reverse();
     earlier.forEach(function (mv) {
       var player = view.players.filter(function (p) { return p.seat === mv.seat; })[0];
-      var row = el("li", "move-row");
-      row.appendChild(el("span", "move-who", player ? nameOf(player) : "Someone"));
-      row.appendChild(el("span", "move-what" + (mv.type === "place" ? " is-word" : ""), describeMove(mv)));
-      row.appendChild(el("span", "move-pts" + (mv.score > 0 ? "" : mv.score < 0 ? " is-loss" : " is-none"), formatDelta(mv.score)));
+      var row = el("li", "recent-move");
+      writeMoveSentence(row, mv, player ? nameOf(player) : "Someone");
       list.appendChild(row);
     });
     list.hidden = !earlier.length || view.status !== "active";
     // Hidden screen: no boxes to measure. show() runs this again once it's up.
     var wrap = els.boardWrap;
     if (!list.hidden && wrap.clientWidth) {
-      while (list.lastChild && wrap.clientHeight < wrap.clientWidth) list.removeChild(list.lastChild);
-      list.hidden = !list.lastChild;
+      var rowHeight = list.firstChild.offsetHeight;
+      var fits = RECENT_ROWS.some(function (rows) {
+        list.style.maxHeight = Math.min(rows, earlier.length) * rowHeight + "px";
+        return wrap.clientHeight >= wrap.clientWidth;
+      });
+      list.hidden = !fits;
     }
+    list.scrollTop = keepTop;
+    markRecentEdges();
 
-    var shown = list.hidden ? 0 : list.children.length;
-    var missed = view.status === "active" ? movesSinceMine(view).length - 1 - shown : 0;
+    var missed = view.status === "active" && list.hidden ? movesSinceMine(view).length - 1 : 0;
     if (missed > 0) {
       els.lastMove.appendChild(el("span", "more", " · +" + missed + " more"));
       els.lastMove.classList.add("has-more");
     }
+  }
+
+  // A logged move in the words the last-move line uses: "@pip played HAT
+  // for 6 points", "@hopper passed." The log has the words but not each
+  // one's score, so a move that made several reads "HAT, AT for 9 points".
+  function writeMoveSentence(target, mv, who) {
+    if (mv.type === "place") {
+      target.appendChild(document.createTextNode(who + " played "));
+      if (!mv.words.length) target.appendChild(el("span", "word", "a word"));
+      mv.words.forEach(function (w, i) {
+        if (i) target.appendChild(document.createTextNode(", "));
+        target.appendChild(el("span", "word", w));
+      });
+      target.appendChild(document.createTextNode(" for "));
+      target.appendChild(el("span", "pts", mv.score + (mv.score === 1 ? " point" : " points")));
+      if (mv.count === Rules.RACK) target.appendChild(document.createTextNode(", with a bingo"));
+    } else if (mv.type === "exchange") {
+      target.textContent = who + " swapped " + (mv.count !== null ? mv.count + " tile" + (mv.count === 1 ? "" : "s") : "tiles") + ".";
+    } else if (mv.type === "pass") {
+      target.textContent = who + (mv.forced ? " was skipped." : " passed.");
+    } else if (mv.type === "claim") {
+      target.textContent = who + " stopped playing and left the game.";
+    } else {
+      target.textContent = who + " moved.";
+    }
+  }
+
+  function markRecentEdges() {
+    var l = els.recentMoves;
+    l.classList.toggle("more-up", l.scrollTop > 1);
+    l.classList.toggle("more-down", l.scrollTop + l.clientHeight < l.scrollHeight - 1);
   }
 
   function formatDelta(score) {
@@ -3714,6 +3754,7 @@
     els.movesButton.addEventListener("click", showMoves);
     bindPlayerDrag();
     els.recentMoves.addEventListener("click", showMoves);
+    els.recentMoves.addEventListener("scroll", markRecentEdges, { passive: true });
     els.lastMove.addEventListener("click", function () {
       if (els.lastMove.classList.contains("is-link")) showMoves();
     });

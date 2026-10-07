@@ -213,6 +213,7 @@ if (q.get('four') === '1') {
   pass(g, 2);
   g.players[3].rack.splice(0, 2, 'O', 'X');
   place(g, 3, [{ row: 8, col: 9, letter: 'O' }, { row: 9, col: 9, letter: 'X' }]);
+  for (let seat = 0; seat < 4; seat++) pass(g, seat);
   g.players[0].score += 112; g.players[1].score += 140; g.players[2].score += 98; g.players[3].score += 127;
   // Shown first in the list, so open=1 opens it.
   const rest = Object.values(matches).filter((x) => x !== g);

@@ -934,11 +934,27 @@ button.chip-bag::after { content: " ›"; }
 .last-move.is-link::after { content: " ›"; color: var(--muted); font-weight: 700; }
 .last-move .more { color: var(--muted); white-space: nowrap; }
 /* The moves before the last, in the board's leftover room. */
-.recent-moves { list-style: none; margin: -4px 0 0; padding: 0; cursor: pointer; }
+/* A short box (three rows) that scrolls through every earlier move, faded at
+   the edge with more behind it. Quieter than the line above it. */
+.recent-moves {
+  list-style: none; margin: 2px 0 0; padding: 0; cursor: pointer;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+}
+.recent-moves::-webkit-scrollbar { display: none; }
 .recent-moves[hidden] { display: none; }
-.recent-moves .move-row { padding: 2px 0; border: 0; font-size: 13px; color: var(--muted); }
-.recent-moves .move-what.is-word { color: var(--ink); font-weight: 600; }
-.recent-moves .move-pts { font-weight: 600; }
+/* Sentences like the line above, a size down and greyed. */
+.recent-move {
+  font-size: 13px; line-height: 20px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-move .word { font-weight: 700; letter-spacing: 0.04em; }
+.recent-move .pts { font-weight: 700; }
+.recent-moves.more-down { -webkit-mask-image: linear-gradient(to top, transparent, #000 14px); mask-image: linear-gradient(to top, transparent, #000 14px); }
+.recent-moves.more-up { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px); mask-image: linear-gradient(to bottom, transparent, #000 10px); }
+.recent-moves.more-up.more-down {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+}
 .screen-match.is-finding .recent-moves,
 .screen-match.is-over .recent-moves { display: none; }
 /* Kept on the count's line rather than wrapping on its own. */
