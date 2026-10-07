@@ -239,9 +239,10 @@ button { font: inherit; color: inherit; }
 
 /* With no games (or signed out) the hero owns the screen; with games the list
    does and the hero is not rendered at all. application.js sets `.is-landing`
-   on the list screen while the hero is up. */
-.screen-list.is-landing .bar .title,
-.screen-list.has-games .bar .title { visibility: hidden; }
+   on the list screen while the hero is up. Neither shows the bar title, so it
+   starts hidden (no flash through the handshake) and only `.is-bare` — the
+   "none" mode on a host that cannot play — brings it back. */
+.screen-list:not(.is-bare) .bar .title { visibility: hidden; }
 /* Centred with auto margins rather than justify-content: on a short phone the
    hero is taller than the screen, and centring would push its top out of
    reach of the scroll. */

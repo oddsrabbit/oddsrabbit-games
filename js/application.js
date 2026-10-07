@@ -3762,6 +3762,7 @@
     els.listSheet.hidden = mode !== "games";
     els.screens.list.classList.toggle("is-landing", mode === "landing");
     els.screens.list.classList.toggle("has-games", mode === "games");
+    els.screens.list.classList.toggle("is-bare", mode === "none");
   }
 
   function showHeroOnly(noteText) {

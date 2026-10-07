@@ -8,6 +8,18 @@
          come before the SDK script. See apps-sdk/docs/game-header-guidelines.md. -->
     <meta name="oddsrabbit-chrome" content="edge" />
     <title>Word Battle</title>
+    <script>
+      // Apply the host-passed colorScheme before the stylesheets load so the
+      // first paint is already in the right theme, with no flash of light
+      // colours. applyTheme() confirms it from OR.colorScheme once the SDK is
+      // ready; without the param (standalone dev load) it decides alone.
+      (function () {
+        var v = new URLSearchParams(location.search).get("colorScheme");
+        if (v === "light" || v === "dark") {
+          document.documentElement.setAttribute("data-theme", v);
+        }
+      })();
+    </script>
     <!-- Shared leaderboard component, for its avatar renderer: player strips,
          match rows and the invite picker all hash usernames to the same colour
          as every board on the platform. Stylesheet first so styles.css keeps
