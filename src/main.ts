@@ -2225,10 +2225,15 @@ async function maybeAskReminders(kind: 'nap' | 'bake' | 'forage'): Promise<void>
   if (!OR.capabilities.has('notifications.schedule') || settings.reminders !== null) return;
   const status = await OR.notifications.status();
   const pushOff = status !== null && !status.push;
+  // push is false while this game alone is muted, too: that's their choice
+  // here, not their phone's, so say so and where to undo it
+  const gameMuted = status?.muted === true;
   const what = kind === 'nap' ? 'when she wakes up' : kind === 'forage' ? "when she's home" : 'when the treat is ready';
   openSheet((close) => [
     h('h2', { text: `Want a nudge ${what}?` }),
-    h('p', { text: pushOff
+    h('p', { text: gameMuted
+      ? "You've muted Rabbit Pets, so we'll leave a note in your bell instead. Turn that back on with Notifications in Settings."
+      : pushOff
       ? "Your phone notifications are off for games, so we'll leave a note in your notifications instead."
       : `We'll let you know ${kind === 'nap' ? `in about ${fmtDuration(sleepLeft())}` : kind === 'forage' ? `in about ${fmtDuration((tripOf(pet)?.endsAtMs ?? now()) - now())}` : 'in about an hour'}.` }),
     h('div', { class: 'actions-col' },
@@ -4607,18 +4612,58 @@ function reminderSummary(): string {
   return on === REMINDER_KINDS.length ? 'All on' : on ? `${on} of ${REMINDER_KINDS.length} on` : 'Off';
 }
 
-/** The gear in the header: sound, and reminders, all of them or kind by kind. */
+/**
+ * The gear in the header: sound, the platform's mute for the whole game, and
+ * reminders, all of them or kind by kind.
+ */
 function openSettings(): void {
   openSheet((close) => {
     const body = h('div', { class: 'menu' });
+    // The game's mute lives on the server and can change from the app's own
+    // settings, so it's read each time the sheet opens. Null until it answers,
+    // and for good if it can't: the row only shows once the state is known.
+    let muted: boolean | null = null;
+    if (OR.capabilities.has('notifications.setMuted')) {
+      void OR.notifications.muted().then((m) => {
+        if (m === null || !body.isConnected) return;
+        muted = m;
+        fill();
+      });
+    }
+    // One change at a time: taps while one is on its way are ignored, so
+    // replies can't land out of order and a quick double tap can't run into
+    // the host's rate limit.
+    let saving = false;
+    const setMuted = (next: boolean) => {
+      if (saving) return;
+      saving = true;
+      const was = muted;
+      muted = next;
+      fill();
+      OR.notifications.setMuted(next).then(
+        (now) => { saving = false; muted = now; if (body.isConnected) fill(); },
+        () => {
+          saving = false;
+          muted = was;
+          if (body.isConnected) fill();
+          toast("Couldn't change that just now. Try again in a moment.");
+        });
+    };
     const fill = () => {
       const sound = settings.sound !== false;
       const speaker = h('span', { class: 'svg-ico' });
       speaker.innerHTML = sound ? SPEAKER_ON : SPEAKER_OFF;
       const rows: HTMLElement[] = [switchRow('Sound', sound ? 'On' : 'Off', speaker, sound, () => { toggleSound(); fill(); })];
+      if (muted !== null) {
+        const row = switchRow('Notifications', muted ? 'Muted: nothing from Rabbit Pets reaches your phone' : 'Reminders, gifts and visits on your phone',
+          null, !muted, () => setMuted(!muted));
+        if (saving) row.setAttribute('aria-busy', 'true');
+        rows.push(row);
+      }
       if (OR.capabilities.has('notifications.schedule')) {
         const on = settings.reminders === 'on';
-        rows.push(switchRow('Reminders', on ? 'Nudges now and then, the kinds below' : 'Off: no nudges at all', 'moon', on, () => {
+        const sub = !on ? 'Off: no reminders' : muted ? 'In your bell only while muted, the kinds below' : 'Nudges now and then, the kinds below';
+        rows.push(switchRow('Reminders', sub, 'moon', on, () => {
           settings.reminders = on ? 'off' : 'on';
           saveSettings();
           queueReconcile();
@@ -4642,15 +4687,18 @@ function openSettings(): void {
           }
         }
       }
-      // keep focus on the row that was tapped as the rows are rebuilt
-      const at = [...body.querySelectorAll('button')].indexOf(document.activeElement as HTMLButtonElement);
+      // keep focus on the row that was tapped as the rows are rebuilt, by its
+      // label rather than its place: the Notifications row arrives late
+      for (const row of rows) row.dataset.row = row.querySelector('.nm')?.textContent ?? '';
+      const focused = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('[data-row]');
+      const at = focused && body.contains(focused) ? focused.dataset.row : undefined;
       body.replaceChildren(...rows);
-      if (at >= 0) body.querySelectorAll('button')[at]?.focus();
+      if (at !== undefined) rows.find((r) => r.dataset.row === at)?.focus();
     };
     fill();
     return [
       h('div', { class: 'eyebrow', text: 'Settings' }),
-      h('h2', { text: 'Sound and reminders' }),
+      h('h2', { text: 'Sound and notifications' }),
       body,
       h('div', { class: 'actions-col' }, button('Done', 'btn', close)),
     ];
