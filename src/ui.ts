@@ -49,19 +49,60 @@ export function haptic(kind: 'light' | 'medium' | 'success' | 'error'): void {
 
 export async function readJson<T>(key: string, fallback: T): Promise<T> {
   try {
-    const raw = await OR().storage.get(key);
+    // A write still on its way is newer than what the server holds.
+    const raw = writes.get(key)?.latest ?? (await OR().storage.get(key));
     return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
   }
 }
 
-/** Best-effort, like rabbit-words: a failed write (offline, a degraded host) leaves the game playing on from memory. */
-export async function writeJson(key: string, value: unknown): Promise<void> {
+/**
+ * Writes for one key, one at a time. For a signed-in player each write is its
+ * own request to the server, and parallel requests can land out of order: a
+ * run saving after every word once ended up stored with only its first three.
+ * So a key has at most one write in flight, and when it lands the latest value
+ * goes next; values in between are skipped.
+ */
+const writes = new Map<string, { latest: string; run: Promise<void> | null }>();
+
+/**
+ * Best-effort, like rabbit-words: a failed write (offline, a degraded host) is
+ * retried a couple of times, then left for the next write of the key, and the
+ * game plays on from memory. Resolves once this value, or a newer one, is
+ * stored or given up on.
+ */
+export function writeJson(key: string, value: unknown): Promise<void> {
+  const raw = JSON.stringify(value);
+  const w = writes.get(key);
+  if (w) {
+    w.latest = raw;
+    return w.run!;
+  }
+  const entry: { latest: string; run: Promise<void> | null } = { latest: raw, run: null };
+  writes.set(key, entry);
+  entry.run = flushWrites(key, entry);
+  return entry.run;
+}
+
+async function flushWrites(key: string, w: { latest: string }): Promise<void> {
+  let sent: string | null = null;
+  let failures = 0;
   try {
-    await OR().storage.set(key, JSON.stringify(value));
-  } catch {
-    /* best-effort */
+    while (sent !== w.latest) {
+      const raw: string = w.latest;
+      try {
+        await OR().storage.set(key, raw);
+        sent = raw;
+        failures = 0;
+      } catch {
+        if (++failures >= 3) return;
+        await new Promise((r) => window.setTimeout(r, 400 * failures));
+      }
+    }
+  } finally {
+    // Synchronously after the last check, so a write arriving now starts a fresh run.
+    writes.delete(key);
   }
 }
 

@@ -458,6 +458,7 @@ body {
 .social-friends { list-style: none; margin: 0; padding: 0; }
 .social-friends li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--border); font-size: 14px; }
 .social-score { font-weight: 700; }
+.social-friends li.me { color: var(--accent); font-weight: 700; }
 
 .grid.disabled { opacity: 0.6; }
 .chip[hidden] { display: none; }

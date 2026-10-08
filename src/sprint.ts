@@ -465,6 +465,10 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
     try {
       const r = await OR().scores.rank({ roundKey: roundKey(progress.puzzleIndex), order: 'top' });
       rankLine = r ? `#${r.rank} of ${r.total} so far` : null;
+      if (r && restoreFound(r.entry.metadata)) {
+        await save();
+        if (phaseOf(progress, ctx.now(), runMs()) === 'done') render();
+      }
     } catch {
       rankLine = null;
     }
@@ -472,6 +476,21 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
       const line = root.querySelector('.sprint-rank');
       if (line) line.textContent = rankLine ?? 'Ranked once the server catches up.';
     }
+  }
+
+  /**
+   * The words on your score row, when this device's copy of the run has fewer
+   * (a save that never landed, or a run finished in another session). The row
+   * is what counted, so it wins. True when words were added.
+   */
+  function restoreFound(metadata: Record<string, unknown> | null): boolean {
+    const mask = metadata?.['f'];
+    if (typeof mask !== 'string') return false;
+    const have = new Set(progress.found);
+    const missing = decodeMask(content.words, mask).filter((w) => !have.has(w));
+    if (missing.length === 0) return false;
+    progress.found.push(...missing);
+    return true;
   }
 
   // ---------- Yesterday's results ----------

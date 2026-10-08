@@ -31,6 +31,7 @@ import { pointsFor } from './sprint-rules';
 import { fillLengthRow, lengthCounts, lengthRow, lengthTable } from './lengths';
 import { openShareSheet } from './share';
 import { createTracer, type Tracer } from './tracer';
+import type { FriendScore } from '@oddsrabbit/apps-sdk';
 import { button, el, formatPuzzleDate, haptic, OR, readJson, resetTimeLine, SHARE_URL, showToast, writeJson } from './ui';
 
 /** Quiet time after the last find before the score goes to the server. */
@@ -247,6 +248,7 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     renderStarts();
     renderFound();
     renderDone();
+    renderSocial();
   }
 
   // ---------- Words ----------
@@ -331,7 +333,7 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
 
     void save();
     refresh();
-    if (isCleared(content, progress)) void submitNow().then(loadSocial);
+    if (isCleared(content, progress)) void submitNow();
     else scheduleSubmit();
 
     if (milestone !== null && milestone < 100) window.setTimeout(() => play('milestone'), 350);
@@ -521,6 +523,8 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
       });
       progress.submitted = Math.max(progress.submitted, score);
       await save();
+      // The counts and friends' places now include this score.
+      void loadSocial();
     } catch {
       /* best-effort: retried on the next find, on pause, and on the next load */
     }
@@ -528,16 +532,41 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
 
   // ---------- Company ----------
 
-  /** "62% of 40 players found every word" and friends' progress. Company, not a ranking. */
+  const SOCIAL_POLL_MS = 60_000;
+  let company: { dist: Array<{ score: number; count: number }> | null; friends: FriendScore[] } | null = null;
+  let socialTimer: number | undefined;
+
+  /**
+   * Fetch the counts and friends' scores, then keep them fresh: again after
+   * each score submitted, and every minute while this board is on screen.
+   */
   async function loadSocial(): Promise<void> {
     const or = OR();
     const key = casualRoundKey(index);
     const [dist, friends] = await Promise.all([
       or.capabilities.has('scores.distribution') ? or.scores.distribution({ roundKey: key }).catch(() => null) : Promise.resolve(null),
-      or.user ? or.scores.friends({ roundKey: key }).catch(() => []) : Promise.resolve([]),
+      or.user ? or.scores.friends({ roundKey: key }).catch(() => company?.friends ?? []) : Promise.resolve([]),
     ]);
+    company = { dist: dist ?? company?.dist ?? null, friends };
+    renderSocial();
+    window.clearTimeout(socialTimer);
+    const tick = (): void => {
+      // This board was swapped out (a past board, the archive): stop.
+      if (!ui.social.isConnected) return;
+      // Out of sight (the Ranked tab, the app in the background): look again later.
+      if (document.hidden || root.closest('[hidden]')) socialTimer = window.setTimeout(tick, SOCIAL_POLL_MS);
+      else void loadSocial();
+    };
+    socialTimer = window.setTimeout(tick, SOCIAL_POLL_MS);
+  }
+
+  /** "62% of 40 players found every word", then you and your friends by score. Yours is live, from this device. */
+  function renderSocial(): void {
+    if (!playing) return;
+    const or = OR();
     ui.social.innerHTML = '';
     ui.social.appendChild(el('h3', '', opts.today ? 'Today on the casual board' : 'On this board'));
+    const dist = company?.dist;
     if (dist) {
       const total = dist.reduce((n, e) => n + e.count, 0);
       const cleared = dist.reduce((n, e) => n + (e.score >= ALL_FOUND ? e.count : 0), 0);
@@ -551,20 +580,24 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
         )
       );
     }
-    const others = friends.filter((f) => !f.isSelf).sort((a, b) => b.score - a.score);
-    if (others.length > 0) {
-      const list = el('ul', 'social-friends');
-      for (const f of others.slice(0, 8)) {
-        const li = el('li');
-        li.append(el('span', 'social-name', `@${f.username}`), el('span', 'social-score', scoreLabel(f.score)));
-        list.appendChild(li);
-      }
-      ui.social.appendChild(list);
-    } else if (!or.user) {
+    const me = or.user;
+    const rows = (company?.friends ?? [])
+      .filter((f) => !f.isSelf && f.uuid !== me?.uuid)
+      .map((f) => ({ name: `@${f.username}`, score: f.score, self: false }));
+    rows.push({ name: me ? `@${me.username} (you)` : 'You', score: scoreOf(content, progress), self: true });
+    rows.sort((a, b) => b.score - a.score || Number(b.self) - Number(a.self));
+    const list = el('ul', 'social-friends');
+    for (const r of rows.slice(0, 9)) {
+      const li = el('li', r.self ? 'me' : '');
+      li.append(el('span', 'social-name', r.name), el('span', 'social-score', scoreLabel(r.score)));
+      list.appendChild(li);
+    }
+    ui.social.appendChild(list);
+    if (!me) {
       ui.social.appendChild(
         button('secondary-btn small', 'Sign in to see your friends', () => void or.actions.requestSignIn('See how your friends did'))
       );
-    } else {
+    } else if (rows.length === 1) {
       ui.social.appendChild(el('p', 'social-line muted', 'None of the people you follow have played it yet.'));
     }
   }
