@@ -14,7 +14,7 @@
 import type { Board } from './board';
 
 /** `puzzle-0` is this UTC day; it shows as #1. */
-export const EPOCH = '2026-10-12';
+export const EPOCH = '2026-10-07';
 export const EPOCH_MS = Date.parse(`${EPOCH}T00:00:00Z`);
 export const DAY_MS = 86_400_000;
 

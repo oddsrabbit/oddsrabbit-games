@@ -9,11 +9,13 @@ test('puzzle 0 is the epoch day, and days roll at UTC midnight', () => {
 });
 
 test('the week runs 4×4 Monday to Thursday, 5×5 at the weekend, a shape on Sunday', () => {
-  // The epoch is a Monday.
-  assert.equal(new Date(EPOCH_MS).getUTCDay(), 1);
+  // The epoch is a Wednesday.
+  assert.equal(new Date(EPOCH_MS).getUTCDay(), 3);
   const week = Array.from({ length: 7 }, (_, i) => shapeForPuzzle(i).id);
-  assert.deepEqual(week.slice(0, 6), ['square4', 'square4', 'square4', 'square4', 'square5', 'square5']);
-  const sundays = [6, 13, 20, 27].map((i) => shapeForPuzzle(i).id);
+  // Wed, Thu, Fri, Sat, (Sun), Mon, Tue
+  assert.deepEqual(week.slice(0, 4), ['square4', 'square4', 'square5', 'square5']);
+  assert.deepEqual(week.slice(5), ['square4', 'square4']);
+  const sundays = [4, 11, 18, 25].map((i) => shapeForPuzzle(i).id);
   assert.deepEqual(sundays, ['corners', 'hollow', 'lantern', 'corners']);
 });
 
