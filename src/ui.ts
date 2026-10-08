@@ -56,7 +56,7 @@ export async function readJson<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
-/** Best-effort, like rabbit-words: guests and degraded hosts reject writes, and the game plays on from memory. */
+/** Best-effort, like rabbit-words: a failed write (offline, a degraded host) leaves the game playing on from memory. */
 export async function writeJson(key: string, value: unknown): Promise<void> {
   try {
     await OR().storage.set(key, JSON.stringify(value));

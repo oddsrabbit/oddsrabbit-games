@@ -45,3 +45,7 @@ test('parseResults lines its counts up with the word list', () => {
   assert.equal(parseResults({ players: 3, counts: [1, -1, 0] }, 3), null);
   assert.equal(parseResults(null, 3), null);
 });
+
+test('parseResults treats the sealer\'s placeholder as still tallying', () => {
+  assert.equal(parseResults({ players: 0, counts: [0, 0, 0], sealing: true }, 3), null);
+});

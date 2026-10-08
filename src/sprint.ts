@@ -57,6 +57,34 @@ export interface SprintContext {
 export interface SprintMode {
   tracer(): Tracer | null;
   flush(): void;
+  /** Send a finished run's score again if it hasn't reached the server (on resume, back online). */
+  retrySubmit(): void;
+  /** Whether yesterday's results card is on the Ranked screen (once it has loaded). */
+  hasResultsCard(): Promise<boolean>;
+  /** Stop timers before the shell swaps this day out for the next. */
+  dispose(): void;
+}
+
+// A guest's ranked run on this device, by puzzle index. Signing in afterwards
+// doesn't give a second, ranked go at a board already seen. Device storage,
+// not the player's: a guest's storage is not the account's.
+const GUEST_RUN_LOCAL = 'word-rush:guest-ranked';
+
+function guestRanIndex(): number | null {
+  try {
+    const v = localStorage.getItem(GUEST_RUN_LOCAL);
+    return v === null ? null : Number(v);
+  } catch {
+    return null;
+  }
+}
+
+function rememberGuestRun(index: number): void {
+  try {
+    localStorage.setItem(GUEST_RUN_LOCAL, String(index));
+  } catch {
+    /* best-effort */
+  }
 }
 
 const errorCode = (e: unknown): string => (e && typeof e === 'object' && 'code' in e ? String((e as { code: unknown }).code) : '');
@@ -93,12 +121,22 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
   let clockTimer: number | undefined;
   let readyTimer: number | undefined;
   let rankLine: string | null = null;
+  let disposed = false;
+  /** The last submission failed for a reason worth retrying (network, server error). */
+  let sendFailed = false;
+  /**
+   * Yesterday's results card, fetched once per day rather than on every
+   * screen change. Dropped when it's only the "still being tallied" note, so
+   * the next render asks again.
+   */
+  let resultsCard: Promise<HTMLElement | null> | null = null;
 
   // ---------- Screens ----------
 
   function render(): void {
     window.clearInterval(clockTimer);
     window.clearTimeout(readyTimer);
+    if (disposed) return;
     root.innerHTML = '';
     const phase = phaseOf(progress, ctx.now(), runMs());
     ctx.onPhase(phase);
@@ -107,9 +145,12 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
       return;
     }
     tracer = null;
-    const results = el('div', 'results-slot');
-    root.appendChild(results);
-    void renderResults(results);
+    const slot = el('div', 'results-slot');
+    root.appendChild(slot);
+    resultsCard ??= buildResults();
+    void resultsCard.then((card) => {
+      if (card && slot.isConnected) slot.appendChild(card);
+    });
     if (phase === 'ready') renderReady();
     else renderDone();
     root.appendChild(resetTimeLine());
@@ -138,7 +179,14 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
       el('p', 'sprint-rules muted', 'One run a day, the same board for everyone. It appears when you press Start.')
     );
     const closesAt = EPOCH_MS + (progress.puzzleIndex + 1) * DAY_MS;
-    if (runFitsDay(progress.puzzleIndex, ctx.now(), runMs())) {
+    if (OR().user && guestRanIndex() === progress.puzzleIndex) {
+      const seen = button('primary-btn start-btn', 'Already played today', () => undefined);
+      seen.disabled = true;
+      card.append(
+        seen,
+        el('p', 'sprint-rules muted', 'You played today’s ranked board before signing in on this device, so it can’t be ranked now. A new board opens at midnight UTC.')
+      );
+    } else if (runFitsDay(progress.puzzleIndex, ctx.now(), runMs())) {
       card.appendChild(button('primary-btn start-btn', 'Start', () => void start()));
       // Swap Start for the closed note when the last full run's window passes.
       readyTimer = window.setTimeout(render, closesAt - CLOSE_MARGIN_MS - runMs() - ctx.now() + 50);
@@ -149,7 +197,7 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
     }
     if (!OR().user) {
       card.append(
-        el('p', 'sprint-rules muted', "You're not signed in, so this run won't be ranked."),
+        el('p', 'sprint-rules muted', "You're not signed in, so this run won't be ranked, and signing in afterwards won't give you another go at today's board."),
         button('secondary-btn small', 'Sign in', () => void OR().actions.requestSignIn('Get on the daily leaderboard'))
       );
     }
@@ -266,6 +314,14 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
         el('p', 'sprint-rank', 'Not ranked: you weren’t signed in.'),
         button('secondary-btn small', 'Sign in for tomorrow', () => void OR().actions.requestSignIn('Get on the daily leaderboard'))
       );
+    } else if (!progress.submitted) {
+      // The score hasn't reached the server. Say so, rather than "checking":
+      // it's retried here, on resume and when the connection comes back.
+      card.append(
+        el('p', 'sprint-rank', sendFailed ? 'Your score hasn’t reached the server yet.' : 'Sending your score…'),
+        el('p', 'sprint-rules muted', 'Keep a connection before midnight UTC so it counts. We’ll keep trying.')
+      );
+      if (sendFailed) card.appendChild(button('secondary-btn small', 'Try again', () => void retrySubmit()));
     } else {
       card.appendChild(el('p', 'sprint-rank', rankLine ?? 'Checking your place…'));
       card.appendChild(el('p', 'sprint-rules muted', 'Final places after midnight UTC, when words nobody else found score double.'));
@@ -325,6 +381,7 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
     }
     progress.startedAt = ctx.now();
     progress.found = [];
+    if (!OR().user) rememberGuestRun(progress.puzzleIndex);
     // Saved before the board shows, so reopening mid-run carries on the same
     // clock rather than starting a fresh one.
     await save();
@@ -375,6 +432,7 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
         metadata: sprintMetadata(content, progress),
       });
       progress.submitted = true;
+      sendFailed = false;
     } catch (e) {
       const code = errorCode(e);
       if (code === 'scores/already-submitted') progress.submitted = true;
@@ -382,12 +440,28 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
         progress.submitted = true;
         progress.closed = true;
       }
+      sendFailed = !progress.submitted;
     }
     await save();
   }
 
+  let retrying = false;
+
+  /** A finished run whose score never arrived: send it again and refresh the done screen. */
+  async function retrySubmit(): Promise<void> {
+    if (retrying || finishing || disposed || progress.submitted || !OR().user) return;
+    if (phaseOf(progress, ctx.now(), runMs()) !== 'done') return;
+    retrying = true;
+    sendFailed = false;
+    render(); // "Sending your score…"
+    await submit();
+    retrying = false;
+    render();
+    if (progress.submitted) void loadRank();
+  }
+
   async function loadRank(): Promise<void> {
-    if (!OR().user || progress.closed || !OR().capabilities.has('scores.rank')) return;
+    if (!OR().user || !progress.submitted || progress.closed || !OR().capabilities.has('scores.rank')) return;
     try {
       const r = await OR().scores.rank({ roundKey: roundKey(progress.puzzleIndex), order: 'top' });
       rankLine = r ? `#${r.rank} of ${r.total} so far` : null;
@@ -403,10 +477,10 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
   // ---------- Yesterday's results ----------
 
   /** The card for yesterday's Sprint, once its day has closed: place, bonus, and how your words compared. */
-  async function renderResults(slot: HTMLElement): Promise<void> {
+  async function buildResults(): Promise<HTMLElement | null> {
     const y = index - 1;
-    if (y < 0) return;
-    if ((await readJson<number | null>('results-seen', null)) === y) return;
+    if (y < 0) return null;
+    if ((await readJson<number | null>('results-seen', null)) === y) return null;
     const or = OR();
     const prev = await readJson<unknown>('sprint-prev', null);
     const [day, rawResults, rank, top] = await Promise.all([
@@ -419,14 +493,18 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
         ? or.scores.top({ roundKey: roundKey(y), order: 'top', limit: 3 }).catch(() => [])
         : Promise.resolve([]),
     ]);
-    if (!day) return;
+    if (!day) {
+      // Likely offline: ask again on the next screen change.
+      resultsCard = null;
+      return null;
+    }
     const words = day.sprint.words;
     // Your words: from this device, else from your row's mask.
     let mine: string[] = isSprintProgress(prev) && prev.puzzleIndex === y ? prev.found : [];
     const meta = rank ? rowMeta(rank.entry.metadata) : null;
     const mask = rank?.entry.metadata?.['f'];
     if (mine.length === 0 && typeof mask === 'string') mine = decodeMask(words, mask);
-    if (mine.length === 0 && !rank) return;
+    if (mine.length === 0 && !rank) return null;
 
     const results: SprintResults | null = parseResults(rawResults, words.length);
     const card = el('section', 'results-card');
@@ -436,14 +514,16 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
       button('icon-btn small', '×', () => {
         void writeJson('results-seen', y);
         card.remove();
+        resultsCard = Promise.resolve(null);
       }, 'Dismiss')
     );
     card.appendChild(head);
 
     if (!results) {
       card.appendChild(el('p', 'sprint-rules', 'Results are still being tallied. Check back in a few minutes.'));
-      slot.appendChild(card);
-      return;
+      // Not kept: the next screen change looks again.
+      resultsCard = null;
+      return card;
     }
 
     const counts = new Map(words.map((w, i) => [w, results.counts[i] ?? 0]));
@@ -508,7 +588,7 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
       card.append(el('h3', '', 'Most-found words you missed'), list);
     }
     card.appendChild(button('secondary-btn small', 'Full results', () => showSprintLeaderboard(y, index)));
-    slot.appendChild(card);
+    return card;
   }
 
   /** Yesterday's top three, second-first-third, on steps. */
@@ -544,6 +624,13 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
     tracer: () => tracer,
     flush() {
       void save();
+    },
+    retrySubmit: () => void retrySubmit(),
+    hasResultsCard: () => (resultsCard ?? Promise.resolve(null)).then((card) => card !== null),
+    dispose() {
+      disposed = true;
+      window.clearInterval(clockTimer);
+      window.clearTimeout(readyTimer);
     },
   };
 }

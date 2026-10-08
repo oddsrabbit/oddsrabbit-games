@@ -167,6 +167,10 @@ export function parseDay(raw: unknown): DayContent | null {
 export function parseResults(raw: unknown, wordCount: number): SprintResults | null {
   if (!raw || typeof raw !== 'object') return null;
   const c = raw as Record<string, unknown>;
+  // The sealer writes a placeholder (`sealing: true`, every count 0) before it
+  // tallies. A seal that failed partway leaves it there: still tallying, not
+  // "nobody found anything".
+  if (c.sealing === true) return null;
   if (typeof c.players !== 'number' || !Number.isInteger(c.players) || c.players < 0) return null;
   if (!Array.isArray(c.counts) || c.counts.length !== wordCount) return null;
   if (!c.counts.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0)) return null;

@@ -17,6 +17,7 @@
 //   yesterday=1    you played yesterday's Sprint: its day has closed and the results card shows
 //   tallying=1     with yesterday=1: the day closed but results aren't written yet
 //   closed=1       the Sprint refuses your score as if the day had closed
+//   sendfail=N     the first N Sprint submissions fail as if offline (the retry on resume / Try again)
 //   ran=1          today's Sprint already ran (time's up, not yet sent): opens on the done screen
 //   ending=1       today's Sprint is running with 20 seconds left
 //   user=0         signed out (account storage refused, as on the real hosts)
@@ -31,7 +32,7 @@ const store = q.get('fresh') ? {} : JSON.parse(localStorage.getItem(STORE_KEY) |
 const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(store));
 const frame = document.getElementById('g');
 if (q.get('fresh')) {
-  try { localStorage.removeItem('word-rush:seen-help'); } catch {}
+  try { localStorage.removeItem('word-rush:seen-help'); localStorage.removeItem('word-rush:guest-ranked'); } catch {}
 }
 frame.src = `../dist/word-rush/index.html?colorScheme=${q.get('dark') ? 'dark' : 'light'}`;
 
@@ -149,8 +150,14 @@ frame.addEventListener('load', () => {
     s.setProperty('--oddsrabbit-safe-top', '47px'); s.setProperty('--oddsrabbit-chrome-height', '56px');
     s.setProperty('--oddsrabbit-chrome-start', '56px'); s.setProperty('--oddsrabbit-safe-bottom', '34px');
   }
+  // Like the real hosts, `init` goes to the first page load only: a game that
+  // reloads itself never hears it again, so don't (see startDay in main.ts).
+  if (initSent) return;
+  initSent = true;
   init(); setTimeout(init, 200);
 });
+let initSent = false;
+let sendFails = Number(q.get('sendfail') || 0);
 
 window.addEventListener('message', async (e) => {
   const r = e.data; if (!r || !r.correlationId) return;
@@ -183,6 +190,7 @@ window.addEventListener('message', async (e) => {
       const rows = rowsFor(p.roundKey);
       const prev = rows[ME.uuid];
       if (p.roundKey.startsWith('puzzle-')) {
+        if (sendFails > 0) { sendFails--; return fail('network/offline'); }
         if (q.get('closed')) return fail('scores/round-closed');
         if (prev) return fail('scores/already-submitted');
         rows[ME.uuid] = { ...ME, score: p.score, createdAt: new Date().toISOString(), metadata: { base: p.score, words: 0, f: p.metadata?.f } };

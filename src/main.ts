@@ -49,8 +49,9 @@ function showHelp(onClose?: () => void): void {
 }
 
 // "Seen how to play" lives in the player's storage, which follows a signed-in
-// account. A guest's storage writes are refused, so it's also kept on this
-// device; either one is enough to skip the help.
+// account (a guest's is kept by the host in this browser). It's also kept on
+// this device, so signing in doesn't bring the help back; either one is
+// enough to skip it.
 const SEEN_HELP_LOCAL = 'word-rush:seen-help';
 
 async function seenHelpBefore(): Promise<boolean> {
@@ -75,9 +76,15 @@ function renderUnavailable(): void {
   root.innerHTML = '';
   const wrap = el('div', 'unavailable');
   wrap.setAttribute('role', 'status');
+  const retry = button('secondary-btn', 'Try again', () => {
+    retry.disabled = true;
+    retry.textContent = 'Checking…';
+    void startDay();
+  });
   wrap.append(
     el('p', 'unavailable-title', "Today's boards aren't ready yet."),
     el('p', '', 'Check back in a moment, or make sure you have a connection.'),
+    retry,
     resetTimeLine()
   );
   root.appendChild(wrap);
@@ -112,8 +119,11 @@ async function setupSound(): Promise<void> {
     btn.setAttribute('aria-pressed', String(isMuted()));
     btn.setAttribute('aria-label', isMuted() ? 'Unmute sound' : 'Mute sound');
   };
-  setMuted(settings.muted === true);
+  // Only ever mute here: unmuting would start audio outside a gesture.
+  if (settings.muted === true) setMuted(true);
   paint();
+  // Hidden until the setting is known, so a muted player never sees 🔊 flip to 🔇.
+  btn.hidden = false;
   btn.addEventListener('click', () => {
     setMuted(!isMuted());
     paint();
@@ -132,120 +142,168 @@ async function setupSound(): Promise<void> {
   });
 }
 
+/** The day on screen: its boards and both modes. Null while nothing could load. */
+interface Day {
+  index: number;
+  active: Tab;
+  sprint: SprintMode;
+  casual: CasualMode | null;
+  select(tab: Tab): Promise<void>;
+}
+
+let current: Day | null = null;
+const boardBtn = (): HTMLButtonElement => document.getElementById('btn-board') as HTMLButtonElement;
+
+/**
+ * Load (or reload) today's boards and build both modes. Runs at boot, from the
+ * unavailable screen's Try again, and when the day rolls over with the game
+ * open: in place, never `location.reload()`, because a reloaded game never
+ * hears the host's `init` again. Concurrent calls share one run.
+ */
+let startingDay: Promise<void> | null = null;
+function startDay(): Promise<void> {
+  startingDay ??= (async () => {
+    const previous = current;
+    previous?.sprint.flush();
+    previous?.casual?.flush();
+    const index = puzzleIndexAt(now());
+    const [day, savedTab] = await Promise.all([loadDay(index), readJson<Tab>('tab', previous?.active ?? 'sprint')]);
+    previous?.sprint.dispose();
+    current = null;
+    if (!day) {
+      boardBtn().hidden = true;
+      document.body.classList.remove('running');
+      renderUnavailable();
+      return;
+    }
+    boardBtn().hidden = false;
+
+    // Tabs, and a pane per mode so switching keeps each one's screen.
+    const tabs = el('div', 'tabs');
+    tabs.setAttribute('role', 'tablist');
+    const meta = el('p', 'day-meta', `#${index + 1} · ${formatPuzzleDate(index)}`);
+    const panes: Record<Tab, HTMLElement> = { sprint: el('div', 'pane'), casual: el('div', 'pane') };
+    const tabBtns: Record<Tab, HTMLButtonElement> = {
+      sprint: button('tab', 'Ranked', () => void d.select('sprint')),
+      casual: button('tab', 'Casual', () => void d.select('casual')),
+    };
+    for (const [t, b] of Object.entries(tabBtns)) {
+      b.setAttribute('role', 'tab');
+      b.dataset.tab = t;
+    }
+    tabs.append(tabBtns.sprint, tabBtns.casual);
+    root.innerHTML = '';
+    root.append(meta, tabs, panes.sprint, panes.casual);
+
+    const onPhase = (phase: SprintPhase): void => {
+      // Mid-run, nothing but the clock and the board: no tabs, no leaderboard.
+      const running = phase === 'playing';
+      tabs.hidden = running;
+      meta.hidden = running;
+      boardBtn().hidden = running;
+      // Mute stays reachable mid-run.
+      document.body.classList.toggle('running', running);
+    };
+
+    const d: Day = {
+      index,
+      active: savedTab === 'casual' ? 'casual' : 'sprint',
+      sprint: null as unknown as SprintMode,
+      casual: null,
+      async select(tab: Tab): Promise<void> {
+        d.active = tab;
+        void writeJson('tab', tab);
+        for (const t of ['sprint', 'casual'] as const) {
+          tabBtns[t].setAttribute('aria-selected', String(t === tab));
+          panes[t].hidden = t !== tab;
+        }
+        // The casual board is built on first visit, so a Sprint-only player never pays for it.
+        if (tab === 'casual' && !d.casual) d.casual = await mountCasualPane(panes.casual, index, day.casual);
+        window.scrollTo({ top: 0 });
+      },
+    };
+    d.sprint = await mountSprint(panes.sprint, {
+      index,
+      content: day.sprint,
+      now,
+      onPhase,
+      openCasual: () => void d.select('casual'),
+    });
+    current = d;
+    await d.select(d.active);
+  })().finally(() => {
+    startingDay = null;
+  });
+  return startingDay;
+}
+
+/**
+ * On resume, on a timer, and back online: the unavailable screen tries again,
+ * a day left open past midnight UTC starts the new one (a ranked run on screen
+ * finishes first; it then carries over as yesterday's), and a score that
+ * didn't reach the server is sent again.
+ */
+function refreshIfStale(): void {
+  if (startingDay) return;
+  if (!current) {
+    void startDay();
+    return;
+  }
+  if (document.body.classList.contains('running')) return;
+  if (puzzleIndexAt(now()) !== current.index) {
+    void startDay();
+    return;
+  }
+  current.sprint.retrySubmit();
+}
+
 async function bootstrap(): Promise<void> {
   await OR().whenReady();
   void setupSound();
   await syncClock();
-  const index = puzzleIndexAt(now());
-  const boardBtn = document.getElementById('btn-board') as HTMLButtonElement;
   document.getElementById('btn-help')!.addEventListener('click', () => showHelp());
-
-  const [day, savedTab, seenHelp] = await Promise.all([
-    loadDay(index),
-    readJson<Tab>('tab', 'sprint'),
-    seenHelpBefore(),
-  ]);
-  if (!day) {
-    boardBtn.hidden = true;
-    renderUnavailable();
-    OR().ready();
-    return;
-  }
-
-  boardBtn.addEventListener('click', () => showSprintLeaderboard(index, index));
-
-  // Tabs, and a pane per mode so switching keeps each one's screen.
-  const tabs = el('div', 'tabs');
-  tabs.setAttribute('role', 'tablist');
-  const meta = el('p', 'day-meta', `#${index + 1} · ${formatPuzzleDate(index)}`);
-  const panes: Record<Tab, HTMLElement> = { sprint: el('div', 'pane'), casual: el('div', 'pane') };
-  const tabBtns: Record<Tab, HTMLButtonElement> = {
-    sprint: button('tab', 'Ranked', () => select('sprint')),
-    casual: button('tab', 'Casual', () => select('casual')),
-  };
-  for (const [t, b] of Object.entries(tabBtns)) {
-    b.setAttribute('role', 'tab');
-    b.dataset.tab = t;
-  }
-  tabs.append(tabBtns.sprint, tabBtns.casual);
-  root.innerHTML = '';
-  root.append(meta, tabs, panes.sprint, panes.casual);
-
-  let active: Tab = savedTab === 'casual' ? 'casual' : 'sprint';
-  let casual: CasualMode | null = null;
-  let sprint: SprintMode | null = null;
-
-  async function select(tab: Tab): Promise<void> {
-    active = tab;
-    void writeJson('tab', tab);
-    for (const t of ['sprint', 'casual'] as const) {
-      tabBtns[t].setAttribute('aria-selected', String(t === tab));
-      panes[t].hidden = t !== tab;
-    }
-    // The casual board is built on first visit, so a Sprint-only player never pays for it.
-    if (tab === 'casual' && !casual) casual = await mountCasualPane(panes.casual, index, day!.casual);
-    window.scrollTo({ top: 0 });
-  }
-
-  const onPhase = (phase: SprintPhase): void => {
-    // Mid-run, nothing but the clock and the board: no tabs, no leaderboard.
-    const running = phase === 'playing';
-    tabs.hidden = running;
-    meta.hidden = running;
-    boardBtn.hidden = running;
-    // Mute stays reachable mid-run.
-    document.body.classList.toggle('running', running);
-  };
-
-  sprint = await mountSprint(panes.sprint, {
-    index,
-    content: day.sprint,
-    now,
-    onPhase,
-    openCasual: () => void select('casual'),
+  boardBtn().addEventListener('click', () => {
+    if (current) showSprintLeaderboard(current.index, current.index);
   });
-  await select(active);
+
+  const [, seenHelp] = await Promise.all([startDay(), seenHelpBefore()]);
 
   document.addEventListener('keydown', (e) => {
-    if (document.querySelector('.modal-backdrop, .lb-backdrop')) return;
-    const tracer = active === 'sprint' ? sprint?.tracer() : casual?.tracer();
+    if (!current || document.querySelector('.modal-backdrop, .lb-backdrop')) return;
+    const tracer = current.active === 'sprint' ? current.sprint.tracer() : current.casual?.tracer();
     if (tracer?.key(e)) e.preventDefault();
   });
   OR().lifecycle.on('pause', () => {
-    sprint?.flush();
-    casual?.flush();
+    current?.sprint.flush();
+    current?.casual?.flush();
   });
-
-  // A daily game left open, or resumed from the background, past midnight UTC
-  // starts over on the new day. A ranked run on screen finishes first; the
-  // done screen then reloads, and the run carries over as yesterday's.
-  const checkDay = (): void => {
-    if (puzzleIndexAt(now()) === index || document.body.classList.contains('running')) return;
-    sprint?.flush();
-    casual?.flush();
-    location.reload();
-  };
-  const onResume = (): void => void syncClock().then(checkDay);
+  const onResume = (): void => void syncClock().then(refreshIfStale);
   OR().lifecycle.on('resume', onResume);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) onResume();
   });
-  window.setInterval(checkDay, 30_000);
+  window.addEventListener('online', onResume);
+  window.setInterval(refreshIfStale, 30_000);
 
+  // A push tap. The end-of-day push points at yesterday's ranked board: its
+  // results card is at the top of the Ranked tab, so show that rather than
+  // covering it with the leaderboard. Never over a run in progress.
   const intent = leaderboardIntent(OR().initialState);
-  const openIntent = (): void => {
-    if (intent !== null && intent <= index) {
-      void select('sprint');
-      showSprintLeaderboard(intent, index);
-    }
+  const openIntent = async (): Promise<void> => {
+    const d = current;
+    if (intent === null || !d || intent > d.index) return;
+    void d.select('sprint');
+    if (document.body.classList.contains('running')) return;
+    if (intent === d.index - 1 && (await d.sprint.hasResultsCard())) return;
+    showSprintLeaderboard(intent, d.index);
   };
-  if (!seenHelp) {
+  if (!seenHelp && current) {
     showHelp(() => {
       rememberSeenHelp();
-      openIntent();
+      void openIntent();
     });
   } else {
-    openIntent();
+    void openIntent();
   }
 
   OR().ready();

@@ -3,7 +3,7 @@
 A daily word-grid game for OddsRabbit with two modes. Both trace words through touching letters (diagonals too, each tile once) and follow the same week: a 4×4 Monday to Thursday, a 5×5 Friday and Saturday, and a shaped board on Sunday (Corners, Hollow, Lantern in turn; `shapeForPuzzle()` in `src/puzzle.ts`).
 
 **Ranked** (`src/sprint.ts`, rules in `src/sprint-rules.ts`; "Sprint" is its name in the code), the competition with the daily leaderboard:
-- Everyone gets the same board, hidden until Start. You have 90 seconds on a 4×4, 2 minutes on the 5×5 and shaped boards (`sprintMs()`), and one run a day. Words of 3+ letters score classic Boggle points by length: 3–4 letters 1, 5 → 2, 6 → 3, 7 → 5, 8+ → 11.
+- Everyone gets the same board, hidden until Start. A guest who runs it can't sign in and run it again ranked on the same device that day (`word-rush:guest-ranked` in localStorage). You have 90 seconds on a 4×4, 2 minutes on the 5×5 and shaped boards (`sprintMs()`), and one run a day. Words of 3+ letters score classic Boggle points by length: 3–4 letters 1, 5 → 2, 6 → 3, 7 → 5, 8+ → 11.
 - When the clock stops your base points lock in, with a provisional place ("#4 of 23 so far").
 - **When the day closes** (just after midnight UTC, `WordSprintSealer` in the backend), every word nobody else found scores double. Each row is rated `round(1000 × final / day's best)` so every board size weighs the same, and `results-N` records how many players found each word.
 - The next day a results card shows your final place, "42 + 9 rare-word bonus = 51", your words with how many found them, the best words nobody found, and the most-found words you missed. The end-of-day push links to it.
@@ -45,10 +45,10 @@ Copy `data/word-rush-boards.json` to the backend's `tools/data/` and deploy. The
 
 ### Launch checklist
 
-1. **Pick the launch day** and set it as the epoch in all three places: `EPOCH` in `src/puzzle.ts`, `'epoch'` for `word-rush` in the backend's `DailyGameRegistry.php`, and the boards file (rerun `npm run gen-boards`, which writes `EPOCH` into it). It's `2026-10-12` (a Monday) for now. `WordGridProvider` refuses a file whose epoch doesn't match the registry.
-2. Copy the boards file to the backend, deploy, and run `tools/setup-apps-platform.php` to seed the app row. It's seeded `admin_only`.
-3. Build here and upload `dist/word-rush/` (it includes `icon-512.png`, which the manifest points at).
-4. Run the provisioning cron once by hand and check `puzzle-<today>` was seeded.
+1. **Pick the launch day** and set it as the epoch in all three places: `EPOCH` in `src/puzzle.ts`, `'epoch'` for `word-rush` in the backend's `DailyGameRegistry.php`, and the boards file (rerun `npm run gen-boards`, which writes `EPOCH` into it). It's `2026-10-12` (a Monday) for now. `WordGridProvider` refuses a file whose epoch doesn't match the registry. The backend's `WordSprintSealerTest` also hard-codes the epoch; update it too.
+2. Copy the boards file to the backend's `tools/data/` and check the two copies match (`sha256sum`): a stale copy once shipped boards with blocked words. Deploy, and run `tools/setup-apps-platform.php` to seed the app row. It's seeded `admin_only`.
+3. Build here and upload `dist/word-rush/` (it includes `icon-512.png`, which the manifest points at), then **Bump cache version** in `tools/setup-apps-platform.php` (apps-sdk `docs/deploy-cache-policy.md`: it's the only cache-bust that works).
+4. Run the provisioning cron once by hand and check `puzzle-0` was seeded (before launch it seeds from day 0 and doesn't alert). If any `puzzle-N` rows were seeded from an older boards file, delete them first: a seeded day is never rewritten.
 5. Play it as an admin, then flip it public: `POST /admin/apps/word-rush {adminOnly:false}`.
 
 ## How it works
@@ -58,7 +58,7 @@ Copy `data/word-rush-boards.json` to the backend's `tools/data/` and deploy. The
 - **One solver** (`src/board.ts`): a trie plus depth-first search, abandoning a path as soon as no word starts with it. It solves a 5×5 against all of ENABLE in milliseconds. The game uses the same code for typed input and hints.
 - **Content** is served by `content.daily` on `puzzle-N` as `{ v: 2, sprint: { shape, rows, cols, tiles, words }, casual: { …, words, bonus, star } }` (`parseDay()` checks it). A tile is one letter or `"QU"`, or null for a hole. The client caches it under `day`; play is stored under `sprint` and `casual`.
 - **Round keys:** `puzzle-N` is the Sprint, so every backend feature keyed on it (season, push, Top today, podium) is the Sprint's. `casual-N` holds casual scores and feeds none of it. `results-N` is written when the Sprint day closes.
-- **Sprint scores** are sent once, when the clock stops (no keepBest), with a bitmask `f` of the words found. `AppScoreVerifier` recomputes base points from it, keeps the mask for the sealer, and refuses scores once `results-N` exists (`scores/round-closed`). The start time is saved before the board shows, so reopening mid-run resumes the same clock (server time via `time.now`).
+- **Sprint scores** are sent once, when the clock stops (no keepBest), with a bitmask `f` of the words found. `AppScoreVerifier` recomputes base points from it, keeps the mask for the sealer (hidden from other players' reads until the day is sealed), and refuses scores once the UTC day is over (30 s grace for requests in flight) or `results-N` exists (`scores/round-closed`). A send that fails is retried on resume, back online, from the done screen's Try again, and on the next open. The start time is saved before the board shows, so reopening mid-run resumes the same clock (server time via `time.now`).
 - **Casual scores** go with `keepBest` a few seconds after each find, with masks over `words` and `bonus`; the verifier recomputes them and stores counts only.
 - **Cheating:** the checks stop invented scores and words that aren't on the board, not a player who runs a solver. Any letter grid can be solved offline, and the word lists ship to the client. The rare-word bonus makes a solver more tempting, so watch for implausible runs.
 
@@ -81,7 +81,7 @@ npm run build && python3 -m http.server 8766
 # http://localhost:8766/dev/harness.html
 ```
 
-`dev/harness.html` stands in for the host: it serves days from `data/word-rush-boards.json`, keeps storage in localStorage, fakes five other players, and closes past days the way the sealer does. Parameters (listed at the top of the file): `day=N` (default 3; it moves the server clock, so days before launch work), `yesterday=1` (you played yesterday: shows the results card), `ran=1` / `ending=1` (a Sprint already over / with 20 seconds left), `closed=1`, `tallying=1`, `fresh=1`, `user=0`, `dark=1`, `chrome=app`, `late=N` (start N seconds before midnight UTC: Start's cutoff and the day rolling over).
+`dev/harness.html` stands in for the host: it serves days from `data/word-rush-boards.json`, keeps storage in localStorage, fakes five other players, and closes past days the way the sealer does. Parameters (listed at the top of the file): `day=N` (default 3; it moves the server clock, so days before launch work), `yesterday=1` (you played yesterday: shows the results card), `ran=1` / `ending=1` (a Sprint already over / with 20 seconds left), `closed=1`, `tallying=1`, `fresh=1`, `user=0`, `dark=1`, `chrome=app`, `late=N` (start N seconds before midnight UTC: Start's cutoff and the day rolling over), `sendfail=N` (the first N ranked submissions fail as if offline). Like the real hosts, it sends `init` to the first page load only, so a game that reloads itself hangs here too: the day rolls over in place (`startDay()` in `src/main.ts`).
 
 ## Data and licences
 
