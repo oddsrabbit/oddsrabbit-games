@@ -459,6 +459,14 @@ body {
 .social-friends li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--border); font-size: 14px; }
 .social-score { font-weight: 700; }
 .social-friends li.me { color: var(--accent); font-weight: 700; }
+.social-place { color: var(--accent); font-weight: 700; }
+/* The casual board's top players: place, name, score. */
+.social-board li { gap: 10px; }
+.social-board .social-rank { min-width: 2ch; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.social-board .social-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.social-board li.me .social-rank { color: var(--accent); }
+.social-board li.gap { justify-content: center; padding: 0; color: var(--muted); border-top: 0; }
+.social-more { display: block; margin: 8px auto 0; }
 
 .grid.disabled { opacity: 0.6; }
 .chip[hidden] { display: none; }

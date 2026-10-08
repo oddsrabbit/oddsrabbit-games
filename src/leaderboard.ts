@@ -1,10 +1,11 @@
 // The Sprint's boards: Everyone on a day, the month (each player's best days,
-// rated out of 1,000), and Friends. The casual board has none.
+// rated out of 1,000), and Friends. The casual board's: Everyone and Friends.
 
 import type { FriendScore } from '@oddsrabbit/apps-sdk';
 import { openLeaderboardModal, pinnedFromRank, type LeaderboardRow, type LeaderboardTab } from '@oddsrabbit/apps-sdk/ui/leaderboard';
 import { createSeasonTab, currentPeriod, formatPeriod } from '@oddsrabbit/apps-sdk/ui/season';
-import { DAY_MS, EPOCH_MS, roundKey } from './puzzle';
+import { casualRoundKey, DAY_MS, EPOCH_MS, roundKey } from './puzzle';
+import { scoreLabel } from './scoring';
 import { rowMeta, rowPoints } from './sprint-rules';
 import { inviteShare, OR } from './ui';
 
@@ -79,6 +80,52 @@ export function showSprintLeaderboard(index: number, today: number): void {
 
   openLeaderboardModal({
     title: live ? "Today's ranked board" : `Ranked #${index + 1}`,
+    tabs,
+    viewerUuid: or.user?.uuid ?? null,
+    defaultTab: tabs[0]?.id,
+  });
+}
+
+/** A casual board, untimed: by share of the everyday words found, bonus words breaking ties. */
+export function showCasualLeaderboard(index: number, today: number): void {
+  const or = OR();
+  const key = casualRoundKey(index);
+  const live = index >= today;
+  const value = (row: LeaderboardRow): string => scoreLabel(row.score);
+  const tabs: LeaderboardTab[] = [];
+
+  if (or.capabilities.has('scores.top')) {
+    tabs.push({
+      id: 'everyone',
+      label: live ? 'So far' : 'Everyone',
+      emptyText: live ? 'Nobody has played today’s casual board yet. Be the first.' : 'Nobody played this casual board.',
+      load: () => or.scores.top({ roundKey: key, order: 'top', limit: BOARD_LIMIT }),
+      ...(or.capabilities.has('scores.rank')
+        ? { loadPinned: () => or.scores.rank({ roundKey: key, order: 'top' }).then(pinnedFromRank) }
+        : {}),
+      formatValue: value,
+    });
+  }
+
+  const invite = 'Invite friends or follow other players on OddsRabbit to see how they did.';
+  tabs.push({
+    id: 'friends',
+    label: 'Friends',
+    emptyText: invite,
+    emptyPrompt: { blurb: invite, label: 'Invite a friend', onClick: () => void inviteShare() },
+    load: () => or.scores.friends({ roundKey: key }).then(friendsRows),
+    formatValue: value,
+    signInPrompt: or.user
+      ? null
+      : {
+          blurb: 'Sign in to see how the people you follow did.',
+          label: 'Sign in',
+          onClick: () => void or.actions.requestSignIn('See how your friends did on the casual board'),
+        },
+  });
+
+  openLeaderboardModal({
+    title: live ? "Today's casual board" : `Casual #${index + 1}`,
     tabs,
     viewerUuid: or.user?.uuid ?? null,
     defaultTab: tabs[0]?.id,

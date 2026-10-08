@@ -16,7 +16,7 @@ A daily word-grid game for OddsRabbit with two modes. Both trace words through t
 **Casual** (`src/casual.ts`, rules in `src/game.ts`), the relaxed one:
 - Its own board behind a start card, untimed. *Play past boards* lists the last 30 days' casual boards (fetched with `content.daily`); they're saved per day (`casual-N` in storage) and don't count toward the stats.
 - Untimed. Find every everyday word to clear it; rarer words count as bonus words. Hints: *Show word starts* and *Reveal a word* (revealed words don't score).
-- Score `floor(1000 × found / total) × 100 + min(bonus, 99)` on `casual-N`. There's no leaderboard; instead "62% of 40 players found every word without reveals" and how your friends did.
+- Score `floor(1000 × found / total) × 100 + min(bonus, 99)` on `casual-N`. Under the board: "62% of 40 players found every word without reveals", your place ("You're ahead of 70% of players"), and the top 10 with you among them at your live score (or below them at your place). *See the full leaderboard* opens Everyone (top 100) and Friends (`showCasualLeaderboard()` in `src/leaderboard.ts`). It refreshes after each score sent and every minute while on screen.
 
 It's a Boggle-style game, but "Boggle" is a Hasbro trademark: never use the name in the title, store listing or keywords. The letter weights are our own, not a copy of any dice set.
 

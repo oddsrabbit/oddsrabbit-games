@@ -31,7 +31,8 @@ import { pointsFor } from './sprint-rules';
 import { fillLengthRow, lengthCounts, lengthRow, lengthTable } from './lengths';
 import { openShareSheet } from './share';
 import { createTracer, type Tracer } from './tracer';
-import type { FriendScore } from '@oddsrabbit/apps-sdk';
+import type { TopScoreEntry } from '@oddsrabbit/apps-sdk';
+import { showCasualLeaderboard } from './leaderboard';
 import { button, el, formatPuzzleDate, haptic, OR, readJson, resetTimeLine, SHARE_URL, showToast, writeJson } from './ui';
 
 /** Quiet time after the last find before the score goes to the server. */
@@ -533,21 +534,26 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
   // ---------- Company ----------
 
   const SOCIAL_POLL_MS = 60_000;
-  let company: { dist: Array<{ score: number; count: number }> | null; friends: FriendScore[] } | null = null;
+  /** Players shown under the board; the rest are a tap away in the full leaderboard. */
+  const TOP_SHOWN = 10;
+  let company: { dist: Array<{ score: number; count: number }> | null; top: TopScoreEntry[] } | null = null;
   let socialTimer: number | undefined;
 
   /**
-   * Fetch the counts and friends' scores, then keep them fresh: again after
+   * Fetch the counts and the top scores, then keep them fresh: again after
    * each score submitted, and every minute while this board is on screen.
    */
   async function loadSocial(): Promise<void> {
     const or = OR();
     const key = casualRoundKey(index);
-    const [dist, friends] = await Promise.all([
+    const [dist, top] = await Promise.all([
       or.capabilities.has('scores.distribution') ? or.scores.distribution({ roundKey: key }).catch(() => null) : Promise.resolve(null),
-      or.user ? or.scores.friends({ roundKey: key }).catch(() => company?.friends ?? []) : Promise.resolve([]),
+      // One spare, in case the viewer is among them: they're shown at their live score instead.
+      or.capabilities.has('scores.top')
+        ? or.scores.top({ roundKey: key, order: 'top', limit: TOP_SHOWN + 1 }).catch(() => company?.top ?? [])
+        : Promise.resolve([]),
     ]);
-    company = { dist: dist ?? company?.dist ?? null, friends };
+    company = { dist: dist ?? company?.dist ?? null, top };
     renderSocial();
     window.clearTimeout(socialTimer);
     const tick = (): void => {
@@ -560,7 +566,38 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     socialTimer = window.setTimeout(tick, SOCIAL_POLL_MS);
   }
 
-  /** "62% of 40 players found every word", then you and your friends by score. Yours is live, from this device. */
+  /**
+   * Where your live score sits among everyone else's, with no names: "You're
+   * ahead of 70% of players". Your own row, once sent, is in the counts at
+   * the score last submitted, so it's taken out before comparing.
+   */
+  function placeLine(dist: ReadonlyArray<{ score: number; count: number }>): string | null {
+    const mine = scoreOf(content, progress);
+    if (mine === 0) return null;
+    let others = 0;
+    let below = 0;
+    let clearedOthers = 0;
+    let selfLeft = progress.submitted > 0 ? 1 : 0;
+    for (const e of dist) {
+      let n = e.count;
+      if (selfLeft > 0 && e.score === progress.submitted) {
+        n -= 1;
+        selfLeft = 0;
+      }
+      others += n;
+      if (e.score < mine) below += n;
+      if (e.score >= ALL_FOUND) clearedOthers += n;
+    }
+    if (others === 0) return null;
+    if (mine >= ALL_FOUND) {
+      const n = clearedOthers + 1;
+      return n === 1 ? "You're the first to find every word without reveals." : `You're one of ${n} who found every word without reveals.`;
+    }
+    const pct = Math.floor((100 * below) / others);
+    return pct === 0 ? null : `You're ahead of ${pct}% of players.`;
+  }
+
+  /** "62% of 40 players found every word", your place, then the top players. Your score is live, from this device. */
   function renderSocial(): void {
     if (!playing) return;
     const or = OR();
@@ -579,26 +616,47 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
             : `${Math.round((100 * cleared) / total)}% of ${total} ${total === 1 ? 'player' : 'players'} found every word without reveals.`
         )
       );
+      const place = placeLine(dist);
+      if (place) ui.social.appendChild(el('p', 'social-line social-place', place));
     }
     const me = or.user;
-    const rows = (company?.friends ?? [])
-      .filter((f) => !f.isSelf && f.uuid !== me?.uuid)
-      .map((f) => ({ name: `@${f.username}`, score: f.score, self: false }));
-    rows.push({ name: me ? `@${me.username} (you)` : 'You', score: scoreOf(content, progress), self: true });
-    rows.sort((a, b) => b.score - a.score || Number(b.self) - Number(a.self));
-    const list = el('ul', 'social-friends');
-    for (const r of rows.slice(0, 9)) {
+    const mine = scoreOf(content, progress);
+    // Everyone else's best from the server; yours live from this device.
+    const rows = (company?.top ?? [])
+      .filter((r) => r.uuid !== me?.uuid)
+      .map((r) => ({ name: `@${r.username}`, score: r.score, self: false }));
+    const you = { name: me ? `@${me.username} (you)` : 'You', score: mine, self: true };
+    const ranked = me && mine > 0;
+    if (ranked) rows.push(you);
+    rows.sort((x, y) => y.score - x.score || Number(y.self) - Number(x.self));
+    const shown = rows.slice(0, TOP_SHOWN);
+
+    const list = el('ol', 'social-friends social-board');
+    const placeOf = (score: number): number => 1 + rows.filter((r) => r.score > score).length;
+    const row = (r: { name: string; score: number; self: boolean }, place: string): HTMLElement => {
       const li = el('li', r.self ? 'me' : '');
-      li.append(el('span', 'social-name', r.name), el('span', 'social-score', scoreLabel(r.score)));
-      list.appendChild(li);
+      li.append(el('span', 'social-rank', place), el('span', 'social-name', r.name), el('span', 'social-score', scoreLabel(r.score)));
+      return li;
+    };
+    for (const r of shown) list.appendChild(row(r, String(placeOf(r.score))));
+    if (ranked && !shown.includes(you)) {
+      // Below the top: your place among everyone, from the counts when they've loaded.
+      const above = company?.dist
+        ? company.dist.reduce((n, e) => n + (e.score > mine ? e.count : 0), 0)
+        : null;
+      list.appendChild(el('li', 'gap', '⋯'));
+      list.appendChild(row(you, above === null ? '–' : String(above + 1)));
     }
-    ui.social.appendChild(list);
+    if (shown.length > 0 || ranked) ui.social.appendChild(list);
+    if (company && rows.length > 0) {
+      ui.social.appendChild(
+        button('link-btn social-more', 'See the full leaderboard →', () => showCasualLeaderboard(index, opts.today ? index : index + 1))
+      );
+    }
     if (!me) {
       ui.social.appendChild(
-        button('secondary-btn small', 'Sign in to see your friends', () => void or.actions.requestSignIn('See how your friends did'))
+        button('secondary-btn small', 'Sign in to get on the board', () => void or.actions.requestSignIn('Get on the casual board'))
       );
-    } else if (rows.length === 1) {
-      ui.social.appendChild(el('p', 'social-line muted', 'None of the people you follow have played it yet.'));
     }
   }
 
