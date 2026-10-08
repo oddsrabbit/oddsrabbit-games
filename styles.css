@@ -1,96 +1,39 @@
 :root {
-  color-scheme: light;
-  /* OddsRabbit's light theme (oddsrabbit-app src/design/tokens.ts lightColors,
-     which matches the web): near-white, white cards, neutral greys. */
-  --bg: #fcfcfc;
-  --surface: #ffffff;
-  --fg: #333333;
-  --muted: #666666;
-  --border: #e5e7eb;
-  --tile: #ffffff;
-  --tile-edge: #e2e2e2;
-  --tile-shadow: #d0d0d0;
-  --accent: #28a745;
-  --accent-text: #fff;
-  --bonus: #d97706;
-  --star: #ff8d00;
-  --bad: #da0000;
-  --trail: rgba(51, 51, 51, 0.4);
-  --trace-on: #dbe7f5;
-  --trace-edge: #a9c3e3;
-  --found: #2f9e44;
-  --paw: rgba(51, 51, 51, 0.45);
-  /* The shared leaderboard component reads --lb-*. Aliases, so the dark
-     blocks only redefine the sources. */
-  --lb-text: var(--fg);
-  --lb-muted: var(--muted);
-  --lb-border: var(--border);
-  --lb-accent: var(--accent);
-  --lb-accent-text: var(--accent-text);
-  --lb-surface: var(--surface);
-  --lb-you-bg: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-:root[data-color-scheme='dark'] {
   color-scheme: dark;
-  /* OddsRabbit's dark theme (oddsrabbit-app src/design/tokens.ts darkColors,
-     which matches the web): neutral greys, not a game-specific tint. */
-  --bg: #121212;
-  --surface: #1a1a1a;
-  --fg: #dee2e6;
-  --muted: #adb5bd;
-  --border: #374151;
-  --tile: #252525;
-  --tile-edge: #3a3a3c;
-  --tile-shadow: #000;
+  /* One theme for every host colour scheme: a night-blue board taken from the
+     store icon, with green for found words and gold for tracing. */
+  --bg: #0d1626;
+  --surface: #15223a;
+  --fg: #e6edf7;
+  --muted: #94a6bf;
+  --border: #263a5c;
+  --tile: #1d2f4f;
+  --tile-edge: #2d4672;
+  --tile-shadow: #070d18;
   --accent: #34d399;
   --accent-text: #06261a;
   --bonus: #fbbf24;
   --star: #ff8d00;
   --bad: #f87171;
   --trail: rgba(0, 0, 0, 0.45);
-  --trace-on: #4b5563;
-  --trace-edge: #6b7280;
+  --trace-on: #2f5f9e;
+  --trace-edge: #60a5fa;
   --found: #2f9e44;
-  --brand-blue: #60a5fa;
-  --paw: rgba(222, 226, 230, 0.5);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-color-scheme]) {
-    color-scheme: dark;
-    /* OddsRabbit's dark theme (oddsrabbit-app src/design/tokens.ts darkColors,
-       which matches the web): neutral greys, not a game-specific tint. */
-    --bg: #121212;
-    --surface: #1a1a1a;
-    --fg: #dee2e6;
-    --muted: #adb5bd;
-    --border: #374151;
-    --tile: #252525;
-    --tile-edge: #3a3a3c;
-    --tile-shadow: #000;
-    --accent: #34d399;
-    --accent-text: #06261a;
-    --bonus: #fbbf24;
-    --star: #ff8d00;
-    --bad: #f87171;
-    --trail: rgba(0, 0, 0, 0.45);
-    --trace-on: #4b5563;
-    --trace-edge: #6b7280;
-    --found: #2f9e44;
-    --brand-blue: #60a5fa;
-    --paw: rgba(222, 226, 230, 0.5);
-  }
+  --paw: rgba(230, 237, 247, 0.55);
+  /* The shared leaderboard component reads --lb-*. */
+  --lb-text: var(--fg);
+  --lb-muted: var(--muted);
+  --lb-border: var(--border);
+  --lb-accent: var(--accent);
+  --lb-accent-text: var(--accent-text);
+  --lb-surface: var(--surface);
+  --lb-you-bg: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 /* What the status bar sits on while a modal's scrim is up: an opaque guess at
    rgba(0,0,0,0.55) over --bg, for the app's status-bar tone. main.ts sets
    data-overlay while a modal is open. */
-:root[data-overlay] { --oddsrabbit-edge-top: #717171; }
-:root[data-color-scheme='dark'][data-overlay] { --oddsrabbit-edge-top: #080808; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-color-scheme])[data-overlay] { --oddsrabbit-edge-top: #080808; }
-}
+:root[data-overlay] { --oddsrabbit-edge-top: #060a11; }
 
 * { box-sizing: border-box; }
 
@@ -188,35 +131,6 @@ body {
   color: var(--muted);
 }
 .meta-number { color: var(--fg); font-weight: 700; }
-.meta-shape {
-  margin-left: auto;
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* Progress */
-.progress { display: flex; flex-direction: column; gap: 6px; }
-.progress-counts { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
-.progress-text { font-weight: 700; }
-.bonus-chip { color: var(--bonus); font-weight: 700; }
-.bonus-chip[hidden] { display: none; }
-.progress-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--border);
-  overflow: hidden;
-}
-.progress-fill {
-  height: 100%;
-  width: 0;
-  background: var(--accent);
-  border-radius: inherit;
-  transition: width 0.35s ease;
-}
-
 /* The word being traced, or the verdict on the last one. */
 .word-line {
   height: 34px;
@@ -344,18 +258,6 @@ body {
 .tool-btn.armed { border-color: var(--bonus); color: var(--bonus); }
 .tool-btn[hidden] { display: none; }
 
-/* Word list */
-.words { display: flex; flex-direction: column; gap: 12px; }
-.star-hint { margin: 0; color: var(--star); font-weight: 700; font-size: 14px; text-align: center; }
-.group {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
-}
-.group-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
-.group-head h3 { margin: 0; font-size: 14px; }
-.group-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   padding: 3px 9px;
@@ -449,13 +351,16 @@ body {
 .modal .primary-btn { width: 100%; margin-top: 6px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile, .progress-fill, .toast { transition: none; }
+  .tile, .toast { transition: none; }
   .tile.flash-good, .tile.flash-bonus, .tile.flash-bad { animation: none; }
 }
 
 /* ---------- Shell: day line and mode tabs ---------- */
 .day-meta { margin: 0; font-size: 14px; color: var(--muted); text-align: center; }
 .day-meta[hidden], .tabs[hidden], .pane[hidden] { display: none; }
+/* A casual board in play drops the day line too, like a Ranked run, so the
+   board and the words found fit on one screen. The tabs stay: casual has no clock. */
+#root:has(> .pane.casual-play:not([hidden])) > .day-meta { display: none; }
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -473,7 +378,7 @@ body {
   font: 700 15px/1 system-ui, sans-serif;
   cursor: pointer;
 }
-.tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
 .pane { display: flex; flex-direction: column; gap: 12px; }
 
 .eyebrow { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -733,7 +638,7 @@ body {
 /* ---------- OddsRabbit brand touches ---------- */
 :root {
   --brand-gold: #ff8d00;
-  --brand-blue: #0980e7;
+  --brand-blue: #60a5fa;
 }
 
 /* Gold for the big moments, blue for links and the selected tab. */
@@ -796,3 +701,8 @@ body {
 }
 .points-step-len { font-size: 12px; font-weight: 700; color: var(--muted); }
 .points-step-pts { font-size: 15px; font-weight: 900; color: color-mix(in srgb, var(--brand-gold) 75%, var(--fg)); }
+
+/* Casual in play: the hints take the score's place in the Ranked HUD. */
+.casual-play .sprint-hud { align-items: center; gap: 8px; }
+.casual-play .tools { flex-wrap: nowrap; }
+.casual-play .tool-btn { min-height: 34px; padding: 0 12px; font-size: 14px; white-space: nowrap; }

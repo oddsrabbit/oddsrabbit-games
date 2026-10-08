@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a9bff"/><stop offset="1" stop-color="#0565c4"/></linearGradient></defs><rect width="1024" height="1024" fill="url(#bg)"/><rect x="50" y="276" width="924" height="484" rx="58" fill="#fbbf24" opacity="0.28"/>
+        <rect x="50" y="276" width="924" height="484" rx="58" fill="none" stroke="#fbbf24" stroke-width="14"/><g font-family="system-ui, -apple-system, 'Segoe UI', Arial, sans-serif" font-weight="800" text-anchor="middle"><g opacity="0.3">
+    <rect x="72" y="84" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="72" y="72" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="173" y="219.2" font-size="132" fill="#9aa7b6" >B</text></g><g opacity="0.3">
+    <rect x="298" y="84" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="298" y="72" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="399" y="219.2" font-size="132" fill="#9aa7b6" >E</text></g><g opacity="0.3">
+    <rect x="524" y="84" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="524" y="72" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="625" y="219.2" font-size="132" fill="#9aa7b6" >L</text></g><g opacity="0.3">
+    <rect x="750" y="84" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="750" y="72" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="851" y="219.2" font-size="132" fill="#9aa7b6" >A</text></g><g opacity="1">
+    <rect x="72" y="310" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="72" y="298" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="173" y="445.2" font-size="132" fill="#0a3d73" >W</text></g><g opacity="1">
+    <rect x="298" y="310" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="298" y="298" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="399" y="445.2" font-size="132" fill="#0a3d73" >O</text></g><g opacity="1">
+    <rect x="524" y="310" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="524" y="298" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="625" y="445.2" font-size="132" fill="#0a3d73" >R</text></g><g opacity="1">
+    <rect x="750" y="310" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="750" y="298" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="851" y="445.2" font-size="132" fill="#0a3d73" >D</text></g><g opacity="1">
+    <rect x="72" y="536" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="72" y="524" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="173" y="671.2" font-size="132" fill="#0a3d73" >R</text></g><g opacity="1">
+    <rect x="298" y="536" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="298" y="524" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="399" y="671.2" font-size="132" fill="#0a3d73" >U</text></g><g opacity="1">
+    <rect x="524" y="536" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="524" y="524" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="625" y="671.2" font-size="132" fill="#0a3d73" >S</text></g><g opacity="1">
+    <rect x="750" y="536" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="750" y="524" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="851" y="671.2" font-size="132" fill="#0a3d73" >H</text></g><g opacity="0.3">
+    <rect x="72" y="762" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="72" y="750" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="173" y="897.2" font-size="132" fill="#9aa7b6" >M</text></g><g opacity="0.3">
+    <rect x="298" y="762" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="298" y="750" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="399" y="897.2" font-size="132" fill="#9aa7b6" >I</text></g><g opacity="0.3">
+    <rect x="524" y="762" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="524" y="750" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="625" y="897.2" font-size="132" fill="#9aa7b6" >T</text></g><g opacity="0.3">
+    <rect x="750" y="762" width="202" height="202" rx="36" fill="#c9d6e6"/>
+    <rect x="750" y="750" width="202" height="202" rx="36" fill="#ffffff" />
+    <text x="851" y="897.2" font-size="132" fill="#9aa7b6" >E</text></g></g></svg>

@@ -81,6 +81,7 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
   async function showArchive(): Promise<void> {
     live?.flush();
     live = null;
+    pane.classList.remove('casual-play');
     pane.innerHTML = '';
     const head = el('div', 'meta');
     head.append(el('span', 'meta-number', 'Past casual boards'), button('secondary-btn small', 'Back to today', () => void openToday()));
@@ -142,16 +143,15 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
   const save = (): Promise<void> => writeJson(storageKey(index), progress);
 
   const ui = {
-    progressText: el('span', 'progress-text'),
-    progressFill: el('div', 'progress-fill'),
-    bonusChip: el('span', 'bonus-chip'),
+    count: el('div', 'sprint-clock casual-count'),
+    progressFill: el('div', 'timer-fill'),
     startsBtn: button('tool-btn', '', () => {
       showStarts = !showStarts;
       refresh();
     }),
-    revealBtn: button('tool-btn', 'Reveal a word', () => onReveal()),
+    revealBtn: button('tool-btn', 'Reveal', () => onReveal()),
     done: el('section', 'done'),
-    words: el('section', 'words'),
+    found: el('div', 'chips sprint-found'),
     social: el('section', 'social'),
   };
 
@@ -170,11 +170,15 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
   // ---------- Layout ----------
 
   let playing = false;
+  /** The latest find or reveal, shown first in the found strip. */
+  let latest: string | null = null;
+  /** Animate the latest chip only on the refresh right after it lands. */
+  let landed = false;
   const lengths = lengthRow();
-  const title = opts.today ? "Today's casual board" : `Casual #${index + 1} · ${formatPuzzleDate(index)}`;
 
   /** The start card, until Start is pressed: same shape as Ranked's. */
   function renderReady(): void {
+    root.classList.remove('casual-play');
     root.innerHTML = '';
     const card = el('section', 'sprint-card');
     card.append(
@@ -202,21 +206,21 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
       : button('link-btn', '← More past boards', opts.onPast);
   }
 
+  /** Laid out like a Ranked run: count and progress bar, words left by length, the board, then the words found. */
   function renderPlay(): void {
     playing = true;
+    root.classList.add('casual-play');
     root.innerHTML = '';
-    const meta = el('div', 'meta');
-    meta.append(el('span', 'meta-number', title), el('span', 'meta-shape', SHAPES[content.shape].name));
-    if (opts.onToday) meta.appendChild(button('secondary-btn small', 'Today', opts.onToday));
-    const progressRow = el('div', 'progress');
-    const bar = el('div', 'progress-bar');
-    bar.appendChild(ui.progressFill);
-    const counts = el('div', 'progress-counts');
-    counts.append(ui.progressText, ui.bonusChip);
-    progressRow.append(counts, bar);
+    // The hints sit where Ranked shows its score, so the words found stay on screen.
+    const hud = el('div', 'sprint-hud');
     const tools = el('div', 'tools');
     tools.append(ui.startsBtn, ui.revealBtn);
-    root.append(meta, progressRow, lengths.caption, lengths.row, tracer.wordLine, tracer.grid, tools, ui.done, ui.words, ui.social, navLinks());
+    hud.append(ui.count, tools);
+    const bar = el('div', 'timer-bar');
+    bar.appendChild(ui.progressFill);
+    root.append(hud, bar, lengths.caption, lengths.row, tracer.wordLine, tracer.grid, ui.found, ui.done, ui.social);
+    if (opts.onToday) root.appendChild(button('link-btn', '← Back to today’s board', opts.onToday));
+    root.appendChild(navLinks());
     if (opts.today) root.appendChild(resetTimeLine());
     refresh();
     void loadSocial();
@@ -225,19 +229,23 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
   function refresh(): void {
     const total = content.words.length;
     const have = listed(progress);
-    ui.progressText.textContent = `${have} of ${total} words`;
+    ui.count.textContent = `${have}/${total}`;
     ui.progressFill.style.width = `${(have / total) * 100}%`;
-    ui.bonusChip.textContent = progress.bonus.length > 0 ? `+${progress.bonus.length} bonus` : '';
-    ui.bonusChip.hidden = progress.bonus.length === 0;
+    const starDone = progress.found.includes(content.star) || progress.revealed.includes(content.star);
+    lengths.caption.textContent = [
+      opts.today ? 'Words left' : `Board #${index + 1}`,
+      starDone ? '★ found' : `★ ${content.star.length} letters`,
+      ...(progress.bonus.length > 0 ? [`+${progress.bonus.length} bonus`] : []),
+    ].join(' · ');
     fillLengthRow(lengths.row, content.words, [...progress.found, ...progress.revealed]);
     const cleared = isCleared(content, progress);
-    ui.startsBtn.textContent = showStarts ? 'Hide word starts' : 'Show word starts';
+    ui.startsBtn.textContent = showStarts ? 'Hide starts' : 'Word starts';
     ui.startsBtn.setAttribute('aria-pressed', String(showStarts));
     ui.startsBtn.hidden = cleared;
     ui.revealBtn.hidden = cleared;
-    if (!revealArmed) ui.revealBtn.textContent = 'Reveal a word';
+    if (!revealArmed) ui.revealBtn.textContent = 'Reveal';
     renderStarts();
-    renderWords();
+    renderFound();
     renderDone();
   }
 
@@ -263,6 +271,8 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
         return;
       case 'bonus':
         applyWord(progress, result);
+        latest = result.word;
+        landed = true;
         tracer.flashLine(`${result.word} · bonus word!`, 'bonus');
         tracer.flashTiles(traced, 'bonus');
         floatScore(tracer.grid, traced[traced.length - 1]!, board.cols, board.rows, 'bonus', 'bonus');
@@ -273,6 +283,8 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
       case 'found': {
         const before = listed(progress);
         applyWord(progress, result);
+        latest = result.word;
+        landed = true;
         tracer.flashLine(result.star ? `★ ${result.word} · star word!` : result.word, result.star ? 'star' : 'good');
         tracer.flashTiles(traced, 'good');
         floatScore(tracer.grid, traced[traced.length - 1]!, board.cols, board.rows, result.star ? '★' : '✓', result.star ? 'star' : 'good');
@@ -340,46 +352,21 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     }
   }
 
-  /** Group the required words by length, found ones shown, the rest counted. */
-  function renderWords(): void {
-    ui.words.innerHTML = '';
-    const found = new Set(progress.found);
+  /** Every word found, revealed or bonus, the latest first, as in a Ranked run. */
+  function renderFound(): void {
+    ui.found.innerHTML = '';
     const revealed = new Set(progress.revealed);
-    const cleared = isCleared(content, progress);
-    const lengths = [...new Set(content.words.map((w) => w.length))].sort((a, b) => a - b);
-
-    for (const len of lengths) {
-      const all = content.words.filter((w) => w.length === len);
-      const shown = all.filter((w) => found.has(w) || revealed.has(w));
-      const group = el('div', 'group');
-      const head = el('div', 'group-head');
-      head.append(el('h3', '', `${len} letters`), el('span', 'group-count', `${shown.length}/${all.length}`));
-      const chips = el('div', 'chips');
-      for (const w of shown.sort()) {
-        const chip = el('span', revealed.has(w) ? 'chip revealed' : 'chip', w === content.star ? `★ ${w}` : w);
-        if (w === content.star) chip.classList.add('star');
-        chips.appendChild(chip);
-      }
-      const left = all.length - shown.length;
-      if (left > 0) chips.appendChild(el('span', 'chip left', `${left} to find`));
-      group.append(head, chips);
-      ui.words.appendChild(group);
-    }
-
-    // The star word's length is the one clue the list gives away.
-    if (!found.has(content.star) && !revealed.has(content.star) && !cleared) {
-      ui.words.prepend(el('p', 'star-hint', `★ The star word has ${content.star.length} letters.`));
-    }
-
-    if (progress.bonus.length > 0) {
-      const group = el('div', 'group bonus-group');
-      const head = el('div', 'group-head');
-      head.append(el('h3', '', 'Bonus words'), el('span', 'group-count', String(progress.bonus.length)));
-      const chips = el('div', 'chips');
-      for (const w of progress.bonus.slice().sort()) chips.appendChild(el('span', 'chip bonus', w));
-      group.append(head, chips);
-      ui.words.appendChild(group);
-    }
+    const bonus = new Set(progress.bonus);
+    const all = [...progress.found, ...progress.revealed, ...progress.bonus].reverse();
+    const order = latest && all.includes(latest) ? [latest, ...all.filter((w) => w !== latest)] : all;
+    order.forEach((w, i) => {
+      const cls = bonus.has(w) ? 'chip bonus' : revealed.has(w) ? 'chip revealed' : w === content.star ? 'chip star' : 'chip';
+      const chip = el('span', cls, w === content.star ? `★ ${w}` : w);
+      if (i === 0 && w === latest && landed) chip.classList.add('new');
+      ui.found.appendChild(chip);
+    });
+    landed = false;
+    ui.found.hidden = order.length === 0;
   }
 
   // ---------- Hints ----------
@@ -405,7 +392,8 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
   function onReveal(): void {
     if (!revealArmed) {
       revealArmed = true;
-      ui.revealBtn.textContent = "Tap again · won't score";
+      ui.revealBtn.textContent = 'Tap again';
+      tracer.flashLine("Tap again to reveal · it won't score", 'info');
       ui.revealBtn.classList.add('armed');
       revealTimer = window.setTimeout(disarm, 3000);
       return;
@@ -415,6 +403,8 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     if (!word) return;
     const before = listed(progress);
     progress.revealed.push(word);
+    latest = word;
+    landed = true;
     const route = findPath(board, word);
     if (route) tracer.flashTiles(route, 'bonus');
     tracer.flashLine(`Revealed: ${word}`, 'info');
@@ -425,7 +415,7 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     window.clearTimeout(revealTimer);
     revealArmed = false;
     ui.revealBtn.classList.remove('armed');
-    ui.revealBtn.textContent = 'Reveal a word';
+    ui.revealBtn.textContent = 'Reveal';
   }
 
   // ---------- Cleared ----------
