@@ -62,7 +62,13 @@
   // work if a host ever answers pages that never shorten.
   var INVITABLE_MAX_PAGES = 20;
   // Below this many people a search field is just another thing on screen.
+  // (Ignored on a host with matches.searchPlayers, where search reaches
+  // everyone and so is always worth showing.)
   var SEARCH_THRESHOLD = 8;
+  // The server answers searchPlayers from 2 characters; typing pauses this
+  // long before asking.
+  var SEARCH_MIN = 2;
+  var SEARCH_DELAY_MS = 250;
 
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
@@ -132,6 +138,11 @@
     waitingTitle: $(".waiting-title"),
     lobbyBack: $(".lobby-back"),
     lobbyClose: $(".lobby-close"),
+    inviteNote: $(".invite-note"),
+    challengeActions: $(".challenge-actions"),
+    acceptButton: $(".accept-button"),
+    declineButton: $(".decline-button"),
+    shareCard: $(".lobby-panel .share-card"),
     shareCodeButton: $(".share-code-button"),
     boardWrap: $(".board-wrap"),
     boardCanvas: $(".board-canvas"),
@@ -199,6 +210,11 @@
     inviteQuery: "",
     inviteCapped: false,
     inviteRun: 0,
+    // matches.searchPlayers: rows for `searchFor`, and the pending timer.
+    searchResults: [],
+    searchFor: "",
+    searchTimer: null,
+    searchRun: 0,
     invitees: {},
     open: false,
     seats: 2,
@@ -351,6 +367,30 @@
 
   function opponentsOf(view) {
     return view.players.filter(function (p) { return !p.isSelf; });
+  }
+
+  // A challenge waiting on this viewer: their seat is held as 'invited' until
+  // they accept (matches.join) or decline (matches.resign). `mySeatStatus`
+  // where the host sends it, the player row otherwise.
+  function isChallenge(view) {
+    if (!view || view.status !== "lobby") return false;
+    if (view.mySeatStatus) return view.mySeatStatus === "invited";
+    var me = meIn(view);
+    return !!me && me.status === "invited";
+  }
+
+  function hostOf(view) {
+    return view.players.filter(function (p) { return p.seat === 0; })[0] || null;
+  }
+
+  // Seats still to fill or to accept: an invited seat is held, not taken.
+  function seatsMissing(view) {
+    var joined = view.players.filter(function (p) { return p.status === "joined"; }).length;
+    return Math.max(0, view.maxPlayers - joined);
+  }
+
+  function invitedOthers(view) {
+    return view.players.filter(function (p) { return !p.isSelf && p.status === "invited"; });
   }
 
   // Resigned or timed out of a table that plays on without them (3–4 seats).
@@ -658,9 +698,10 @@
     rows = rows.slice().sort(byNewest);
     var mine = rows.filter(function (m) { return m.status === "active" && !isOut(m) && m.isMyTurn; });
     var groups = [
+      { title: "Challenges", rows: rows.filter(isChallenge), challenges: true },
       { title: "Also your move", rows: mine.slice(1) },
       { title: "Their move", rows: rows.filter(function (m) { return m.status === "active" && !isOut(m) && !m.isMyTurn; }) },
-      { title: "Waiting for players", rows: rows.filter(function (m) { return m.status === "lobby"; }) },
+      { title: "Waiting for players", rows: rows.filter(function (m) { return m.status === "lobby" && !isChallenge(m); }) },
       { title: "Finished", rows: rows.filter(isDone), results: true }
     ];
 
@@ -687,7 +728,7 @@
       var title = group.title === "Also your move" && !mine.length ? "Your move" : group.title;
       els.listBody.appendChild(el("h2", "group-title", title));
       group.rows.forEach(function (m) {
-        els.listBody.appendChild(group.results ? renderResult(m) : renderRow(m));
+        els.listBody.appendChild(group.results ? renderResult(m) : group.challenges ? renderChallenge(m) : renderRow(m));
       });
     });
     els.listBody.scrollTop = scroll;
@@ -792,8 +833,11 @@
       detail.textContent = "Looking for an opponent…";
       status = "We’ll let you know when someone sits down";
     } else if (m.status === "lobby") {
-      detail.textContent = m.players.length + " of " + m.maxPlayers + " seated";
-      status = "Open it to share the join code";
+      var asked = invitedOthers(m);
+      detail.textContent = (m.maxPlayers - seatsMissing(m)) + " of " + m.maxPlayers + " in";
+      status = asked.length
+        ? "Waiting for " + asked.map(function (p) { return "@" + p.username; }).join(", ") + " to accept"
+        : "Open it to share the join code";
     } else {
       detail.appendChild(document.createTextNode(scoreText(m)));
       var chip = leadChip(leadOf(m));
@@ -844,6 +888,69 @@
       row.appendChild(nudgeBtn);
     }
     return row;
+  }
+
+  // A challenge row: who asked, and the two answers right on the row.
+  function renderChallenge(m) {
+    var host = hostOf(m);
+    var row = el("div", "match-row is-challenge");
+    var open = el("button", "match-open");
+    open.type = "button";
+    open.appendChild(faces(m));
+    var text = el("span", "match-text");
+    var nameLine = el("span", "match-names", (host ? "@" + host.username : "Someone") + " challenged you");
+    if (isWild(m)) nameLine.appendChild(el("span", "tag-wild", "Wild"));
+    text.appendChild(nameLine);
+    var others = opponentsOf(m).filter(function (p) { return p.seat !== 0; });
+    text.appendChild(el("span", "match-detail", m.maxPlayers + " players"
+      + (others.length ? " · with " + others.map(function (p) { return "@" + p.username; }).join(", ") : "")));
+    open.appendChild(text);
+    var side = el("span", "match-side");
+    var when = ago(m.updatedAt);
+    if (when) side.appendChild(el("span", "match-when", when));
+    open.appendChild(side);
+    open.setAttribute("aria-label", nameLine.textContent + (when ? ". " + ago(m.updatedAt, true) : ""));
+    open.addEventListener("click", function () { openFromList(open, m.matchUuid); });
+    row.appendChild(open);
+
+    var actions = el("span", "row-actions");
+    var accept = el("button", "row-accept primary", "Accept");
+    accept.type = "button";
+    accept.addEventListener("click", function () { acceptChallenge(m, accept); });
+    var decline = el("button", "row-decline subtle", "Decline");
+    decline.type = "button";
+    decline.addEventListener("click", function () { declineChallenge(m); });
+    actions.appendChild(accept);
+    actions.appendChild(decline);
+    row.appendChild(actions);
+    return row;
+  }
+
+  function acceptChallenge(m, button) {
+    if (button) button.disabled = true;
+    OR.matches.join({ matchUuid: m.matchUuid }).then(function (view) {
+      haptic("success");
+      if (view.status === "active") toast("Game on — " + (view.isMyTurn ? "you go first!" : "they go first."));
+      enterMatch(view);
+    }).catch(function (err) {
+      if (button) button.disabled = false;
+      toast(errorText(err, "Couldn't accept the challenge."), true);
+      loadList(true);
+    });
+  }
+
+  function declineChallenge(m) {
+    var host = hostOf(m);
+    confirmDialog({
+      title: "Decline this challenge?",
+      text: (host ? "@" + host.username : "They") + " won’t get a notification; the game just closes. To stop challenges from people you don’t follow, turn on “Only People I Follow Can Challenge Me” in your OddsRabbit settings.",
+      confirmLabel: "Decline"
+    }, function () {
+      OR.matches.resign({ matchUuid: m.matchUuid }).then(function () {
+        if (state.screen === "match") showScreen("list");
+        loadList();
+      }).catch(function (err) { toast(errorText(err, "Couldn't decline."), true); });
+    });
   }
 
   // Finished games are history, not things to do: one thin line each.
@@ -1074,7 +1181,11 @@
     state.inviteQuery = "";
     state.inviteCapped = false;
     els.inviteInput.value = "";
-    els.inviteSearch.hidden = true;
+    els.inviteSearch.hidden = !canSearch();
+    resetSearch();
+    els.inviteNote.textContent = canSearch()
+      ? "Search for anyone on OddsRabbit. They get a challenge to accept or decline."
+      : "People you follow, or who follow you. For anyone else, add a seat for a link.";
     els.createStatus.textContent = "";
     renderSeats();
     showScreen("new");
@@ -1144,14 +1255,57 @@
     });
   }
 
+  function canSearch() {
+    return OR.capabilities.has("matches.searchPlayers");
+  }
+
+  function resetSearch() {
+    if (state.searchTimer) { clearTimeout(state.searchTimer); state.searchTimer = null; }
+    state.searchRun++;
+    state.searchResults = [];
+    state.searchFor = "";
+  }
+
+  // Ask the server for everyone matching, a beat after typing stops. The
+  // follow list is filtered locally in the meantime, so names you know show
+  // at once and the rest of the platform fills in under them.
+  function searchSoon() {
+    if (!canSearch()) return;
+    var query = state.inviteQuery.trim();
+    if (state.searchTimer) clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+    if (query.length < SEARCH_MIN) {
+      state.searchRun++;
+      state.searchResults = [];
+      state.searchFor = "";
+      return;
+    }
+    state.searchTimer = setTimeout(function () {
+      state.searchTimer = null;
+      var run = ++state.searchRun;
+      OR.matches.searchPlayers({ query: query, limit: 20 }).then(function (rows) {
+        if (run !== state.searchRun) return;
+        state.searchResults = rows;
+        state.searchFor = query;
+        renderInvitable();
+      }).catch(function () {
+        if (run !== state.searchRun) return;
+        state.searchResults = [];
+        state.searchFor = query;
+        renderInvitable();
+      });
+    }, SEARCH_DELAY_MS);
+  }
+
   // `relation` is the viewer's side of the follow edge. Only two of the three
   // are worth a badge: that someone follows you is the non-obvious half.
-  var RELATION_LABEL = { mutual: "mutual", follower: "follows you" };
+  // ('none' only comes from search: someone you have no follow with.)
+  var RELATION_LABEL = { mutual: "mutual", follower: "follows you", none: "not following" };
 
   // Mutuals first, then people who follow you, then people you follow;
   // alphabetical inside each. The server treats all three the same — this is
   // only about which name a player is most likely to be hunting for.
-  var RELATION_RANK = { mutual: 0, follower: 1, following: 2 };
+  var RELATION_RANK = { mutual: 0, follower: 1, following: 2, none: 3 };
   function byRelationThenName(a, b) {
     var ra = RELATION_RANK[a.relation], rb = RELATION_RANK[b.relation];
     if (ra !== rb) return (ra === undefined ? 9 : ra) - (rb === undefined ? 9 : rb);
@@ -1193,14 +1347,24 @@
     clear(els.invitableList);
     var total = state.invitable.length;
     var query = state.inviteQuery.trim().toLowerCase();
-    els.inviteSearch.hidden = total <= SEARCH_THRESHOLD;
+    var searching = canSearch();
+    els.inviteSearch.hidden = !searching && total <= SEARCH_THRESHOLD;
 
     var ordered = state.invitable.slice().sort(byRelationThenName);
     var matches = function (p) { return !query || p.username.toLowerCase().indexOf(query) !== -1; };
     // Anyone already picked stays on screen whatever is typed, so a selection
-    // cannot quietly scroll out of the list mid-search.
-    var picked = ordered.filter(function (p) { return !!state.invitees[p.uuid]; });
+    // cannot quietly scroll out of the list mid-search. Read from the picks
+    // themselves: someone found by search is not in the follow list.
+    var picked = Object.keys(state.invitees).map(function (uuid) { return state.invitees[uuid]; }).sort(byRelationThenName);
     var rest = ordered.filter(function (p) { return !state.invitees[p.uuid] && matches(p); });
+    // Everyone else the server found for this query, minus anyone already
+    // listed above. Only while the results are for what is typed now.
+    var known = {};
+    ordered.forEach(function (p) { known[p.uuid] = true; });
+    var found = searching && query.length >= SEARCH_MIN && state.searchFor.toLowerCase() === query
+      ? state.searchResults.filter(function (p) { return !known[p.uuid] && !state.invitees[p.uuid]; })
+      : [];
+    var pending = searching && query.length >= SEARCH_MIN && state.searchFor.toLowerCase() !== query;
     // Counted over everyone, not just the unpicked: someone you already
     // invited still matches what you typed, and saying "0 match" with their
     // row on screen reads as a bug.
@@ -1210,6 +1374,10 @@
     picked.forEach(function (p) { els.invitableList.appendChild(inviteRow(p)); });
     if (picked.length && query && rest.length) els.invitableList.appendChild(el("div", "invite-group", "Results"));
     rest.forEach(function (p) { els.invitableList.appendChild(inviteRow(p)); });
+    if (found.length) {
+      els.invitableList.appendChild(el("div", "invite-group", "Everyone else"));
+      found.forEach(function (p) { els.invitableList.appendChild(inviteRow(p)); });
+    }
 
     els.inviteClear.hidden = !els.inviteInput.value;
 
@@ -1217,25 +1385,34 @@
     // asked for, it is a truncation rather than a count — so it must not be
     // read out as "of 200 people". Search only covers what was fetched, and
     // saying so is the difference between "they are not on here" and "they are
-    // not in the part of the list I can see".
+    // not in the part of the list I can see". (With server search, a name
+    // past the fetched part still turns up under "Everyone else".)
     var capped = state.inviteCapped;
-    els.inviteCount.textContent = !total ? ""
+    els.inviteCount.textContent = searching && query
+      ? (pending ? "Searching…" : "")
+      : !total ? ""
       : query
         ? (matchCount === 0 ? "" // the empty-state line below says this better
           : matchCount + " of " + (capped ? "the first " + total : String(total))
             + " match “" + state.inviteQuery.trim() + "”")
       : capped
         ? "Showing " + total + " — search to narrow it down"
-        : total + " " + (total === 1 ? "person" : "people") + " you can invite";
+        : total + " " + (total === 1 ? "person" : "people") + " you follow or who follow you";
 
     // The rule itself lives in the note above the list, which is always on
-    // screen; this only has to cover the two empty cases.
-    var nothing = !picked.length && !rest.length;
+    // screen; this only has to cover the empty cases.
+    var nothing = !picked.length && !rest.length && !found.length && !pending;
     els.invitableEmpty.hidden = !nothing;
     if (nothing) {
-      els.invitableEmpty.textContent = !total
-        ? "Nobody to invite yet — follow a few people, or add a seat for a link and send it to anyone."
-        : "Nobody matching that — you can only invite people you follow or who follow you. For anyone else, add a seat for a link.";
+      els.invitableEmpty.textContent = searching
+        ? (query.length >= SEARCH_MIN
+          ? "Nobody by that name is taking challenges. Check the spelling, or add a seat for a link."
+          : !total
+            ? "Search for anyone by username, or add a seat for a link and send it to anyone."
+            : "Keep typing to search everyone on OddsRabbit.")
+        : !total
+          ? "Nobody to invite yet — follow a few people, or add a seat for a link and send it to anyone."
+          : "Nobody matching that — you can only invite people you follow or who follow you. For anyone else, add a seat for a link.";
     }
     els.invitableList.scrollTop = scroll;
   }
@@ -2027,25 +2204,42 @@
     renderFinding(view);
     if (view.status !== "lobby" || view.matchmaking) { els.lobbyPanel.hidden = true; return; }
     els.lobbyPanel.hidden = false;
-    var missing = Math.max(0, view.maxPlayers - view.players.length);
-    els.waitingTitle.textContent = missing > 0
-      ? "Waiting for " + missing + " more player" + (missing > 1 ? "s" : "")
-      : "Everyone’s here — starting";
-    els.lobbyLead.textContent = missing > 0
-      ? "The game starts the moment every seat is filled. Whoever opens the link signs in (or signs up), then takes a seat."
-      : "";
-    var code = view.joinCode;
+    var challenged = isChallenge(view);
+    var missing = seatsMissing(view);
+    var empty = Math.max(0, view.maxPlayers - view.players.length);
+    var asked = invitedOthers(view);
+    var host = hostOf(view);
+    els.waitingTitle.textContent = challenged
+      ? (host ? "@" + host.username : "Someone") + " challenged you"
+      : missing === 0
+        ? "Everyone’s here — starting"
+        : asked.length && !empty
+          ? "Waiting for " + asked.map(function (p) { return "@" + p.username; }).join(", ") + " to accept"
+          : "Waiting for " + missing + " more player" + (missing > 1 ? "s" : "");
+    els.lobbyLead.textContent = challenged
+      ? "A game of " + GAME_NAME + (isWild(view) ? " (Wild)" : "") + " for " + view.maxPlayers + ". It starts once everyone has accepted."
+      : missing === 0 ? ""
+      : asked.length && !empty
+        ? "They’ve been sent your challenge. The game starts as soon as they accept."
+        : "The game starts the moment every seat is filled. Whoever opens the link signs in (or signs up), then takes a seat.";
+    var code = challenged ? null : view.joinCode;
     els.lobbyCode.textContent = code || "—";
     els.lobbyCode.parentNode.hidden = !code;
     els.shareCodeButton.hidden = !code;
     els.lobbyLink.hidden = !code;
+    if (els.shareCard) els.shareCard.hidden = !code;
     if (code) els.lobbyLinkField.value = inviteUrl(code);
+    els.challengeActions.hidden = !challenged;
+    els.acceptButton.disabled = false;
+    els.lobbyClose.hidden = challenged;
 
     clear(els.waitingSeats);
     view.players.forEach(function (p) {
-      els.waitingSeats.appendChild(waitingSeat((p.username || "?").charAt(0).toUpperCase(), nameOf(p), false));
+      var invited = p.status === "invited" && !p.isSelf;
+      els.waitingSeats.appendChild(waitingSeat((p.username || "?").charAt(0).toUpperCase(),
+        nameOf(p) + (invited ? " · invited" : ""), invited));
     });
-    for (var i = 0; i < missing; i++) els.waitingSeats.appendChild(waitingSeat("?", "Open seat", true));
+    for (var i = 0; i < empty; i++) els.waitingSeats.appendChild(waitingSeat("?", "Open seat", true));
     // The creator (seat 0) closing it ends the table; anyone else just leaves.
     var me = meIn(view);
     els.lobbyClose.textContent = me && me.seat === 0 ? "Close table" : "Leave table";
@@ -2735,9 +2929,12 @@
   }
 
   // Somebody to talk to: another seat that is (or was) actually at the table.
-  // A lobby of one, or a quick-match table still looking, has nobody.
+  // A lobby of one, or a quick-match table still looking, has nobody. Nor
+  // does a challenge this player has not accepted: the server keeps an
+  // invited seat out of the table's chat until they say yes.
   function chatAvailable(view) {
-    return !!view && canChat() && view.players.some(function (p) { return !p.isSelf && p.status !== "invited"; });
+    return !!view && canChat() && !isChallenge(view)
+      && view.players.some(function (p) { return !p.isSelf && p.status !== "invited"; });
   }
 
   function newChatState(uuid) {
@@ -3746,6 +3943,12 @@
     els.findingStop.addEventListener("click", resign);
     els.lobbyBack.addEventListener("click", backToList);
     els.lobbyClose.addEventListener("click", resign);
+    els.acceptButton.addEventListener("click", function () {
+      if (state.match) acceptChallenge(state.match, els.acceptButton);
+    });
+    els.declineButton.addEventListener("click", function () {
+      if (state.match) declineChallenge(state.match);
+    });
     els.menuButton.addEventListener("click", openMatchMenu);
     wireChat();
     els.players.addEventListener("click", showPlayers);
@@ -3756,11 +3959,13 @@
     });
     els.inviteInput.addEventListener("input", function () {
       state.inviteQuery = els.inviteInput.value;
+      searchSoon();
       renderInvitable();
     });
     els.inviteClear.addEventListener("click", function () {
       els.inviteInput.value = "";
       state.inviteQuery = "";
+      resetSearch();
       renderInvitable();
       els.inviteInput.focus();
     });
@@ -3768,6 +3973,7 @@
       if (e.key !== "Escape" || !els.inviteInput.value) return;
       els.inviteInput.value = "";
       state.inviteQuery = "";
+      resetSearch();
       renderInvitable();
       e.stopPropagation();
     });

@@ -469,6 +469,10 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--line); background: var(--card); font-size: 13px; font-weight: 600;
 }
 .row-nudge:disabled { opacity: 0.55; cursor: default; }
+/* A challenge row: the answer is on the row, so the two buttons sit under it. */
+.match-row.is-challenge { flex-wrap: wrap; border-color: color-mix(in srgb, var(--turn) 40%, var(--line)); }
+.row-actions { display: flex; gap: 8px; flex: 1 0 100%; box-sizing: border-box; padding: 0 12px 12px; }
+.row-actions button { flex: 1 1 0; padding: 10px 12px; }
 .match-status .word { font-weight: 700; letter-spacing: 0.03em; color: var(--ink); }
 .match-status .pts { font-weight: 700; color: var(--turn); }
 

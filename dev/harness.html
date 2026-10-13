@@ -46,6 +46,12 @@ const PEOPLE = [
   { uuid: '33333333-3333-4333-8333-333333333333', username: 'hopper', avatar: null, relation: 'following' },
   { uuid: '44444444-4444-4444-8444-444444444444', username: 'clover', avatar: null, relation: 'follower' },
 ];
+// Nobody you follow: only matches.searchPlayers finds them (search=0 hides it).
+const OTHERS = [
+  { uuid: '66666666-6666-4666-8666-666666666666', username: 'rabbit_racer', avatar: null, relation: 'none' },
+  { uuid: '77777777-7777-4777-8777-777777777777', username: 'radish_king', avatar: null, relation: 'none' },
+  { uuid: '88888888-8888-4888-8888-888888888888', username: 'pip_squeak', avatar: null, relation: 'none' },
+];
 const TILES = 'AAAAAAAAABBCCDDDDEEEEEEEEEEEEFFGGGHHIIIIIIIIIJKLLLLMMNNNNNNOOOOOOOOPPQRRRRRRSSSSTTTTTTUUUUVVWWXYYZ__';
 const IDLE_MS = Number(q.get('idle') || 0) * 86400e3;
 const matches = {};
@@ -93,12 +99,16 @@ function view(m) {
   const me = m.players[0];
   const rackCounts = {};
   m.players.forEach((p) => { rackCounts[String(p.seat)] = p.rack.length; });
+  // Internally the viewer is always seat 0. A challenge someone else sent
+  // (challenge=1) is shown with them at seat 0, the host's seat, and the
+  // viewer at 1; cosmetic, so only the seats the game reads are swapped.
+  const sw = (s) => (m.challenge && (s === 0 || s === 1) ? 1 - s : s);
   return {
     matchUuid: m.uuid, game: m.game, status: m.status, version: m.version, maxPlayers: m.maxPlayers,
-    players: m.players.map((p) => ({ seat: p.seat, uuid: p.uuid, username: p.username, avatar: null, status: p.status, score: p.score, isSelf: p.seat === 0 })),
-    turnSeat: m.status === 'active' ? m.turn : null, turnDeadline: null, winnerSeat: m.winner,
+    players: m.players.map((p) => ({ seat: sw(p.seat), uuid: p.uuid, username: p.username, avatar: null, status: p.status, score: p.score, isSelf: p.seat === 0 })).sort((a, b) => a.seat - b.seat),
+    turnSeat: m.status === 'active' ? sw(m.turn) : null, turnDeadline: null, winnerSeat: m.winner === null ? null : sw(m.winner),
     turnStartedAt: m.status === 'active' ? m.turnStartedAt : null,
-    mySeat: 0, isMyTurn: m.status === 'active' && m.turn === 0 && me.status === 'joined',
+    mySeat: sw(0), mySeatStatus: me.status, isMyTurn: m.status === 'active' && m.turn === 0 && me.status === 'joined',
     updatedAt: m.updatedAt, joinCode: m.joinCode,
     // What MatchService now puts on every row and view: the public recap of
     // the last move, and whether this is a quick-match table.
@@ -231,12 +241,19 @@ if (q.get('finished') === '1') {
   f.status = 'finished'; f.winner = 0; f.updatedAt = new Date(Date.now() - 9 * 86400e3).toISOString();
 }
 
+// challenge=1: @hopper has challenged you; Accept / Decline from the list.
+if (q.get('challenge') === '1') {
+  const c = newMatch([PEOPLE[1]], 'tiles', 0, 15 * 60e3);
+  c.challenge = true; c.status = 'lobby'; c.players[0].status = 'invited';
+}
+
 const frame = document.getElementById('g');
 const caps = ['storage.get', 'storage.set', 'actions.share', 'actions.haptic', 'actions.requestSignIn'];
 if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'matches.list', 'matches.get', 'matches.move', 'matches.resign', 'matches.invitable', 'matches.nudge', 'matches.claim');
 // newverbs=0: a host from before matches.check / matches.quick (today's app).
 if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.check', 'matches.quick');
 if (q.get('matches') !== '0' && q.get('chat') !== '0') caps.push('matches.chat', 'matches.chatSend');
+if (q.get('matches') !== '0' && q.get('search') !== '0') caps.push('matches.searchPlayers');
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
   send({ type: 'init', user: q.get('user') === '0' ? null : { ...ME, avatar: null, createdAt: null },
@@ -293,7 +310,42 @@ function handle(type, p) {
     }
     case 'matches.get': if (!m) throw { code: 'match/not-found', message: 'No such match.' }; return view(m);
     case 'matches.invitable': return PEOPLE;
-    case 'matches.create': return view(newMatch(PEOPLE.filter((x) => (p.invitees || []).includes(x.uuid)), p.game, p.maxPlayers, 0, p.open));
+    case 'matches.searchPlayers': {
+      const qy = String(p.query || '').trim().toLowerCase();
+      return [...PEOPLE, ...OTHERS].filter((x) => x.username.toLowerCase().startsWith(qy)).slice(0, p.limit || 20);
+    }
+    case 'matches.create': {
+      const asked = [...PEOPLE, ...OTHERS].filter((x) => (p.invitees || []).includes(x.uuid));
+      // limit=1: the stranger-invite cap is already full.
+      if (q.get('limit') === '1' && asked.some((x) => x.relation === 'none')) {
+        throw { code: 'match/invite-limit', message: 'You have 10 challenges waiting on people you don’t follow. Try again once some are accepted or declined.' };
+      }
+      const made = newMatch(asked, p.game, p.maxPlayers, 0, p.open);
+      // Invitees hold 'invited' seats until they accept; here everyone does
+      // after acceptms (default 4s). accept=0 leaves them pending.
+      if (asked.length) {
+        made.status = 'lobby';
+        made.players.slice(1).forEach((x) => { x.status = 'invited'; });
+        if (q.get('accept') !== '0') {
+          setTimeout(() => {
+            made.players.forEach((x) => { if (x.status === 'invited') x.status = 'joined'; });
+            if (made.players.length === made.maxPlayers) { made.status = 'active'; made.turn = 0; made.turnStartedAt = turnStart(); }
+            made.version++; made.updatedAt = new Date().toISOString();
+          }, Number(q.get('acceptms') || 4000));
+        }
+      }
+      return view(made);
+    }
+    case 'matches.join': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      if (m.status === 'lobby' && m.players[0].status === 'invited') {
+        m.players[0].status = 'joined';
+        m.status = 'active'; m.turn = Math.random() < 0.5 ? 0 : 1; m.turnStartedAt = turnStart();
+        m.version++; m.updatedAt = new Date().toISOString();
+        opponentsMove(m);
+      }
+      return view(m);
+    }
     case 'matches.move': {
       if (!m) throw { code: 'match/not-found', message: 'No such match.' };
       if (m.turn !== 0 || m.status !== 'active') throw { code: 'match/not-your-turn', message: 'Not your turn.' };
@@ -337,6 +389,7 @@ function handle(type, p) {
       return view(m);
     }
     case 'matches.resign': {
+      if (m.status === 'lobby') { m.status = 'abandoned'; m.version++; m.updatedAt = new Date().toISOString(); return view(m); }
       m.players[0].status = 'resigned'; m.version++;
       if (m.turn === 0) nextTurn(m);
       if (m.status === 'active' && m.players.filter((x) => x.status === 'joined').length < 2) m.status = 'finished';

@@ -191,13 +191,14 @@
         <p class="table-note muted small" role="status"></p>
 
         <h2 class="group-title">Invite friends</h2>
-        <!-- Always on screen: the follow rule is the server's, it is enforced,
-             and it is the answer to "why isn't X here?". -->
+        <!-- Always on screen: who can be invited, the answer to "why isn't X
+             here?". The text is set from JS: on a host with
+             matches.searchPlayers it is anyone, otherwise the follow graph. -->
         <p class="invite-note muted small">People you follow, or who follow you. For anyone else, add a seat for a link.</p>
         <div class="invite-search" hidden>
           <input class="invite-input" type="search" inputmode="search" autocomplete="off"
                  autocapitalize="off" spellcheck="false" placeholder="Search by username"
-                 aria-label="Search people you can invite" />
+                 aria-label="Search people to invite" />
           <button type="button" class="invite-clear" aria-label="Clear search" hidden>×</button>
         </div>
         <p class="invite-count muted small" role="status"></p>
@@ -295,6 +296,12 @@
           </div>
           <button type="button" class="share-code-button primary">Share invite link</button>
           <p class="lobby-code-row muted small">or give them the code <strong class="lobby-code"></strong></p>
+        </div>
+        <!-- A challenge waiting on this player: the seat is held as 'invited'
+             until they answer. Accept is matches.join, Decline matches.resign. -->
+        <div class="finding-actions challenge-actions" hidden>
+          <button type="button" class="accept-button primary">Accept</button>
+          <button type="button" class="decline-button subtle">Decline</button>
         </div>
         <div class="finding-actions">
           <button type="button" class="lobby-back subtle">Back to my games</button>
