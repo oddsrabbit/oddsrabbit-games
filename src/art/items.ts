@@ -31,6 +31,8 @@ const GRIDS: Record<string, string[]> = {
   treat: ['..kkkkk..', '.kmmmmmk.', 'kmnmmmnmk', 'kmmmnmmmk', 'kmnmmmmTk', '.kmmmnTk.', '..kkkkk..'],
   dandelion: ['.k.k.k.', 'kykykyk', '.kyYyk.', 'kykYkyk', '.kkgkk.', '...g...', '..gG...', '...G...'],
   sparkle: ['..s..', '..s..', 'sswss', '..s..', '..s..'],
+  // the sparkle with an outline and some gold, for a chip or a sheet: the bare one is a scene particle and vanishes on cream
+  shine: ['....k....', '...kyk...', '...kyk...', '.kkyyykk.', 'kyyywyyYk', '.kkyyYkk.', '...kYk...', '...kYk...', '....k....'],
   hedgehog: [
     '.......kkkkk.......', '.....kkhHhHhkk.....', '....khHhHhHhHhk....', '...khHhHhHhHhHhk...',
     '..kfkhHhHhHhHhHhk..', '.kfffkhHhHhHhHhHk..', 'kffkffkhHhHhHhHhHk.', 'kffffffkhHhHhHhHHk.',

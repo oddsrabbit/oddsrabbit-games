@@ -1611,7 +1611,7 @@ function render(): void {
       chips.push(chip);
     }
     if (thrives) {
-      const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('sparkle'), 2), 'Thriving');
+      const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('shine'), 2), 'Thriving');
       chip.addEventListener('click', () => openThriving());
       chips.push(chip);
     }
@@ -5582,7 +5582,7 @@ function sendGift(f: Friend, done: () => void): void {
 function openThriving(): void {
   const pct = (x: number) => `${Math.round((x - 1) * 100)}%`;
   openSheet((close) => [
-    h('div', { class: 'event-art' }, img(itemSprite('sparkle'), 4)),
+    h('div', { class: 'event-art' }, img(itemSprite('shine'), 4)),
     h('div', { class: 'eyebrow', text: 'Thriving' }),
     h('h2', { text: thriving(pet.needs) ? `${pet.name} is thriving` : `${pet.name} isn't thriving just now` }),
     h('p', { text: `While her food, joy and clean are all ${THRIVING.above} or more, she finds ${pct(THRIVING.odds)} more things, ${pct(THRIVING.odds)} more wild visitors drop by, and her daily gift is ${pct(THRIVING.gift)} bigger.` }),
