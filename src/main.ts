@@ -169,6 +169,7 @@ function startDay(): Promise<void> {
     const index = puzzleIndexAt(now());
     const [day, savedTab] = await Promise.all([loadDay(index), readJson<Tab>('tab', previous?.active ?? 'sprint')]);
     previous?.sprint.dispose();
+    previous?.casual?.dispose();
     current = null;
     if (!day) {
       boardBtn().hidden = true;
@@ -205,6 +206,8 @@ function startDay(): Promise<void> {
       document.body.classList.toggle('running', running);
     };
 
+    /** The casual board being built: a second tap on its tab while storage is slow waits for it rather than building another. */
+    let mountingCasual: Promise<CasualMode> | null = null;
     const d: Day = {
       index,
       active: savedTab === 'casual' ? 'casual' : 'sprint',
@@ -218,7 +221,10 @@ function startDay(): Promise<void> {
           panes[t].hidden = t !== tab;
         }
         // The casual board is built on first visit, so a Sprint-only player never pays for it.
-        if (tab === 'casual' && !d.casual) d.casual = await mountCasualPane(panes.casual, index, day.casual);
+        if (tab === 'casual' && !d.casual) {
+          mountingCasual ??= mountCasualPane(panes.casual, index, day.casual);
+          d.casual = await mountingCasual;
+        }
         window.scrollTo({ top: 0 });
       },
     };
@@ -277,7 +283,11 @@ async function bootstrap(): Promise<void> {
     current?.sprint.flush();
     current?.casual?.flush();
   });
-  const onResume = (): void => void syncClock().then(refreshIfStale);
+  const onResume = (): void => {
+    // Words found meanwhile in another tab or on another device.
+    current?.casual?.resume();
+    void syncClock().then(refreshIfStale);
+  };
   OR().lifecycle.on('resume', onResume);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) onResume();

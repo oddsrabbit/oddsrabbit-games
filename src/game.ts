@@ -3,7 +3,7 @@
 
 import { MIN_WORD } from './board';
 import type { CasualContent } from './puzzle';
-import { encodeMask, scoreFor } from './scoring';
+import { decodeMask, encodeMask, scoreFor } from './scoring';
 
 /** One day's play, stored under the `today` key. */
 export interface Progress {
@@ -47,6 +47,56 @@ export function isProgress(v: unknown): v is Progress {
     typeof p.counted.halfway === 'boolean' &&
     typeof p.counted.cleared === 'boolean'
   );
+}
+
+/**
+ * Fold another copy of the same board's play (another tab, another device, the
+ * stored copy) into `into`. Words are only ever added, so the union loses
+ * nothing either copy found; a word found in one and revealed in the other
+ * counts as found. True when `into` changed.
+ */
+export function mergeProgress(into: Progress, other: Progress): boolean {
+  const before = JSON.stringify(into);
+  const add = (list: string[], more: readonly string[]): void => {
+    for (const w of more) if (!list.includes(w)) list.push(w);
+  };
+  add(into.found, other.found);
+  add(into.bonus, other.bonus);
+  add(into.revealed, other.revealed);
+  into.revealed = into.revealed.filter((w) => !into.found.includes(w));
+  into.submitted = Math.max(into.submitted, other.submitted);
+  into.counted = {
+    halfway: into.counted.halfway || other.counted.halfway,
+    cleared: into.counted.cleared || other.counted.cleared,
+  };
+  if (other.started) into.started = true;
+  return JSON.stringify(into) !== before;
+}
+
+/**
+ * Words on the player's score row (its `f` and `b` masks, see
+ * submissionMetadata) that this copy is missing: a save that never landed, or
+ * play from a session whose storage didn't reach this one. True when words
+ * were added.
+ */
+export function restoreFromScore(content: CasualContent, progress: Progress, metadata: Record<string, unknown> | null | undefined): boolean {
+  const f = metadata?.['f'];
+  const b = metadata?.['b'];
+  const restored: Progress = {
+    ...freshProgress(progress.puzzleIndex),
+    found: typeof f === 'string' ? decodeMask(content.words, f) : [],
+    bonus: typeof b === 'string' ? decodeMask(content.bonus, b) : [],
+  };
+  if (restored.found.length + restored.bonus.length === 0) return false;
+  restored.started = true;
+  return mergeProgress(progress, restored);
+}
+
+/** Drop anything an edited board no longer lists. */
+export function keepListed(content: CasualContent, progress: Progress): void {
+  progress.found = progress.found.filter((w) => content.words.includes(w));
+  progress.revealed = progress.revealed.filter((w) => content.words.includes(w));
+  progress.bonus = progress.bonus.filter((w) => content.bonus.includes(w));
 }
 
 export type WordResult =

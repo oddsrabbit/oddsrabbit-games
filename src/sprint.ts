@@ -116,7 +116,7 @@ export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promis
 
   /** This run's length: from the board being played (yesterday's, for a run carried over). */
   const runMs = (): number => sprintMs(content.shape);
-  const save = (): Promise<void> => writeJson('sprint', progress);
+  const save = (): Promise<boolean> => writeJson('sprint', progress);
   let tracer: Tracer | null = null;
   let clockTimer: number | undefined;
   let readyTimer: number | undefined;

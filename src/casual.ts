@@ -14,9 +14,12 @@ import {
   freshProgress,
   isCleared,
   isProgress,
+  keepListed,
   listed,
+  mergeProgress,
   milestoneCrossed,
   nextReveal,
+  restoreFromScore,
   scoreOf,
   submissionMetadata,
   type Progress,
@@ -33,7 +36,7 @@ import { openShareSheet } from './share';
 import { createTracer, type Tracer } from './tracer';
 import type { TopScoreEntry } from '@oddsrabbit/apps-sdk';
 import { showCasualLeaderboard } from './leaderboard';
-import { button, el, formatPuzzleDate, haptic, OR, readJson, resetTimeLine, SHARE_URL, showToast, writeJson } from './ui';
+import { button, el, formatPuzzleDate, haptic, OR, readJson, readStored, resetTimeLine, SHARE_URL, showToast, writeJson } from './ui';
 
 /** Quiet time after the last find before the score goes to the server. */
 const SUBMIT_DELAY_MS = 5000;
@@ -45,6 +48,10 @@ export interface CasualMode {
   tracer(): Tracer | null;
   /** Flush progress and the score (on pause). */
   flush(): void;
+  /** Back on screen: pick up words found meanwhile in another tab or on another device. */
+  resume(): void;
+  /** Swapped out for another board or day: stop its timers. */
+  dispose(): void;
 }
 
 /** How many past boards the archive lists. */
@@ -52,37 +59,99 @@ const ARCHIVE_DAYS = 30;
 
 const storageKey = (index: number): string => `casual-${index}`;
 
+// ---------- Progress store ----------
+//
+// Each board's progress is one object per page, shared by every view of it, so
+// a view left behind (today's board before a trip to the archive) can't save
+// an older copy over a newer one. The stored copy can still move under us (a
+// second tab, a phone and a laptop on one account), and a save replaces it
+// whole, so every save first reads it and merges: words are only ever added,
+// so the union loses nothing either side found.
+
+const boards = new Map<number, Progress>();
+/** Boards whose stored copy has been read. Until then a save could replace progress never seen, so it waits. */
+const loaded = new Set<number>();
+/** Boards with changes not yet stored. */
+const unsaved = new Set<number>();
+
+function progressFor(index: number): Progress {
+  let p = boards.get(index);
+  if (!p) {
+    p = freshProgress(index);
+    boards.set(index, p);
+  }
+  return p;
+}
+
+/** Merge the stored copy into this page's. True when that added anything; a failed read changes nothing. */
+async function pullProgress(index: number, tries = 1): Promise<boolean> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const stored = await readStored(storageKey(index));
+      loaded.add(index);
+      return isProgress(stored) && stored.puzzleIndex === index && mergeProgress(progressFor(index), stored);
+    } catch {
+      if (attempt >= tries) return false;
+      await new Promise((r) => window.setTimeout(r, 500 * attempt));
+    }
+  }
+}
+
+/** Store this page's copy, merged with the stored one first. Left unsaved, for the next save or resume, if either can't reach storage. */
+async function pushProgress(index: number): Promise<void> {
+  await pullProgress(index);
+  if (!loaded.has(index) || !unsaved.delete(index)) return;
+  if (!(await writeJson(storageKey(index), progressFor(index)))) unsaved.add(index);
+}
+
+function saveProgress(index: number): Promise<void> {
+  unsaved.add(index);
+  return pushProgress(index);
+}
+
 /**
  * The Casual tab: today's board, the archive of past boards, and a past board
  * being played. Switches between them in place.
  */
 export async function mountCasualPane(pane: HTMLElement, today: number, todayContent: CasualContent): Promise<CasualMode> {
   let live: CasualMode | null = null;
+  /** Bumped by each open, so a slow one tapped past (today, then a past board) doesn't land over the newer one. */
+  let opening = 0;
 
-  const openToday = async (): Promise<void> => {
+  const show = (view: CasualMode | null): void => {
     live?.flush();
-    live = await mountCasual(pane, today, todayContent, { today: true, onPast: () => void showArchive() });
+    live?.dispose();
+    live = view;
     window.scrollTo({ top: 0 });
   };
 
+  const openToday = async (): Promise<void> => {
+    const ticket = ++opening;
+    const view = await mountCasual(pane, today, todayContent, { today: true, onPast: () => void showArchive() }, () => ticket !== opening);
+    if (view) show(view);
+  };
+
   const openPast = async (index: number): Promise<void> => {
+    const ticket = ++opening;
     const day = await OR().content.daily({ roundKey: roundKey(index) }).then((d) => parseDay(d?.content)).catch(() => null);
+    if (ticket !== opening) return;
     if (!day) {
       showToast("Couldn't load that board");
       return;
     }
-    live?.flush();
-    live = await mountCasual(pane, index, day.casual, {
-      today: false,
-      onPast: () => void showArchive(),
-      onToday: () => void openToday(),
-    });
-    window.scrollTo({ top: 0 });
+    const view = await mountCasual(
+      pane,
+      index,
+      day.casual,
+      { today: false, onPast: () => void showArchive(), onToday: () => void openToday() },
+      () => ticket !== opening
+    );
+    if (view) show(view);
   };
 
   async function showArchive(): Promise<void> {
-    live?.flush();
-    live = null;
+    const ticket = ++opening;
+    show(null);
     pane.classList.remove('casual-play');
     pane.innerHTML = '';
     const head = el('div', 'meta');
@@ -93,7 +162,9 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
       pane.appendChild(el('p', 'sprint-rules muted', 'No past boards yet. A new one joins the list every day.'));
       return;
     }
-    const saved = await Promise.all(days.map((d) => readJson<unknown>(storageKey(d), null)));
+    // This page's copy where it has one: it may hold words not stored yet.
+    const saved = await Promise.all(days.map((d) => boards.get(d) ?? readJson<unknown>(storageKey(d), null)));
+    if (ticket !== opening) return;
     const list = el('ul', 'archive');
     days.forEach((d, i) => {
       const p = saved[i];
@@ -121,6 +192,11 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
   return {
     tracer: () => live?.tracer() ?? null,
     flush: () => live?.flush(),
+    resume: () => live?.resume(),
+    dispose: () => {
+      opening++;
+      show(null);
+    },
   };
 }
 
@@ -132,17 +208,24 @@ interface BoardOptions {
   onToday?(): void;
 }
 
-async function mountCasual(root: HTMLElement, index: number, content: CasualContent, opts: BoardOptions): Promise<CasualMode> {
+/** Null when `superseded` turned true while loading: another board was opened meanwhile. */
+async function mountCasual(
+  root: HTMLElement,
+  index: number,
+  content: CasualContent,
+  opts: BoardOptions,
+  superseded: () => boolean
+): Promise<CasualMode | null> {
   const board: Board = boardOf(content);
-  const stored = await readJson<unknown>(storageKey(index), null);
-  const progress: Progress = isProgress(stored) && stored.puzzleIndex === index ? stored : freshProgress(index);
-  // Drop anything an edited board no longer lists.
-  progress.found = progress.found.filter((w) => content.words.includes(w));
-  progress.revealed = progress.revealed.filter((w) => content.words.includes(w));
-  progress.bonus = progress.bonus.filter((w) => content.bonus.includes(w));
-  let stats: Stats = { ...DEFAULT_STATS, ...(await readJson<Stats>('casual-stats', DEFAULT_STATS)) };
+  const progress: Progress = progressFor(index);
+  // A few tries: a blip here would otherwise start an empty board.
+  const [, savedStats] = await Promise.all([pullProgress(index, 3), readJson<Stats>('casual-stats', DEFAULT_STATS)]);
+  if (superseded()) return null;
+  if (!loaded.has(index)) showToast("Couldn't load your saved words. They'll sync once you're back online.");
+  keepListed(content, progress);
+  let stats: Stats = { ...DEFAULT_STATS, ...savedStats };
   let showStarts = false;
-  const save = (): Promise<void> => writeJson(storageKey(index), progress);
+  const save = (): Promise<void> => saveProgress(index);
 
   const ui = {
     count: el('div', 'sprint-clock casual-count'),
@@ -660,15 +743,57 @@ async function mountCasual(root: HTMLElement, index: number, content: CasualCont
     }
   }
 
-  if (progress.started || listed(progress) > 0 || progress.bonus.length > 0) renderPlay();
+  // ---------- Sync ----------
+
+  let disposed = false;
+
+  /** Show progress that arrived from elsewhere: the stored copy, or the score row. */
+  function adopt(): void {
+    keepListed(content, progress);
+    if (disposed) return;
+    if (playing) refresh();
+    else if (hasPlay()) renderPlay();
+  }
+
+  /** Words on this board's score row that this copy lacks (a save that never landed), put back. */
+  async function restoreFromRow(): Promise<void> {
+    const or = OR();
+    if (!or.user || !or.capabilities.has('scores.rank')) return;
+    const row = await or.scores.rank({ roundKey: casualRoundKey(index), order: 'top' }).catch(() => null);
+    if (!row) return;
+    const restored = restoreFromScore(content, progress, row.entry.metadata);
+    // The row's score is already sent, wherever it came from.
+    const sent = Math.max(progress.submitted, row.entry.score);
+    if (!restored && sent === progress.submitted) return;
+    progress.submitted = sent;
+    await save();
+    adopt();
+  }
+
+  async function resume(): Promise<void> {
+    const changed = await pullProgress(index);
+    if (unsaved.has(index)) await pushProgress(index);
+    if (changed) adopt();
+  }
+
+  const hasPlay = (): boolean => !!progress.started || listed(progress) > 0 || progress.bonus.length > 0;
+  if (hasPlay()) renderPlay();
   else renderReady();
   void submitNow();
+  void restoreFromRow();
 
   return {
     tracer: () => (playing ? tracer : null),
     flush() {
-      void save();
+      if (unsaved.has(index)) void pushProgress(index);
       void submitNow();
+    },
+    resume: () => void resume(),
+    dispose() {
+      disposed = true;
+      window.clearTimeout(submitTimer);
+      window.clearTimeout(socialTimer);
+      window.clearTimeout(revealTimer);
     },
   };
 }

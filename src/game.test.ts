@@ -5,8 +5,10 @@ import {
   checkWord,
   freshProgress,
   isCleared,
+  mergeProgress,
   milestoneCrossed,
   nextReveal,
+  restoreFromScore,
   scoreOf,
   submissionMetadata,
 } from './game';
@@ -71,4 +73,52 @@ test('reveals go shortest first', () => {
   assert.equal(nextReveal(content, p), 'FADED');
   p.found.push('FADED', 'FACADE');
   assert.equal(nextReveal(content, p), null);
+});
+
+test('merging two copies of a board keeps every word either one found', () => {
+  // This tab found BEAD; another tab or device found DEAF and revealed FADED, then sent a score.
+  const here = freshProgress(3);
+  here.found.push('BEAD');
+  here.bonus.push('DACE');
+  here.revealed.push('FACADE');
+  const there = freshProgress(3);
+  there.found.push('DEAF', 'FACADE');
+  there.revealed.push('FADED');
+  there.bonus.push('ABED', 'DACE');
+  there.submitted = 500;
+  there.counted.halfway = true;
+  there.started = true;
+  assert.ok(mergeProgress(here, there));
+  assert.deepEqual(here.found, ['BEAD', 'DEAF', 'FACADE']);
+  assert.deepEqual(here.bonus, ['DACE', 'ABED']);
+  assert.deepEqual(here.revealed, ['FADED'], 'found on one side wins over revealed on the other');
+  assert.equal(here.submitted, 500);
+  assert.deepEqual(here.counted, { halfway: true, cleared: false });
+  assert.equal(here.started, true);
+  assert.equal(mergeProgress(here, there), false, 'merging again changes nothing');
+});
+
+test('an empty copy merged in takes nothing away', () => {
+  const here = freshProgress(3);
+  here.found.push('BEAD', 'DEAF');
+  here.submitted = 300;
+  assert.equal(mergeProgress(here, freshProgress(3)), false);
+  assert.deepEqual(here.found, ['BEAD', 'DEAF']);
+  assert.equal(here.submitted, 300);
+});
+
+test('words on the score row come back to a copy that lost them', () => {
+  const sent = freshProgress(3);
+  sent.found.push('FADED', 'BEAD');
+  sent.bonus.push('DACE');
+  const metadata = submissionMetadata(content, sent);
+  const lost = freshProgress(3);
+  lost.revealed.push('BEAD');
+  assert.ok(restoreFromScore(content, lost, metadata));
+  assert.deepEqual(lost.found.slice().sort(), ['BEAD', 'FADED']);
+  assert.deepEqual(lost.bonus, ['DACE']);
+  assert.deepEqual(lost.revealed, []);
+  assert.equal(lost.started, true);
+  assert.equal(restoreFromScore(content, lost, metadata), false);
+  assert.equal(restoreFromScore(content, lost, null), false);
 });
