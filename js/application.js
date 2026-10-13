@@ -2134,7 +2134,7 @@
   // flex child of the rack and cannot leave it.
   function bindRackTile(tile, index) {
     var startX = 0, startY = 0, mode = null, target = index, siblings = null, step = 1;
-    var ghost = null, dropCell = null, lift = 0;
+    var ghost = null, dropCell = null, lift = 0, pointerId = null, held = false;
 
     function makeGhost() {
       ghost = tile.cloneNode(true);
@@ -2158,7 +2158,20 @@
       if (state.dragSlot !== null) { state.dragSlot = null; syncBoard(); }
     }
 
+    // The gesture is followed on the window, not only on the tile. Pointer
+    // capture should send every move and the release to the tile, but where
+    // it did not take, they went to whatever was under the cursor: the ghost
+    // froze over the board and the drop never happened.
+    function listen(on) {
+      var method = on ? "addEventListener" : "removeEventListener";
+      window[method]("pointermove", onMove);
+      window[method]("pointerup", onUp);
+      window[method]("pointercancel", onCancel);
+      window[method]("blur", cancel);
+    }
+
     function cancel() {
+      listen(false);
       tile.style.transform = "";
       tile.classList.remove("is-dragging");
       if (siblings) siblings.forEach(function (node) { node.classList.remove("is-drop-target"); });
@@ -2182,12 +2195,22 @@
     // native drag unless the press is claimed, and a native drag cancels the
     // pointer stream mid-gesture. The click still follows a claimed press.
     tile.addEventListener("dragstart", function (e) { e.preventDefault(); });
+    // On a Mac the context menu opens on the PRESS of a secondary click (a
+    // two-finger tap or ctrl-click on a trackpad), and the menu swallows the
+    // release. A drag that met one never saw the button come up.
+    tile.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
     tile.addEventListener("pointerdown", function (e) {
       if (!rackMovable()) return;
+      // Only the primary button picks a tile up.
+      if (e.pointerType === "mouse" && e.button !== 0) return;
       e.preventDefault();
+      // A gesture whose release went missing is over once a new one starts.
+      if (state.cancelDrag) state.cancelDrag();
       try { tile.setPointerCapture(e.pointerId); } catch (_) {}
       state.cancelDrag = cancel;
+      pointerId = e.pointerId;
+      held = false;
       startX = e.clientX;
       startY = e.clientY;
       lift = dragLift(e.pointerType);
@@ -2195,10 +2218,20 @@
       target = index;
       siblings = $$(".tile", els.rack);
       step = tile.getBoundingClientRect().width + 6;
+      listen(true);
     });
 
-    tile.addEventListener("pointermove", function (e) {
-      if (!siblings) return;
+    function onMove(e) {
+      if (!siblings || e.pointerId !== pointerId) return;
+      // A mouse moving with its button up means the release was lost (to a
+      // context menu, or the system). Without this the tile went on following
+      // the cursor with nothing held, and the next click landed on the board
+      // instead of dropping it. The gesture ends where the button was last
+      // down. `held` guards against a browser that never reports `buttons`.
+      if (e.pointerType === "mouse") {
+        if (e.buttons & 1) held = true;
+        else if (held) { if (mode) finish(); else cancel(); return; }
+      }
       var dx = e.clientX - startX;
       var dy = e.clientY - startY;
       if (!mode) {
@@ -2241,10 +2274,11 @@
         target = next;
       }
       e.preventDefault();
-    });
+    }
 
     function finish() {
       if (!siblings) return;
+      listen(false);
       var landed = dropCell;
       var how = mode;
       tile.style.transform = "";
@@ -2288,13 +2322,15 @@
       if (rackActive()) selectRack(index);
     }
 
-    tile.addEventListener("pointerup", finish);
+    function onUp(e) {
+      if (e.pointerId === pointerId) finish();
+    }
+
     // A cancelled gesture (the browser took it over) is not a drop: put the
     // tile back without the "rejected" shake or a stray select.
-    tile.addEventListener("pointercancel", function () {
-      if (!siblings) return;
-      cancel();
-    });
+    function onCancel(e) {
+      if (siblings && e.pointerId === pointerId) cancel();
+    }
     // Keyboard activation still arrives as a click with no pointer sequence,
     // and must always select — hence a deadline rather than a flag.
     tile.addEventListener("click", function () {

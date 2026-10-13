@@ -358,7 +358,13 @@
       var rect = el.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     }
+    // On a Mac a secondary click (two-finger tap, ctrl-click) opens the
+    // context menu on the press, and the menu swallows the release.
+    el.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     el.addEventListener("pointerdown", function (e) {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      // A mouse gesture whose release went missing is over once a new one starts.
+      if (e.pointerType === "mouse") forget();
       try { el.setPointerCapture(e.pointerId); } catch (_) {}
       self.pointers[e.pointerId] = pos(e);
       var ids = Object.keys(self.pointers);
@@ -368,7 +374,8 @@
         // instead of panning, if the app allows it.
         var at = self.cellAt(p.x, p.y);
         var lift = at && self.handlers.canLift && self.handlers.canLift(at[0], at[1]) ? at : null;
-        self.gesture = { type: "tap", startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, lift: lift };
+        self.gesture = { type: "tap", startX: p.x, startY: p.y, lastX: p.x, lastY: p.y, lift: lift,
+          held: false, cx: e.clientX, cy: e.clientY };
       } else if (ids.length === 2) {
         if (self.gesture && self.gesture.type === "lift" && self.handlers.onLiftCancel) self.handlers.onLiftCancel();
         var a = self.pointers[ids[0]], b = self.pointers[ids[1]];
@@ -378,8 +385,16 @@
     });
     el.addEventListener("pointermove", function (e) {
       if (!self.pointers[e.pointerId]) return;
-      self.pointers[e.pointerId] = pos(e);
       var g = self.gesture;
+      // A mouse moving with its button up means the release was lost: end the
+      // gesture where the button was last down, rather than leave a lifted
+      // tile following a cursor that holds nothing. `held` guards against a
+      // browser that never reports `buttons`.
+      if (g && e.pointerType === "mouse") {
+        if (e.buttons & 1) { g.held = true; g.cx = e.clientX; g.cy = e.clientY; }
+        else if (g.held) { up(lostRelease(e, g)); return; }
+      }
+      self.pointers[e.pointerId] = pos(e);
       if (!g) return;
       var ids = Object.keys(self.pointers);
       if (g.type === "pinch" && ids.length >= 2) {
@@ -425,6 +440,17 @@
       }
       e.preventDefault();
     });
+    function lostRelease(e, g) {
+      return { type: "pointerup", pointerId: e.pointerId, clientX: g.cx, clientY: g.cy, preventDefault: function () {} };
+    }
+    function forget() {
+      var ids = Object.keys(self.pointers);
+      if (!ids.length) return;
+      var g = self.gesture;
+      if (g && g.type === "lift" && self.handlers.onLiftCancel) self.handlers.onLiftCancel();
+      self.pointers = {};
+      self.gesture = null;
+    }
     function up(e) {
       var g = self.gesture;
       var p = self.pointers[e.pointerId];
