@@ -5,7 +5,7 @@ import test from 'node:test';
 
 import { addSurface, burrowForSave, readBurrow, starterBurrow, surfacesOf } from './decor';
 import { act, advance, isPetState, newPet } from './sim';
-import { load, Saver, SAVE_SCHEMA } from './store';
+import { load, savedBytes, Saver, SAVE_SCHEMA, STORAGE_TOTAL_BYTES } from './store';
 import { HOUR_MS } from './tuning';
 import { setMeadow } from './yard';
 
@@ -152,4 +152,58 @@ test('a held saver writes nothing until released, then everything waiting', asyn
   saver.release();
   await saver.flush();
   assert.equal(JSON.parse(stored['v1:pet']!).name, 'Clover');
+});
+
+test("a write that never answers times out and is tried again, so saving doesn't stop", async () => {
+  const stored: Record<string, string> = {};
+  let hang = true;
+  const storage = {
+    get: async (k: string) => stored[k] ?? null,
+    // the first write is lost on the way: no answer, ever
+    set: (k: string, v: string) => (hang ? new Promise<void>(() => undefined) : (stored[k] = v, Promise.resolve())),
+    delete: async () => undefined,
+  };
+  const saver = new Saver({ storage } as never, () => undefined, undefined, 20);
+  saver.queue('v1:pet', () => pet());
+  await saver.flush();
+  assert.equal(stored['v1:pet'], undefined);
+  hang = false;
+  saver.queue('v1:burrow', () => ({ v: 2 }));
+  await saver.flush();
+  assert.equal(JSON.parse(stored['v1:pet']!).name, 'Clover', 'the timed-out write went again');
+  assert.equal(JSON.parse(stored['v1:burrow']!).v, 2, 'and what came after it went too');
+});
+
+test('with storage full, a smaller journal written first makes room for her save in the same batch', async () => {
+  // the server's rule (AppStorageService): every key together under STORAGE_TOTAL_BYTES
+  const stored: Record<string, string> = { 'v1:journal': 'x'.repeat(STORAGE_TOTAL_BYTES - 500), 'v1:pet': JSON.stringify(pet()) };
+  const bytes = (v: string) => new TextEncoder().encode(v).length;
+  const storage = {
+    get: async (k: string) => stored[k] ?? null,
+    set: async (k: string, v: string) => {
+      const others = Object.entries(stored).filter(([key]) => key !== k).reduce((t, [, x]) => t + bytes(x), 0);
+      if (others + bytes(v) > STORAGE_TOTAL_BYTES) throw { code: 'storage/tuple-size-exceeded' };
+      stored[k] = v;
+    },
+    delete: async () => undefined,
+  };
+  const grown = { ...pet(), name: 'Clover'.repeat(100) };
+  // as main.ts othersHaventWritten does: the journal first
+  const journalFirst = async (docs: Map<string, unknown>) => new Map([...docs].sort(([a]) => (a === 'v1:journal' ? -1 : 1)));
+  const saver = new Saver({ storage } as never, () => undefined, journalFirst);
+  saver.queue('v1:pet', () => grown);
+  saver.queue('v1:journal', () => ({ v: 1, rev: 1, entries: [], firsts: [] }));
+  await saver.flush();
+  assert.equal(JSON.parse(stored['v1:pet']!).name, grown.name, 'her save landed');
+  assert.ok(savedBytes(grown) + bytes(stored['v1:journal']!) <= STORAGE_TOTAL_BYTES);
+
+  // the other way round, her save is refused: what players were hitting
+  stored['v1:journal'] = 'x'.repeat(STORAGE_TOTAL_BYTES - 500);
+  stored['v1:pet'] = JSON.stringify(pet());
+  const plain = new Saver({ storage } as never, () => undefined);
+  plain.queue('v1:pet', () => grown);
+  plain.queue('v1:journal', () => ({ v: 1, rev: 1, entries: [], firsts: [] }));
+  await plain.flush();
+  assert.equal(JSON.parse(stored['v1:pet']!).name, 'Clover', 'pet first: refused, storage full');
+  await plain.drop();
 });

@@ -1,8 +1,10 @@
-// Saving to OR.storage. Three keys, each well under the 16 KB value cap:
+// Saving to OR.storage. Everything a player saves shares one 16 KB, counted
+// in bytes across all keys (the server's per-(app, user) cap: see
+// STORAGE_TOTAL_BYTES), not 16 KB a key:
 //   v1:pet       the simulation state (needs, timers, bond, clover, gift)
 //   v1:burrow    decor and where it sits
 //   v1:settings  reminder choice and what's been scheduled
-//   v1:journal   her journal (journal.ts), capped at 200 entries
+//   v1:journal   her journal (journal.ts), capped at 200 entries and cut to fit
 //
 // OR.storage is last-writer-wins with no compare-and-set. Each document
 // carries a `rev` that goes up when the player changes something (not when
@@ -66,6 +68,22 @@ function isSettings(x: unknown): x is Settings {
 
 export const SAVE_SCHEMA = 1;
 
+/**
+ * All of a player's saves together, in bytes. The server (AppStorageService
+ * TUPLE_MAX_BYTES) refuses any write that would take the total of every key
+ * past it, with `storage/tuple-size-exceeded`: so a journal that fills the
+ * room leaves no space for her own save, and every change to her bounces.
+ *
+ * The server is moving to 64 KB (the SDK's STORAGE_TOTAL_MAX_BYTES). Raise
+ * this to match only once that's live: raised first, saves bounce again.
+ */
+export const STORAGE_TOTAL_BYTES = 16 * 1024;
+
+/** A document's size as stored: UTF-8 bytes of its JSON, schema stamp included. */
+export function savedBytes(doc: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(doc && typeof doc === 'object' ? { ...doc, schema: SAVE_SCHEMA } : doc)).length;
+}
+
 /** What reading a save found. `error`: storage couldn't be reached; `broken`: it's there but unreadable. */
 export type Loaded<T> =
   | { kind: 'ok'; value: T }
@@ -128,11 +146,26 @@ const RETRY_MS = [5_000, 10_000, 20_000, 40_000, 60_000];
 const QUIET_FAILURES = 4;
 
 /**
+ * How long one step of a batch (the guard's reads, or one write) may take
+ * before it counts as failed and is retried. Nothing below the saver times a
+ * request out, and batches go one after another, so a single request that
+ * never answers would otherwise stop every save after it, silently: all of
+ * it gone on the next launch.
+ */
+const STEP_TIMEOUT_MS = 30_000;
+
+function timeLimit<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Storage did not answer')), ms); });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Coalesced writer: many changes in a burst become one write per key, and at
  * most one batch is in flight. `flush()` sends anything pending now (on pause
  * / pagehide). A write that fails is queued again, unless something newer for
- * that key has been queued since, and retried after a pause; `onError` is
- * told once per run of failures.
+ * that key has been queued since, and retried after a pause (so is one that
+ * doesn't answer within `timeoutMs`); `onError` is told once per run of failures.
  */
 export class Saver {
   private pending = new Map<string, () => unknown>();
@@ -146,6 +179,7 @@ export class Saver {
     private readonly OR: Pick<OddsRabbitGlobal, 'storage'>,
     private readonly onError: (e: unknown) => void,
     private readonly guard?: BatchGuard,
+    private readonly timeoutMs = STEP_TIMEOUT_MS,
   ) {}
 
   queue(key: string, snapshot: () => unknown): void {
@@ -195,7 +229,7 @@ export class Saver {
       try {
         docs = new Map(batch.map(([k, snap]) => [k, snap()]));
         if (this.guard) {
-          const ok = await this.guard(docs);
+          const ok = await timeLimit(this.guard(docs), this.timeoutMs);
           if (!ok) { void this.drop(); return; }
           docs = ok;
         }
@@ -207,7 +241,7 @@ export class Saver {
       for (const [key, doc] of docs) {
         try {
           // every save says which schema wrote it
-          await this.OR.storage.set(key, JSON.stringify(doc && typeof doc === 'object' ? { ...doc, schema: SAVE_SCHEMA } : doc));
+          await timeLimit(this.OR.storage.set(key, JSON.stringify(doc && typeof doc === 'object' ? { ...doc, schema: SAVE_SCHEMA } : doc)), this.timeoutMs);
         } catch (e) {
           failed ??= e;
           retry(key);

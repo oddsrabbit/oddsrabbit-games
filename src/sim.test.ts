@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { dayKey, localParts, nextLocalHour } from './localtime';
-import { act, advance, thriving, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, sleepMs, visit, type FoodId, type PetState } from './sim';
-import { BOND_DAILY_CAP, DAY_MS, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
+import { act, advance, thriving, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, rewindFuture, sleepMs, visit, type FoodId, type PetState } from './sim';
+import { BOND_DAILY_CAP, DAY_MS, DAY_ROLLOVER_HOUR, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
 
 const UTC = 'UTC';
 // 2026-09-24 12:00 UTC, a Thursday afternoon.
@@ -389,4 +389,42 @@ test('thriving: food, joy and clean all 60 or more; she finds more and more visi
   const good = week(100), poor = week(40);
   assert.ok(good.found > poor.found, `finds ${good.found} vs ${poor.found}`);
   assert.ok(good.critters > poor.critters, `visitors ${good.critters} vs ${poor.critters}`);
+});
+
+test('a save from a clock running ahead is brought back, so a finished trip comes home', () => {
+  // written on a device a day ahead
+  let s = pet(NOON + DAY_MS);
+  s.needs.energy = 90;
+  const claimed = act(s, 'gift', NOON + DAY_MS, UTC);
+  assert.ok(claimed.ok);
+  s = claimed.state;
+  // back on the real clock she's sent out for two hours; three hours on, she should be home
+  const sent = act(s, 'forage', NOON, UTC, { hours: 2 });
+  assert.ok(sent.ok);
+  const later = NOON + 3 * HOUR_MS;
+  const stuck = advance(sent.state, later, UTC).state;
+  assert.deepEqual(act(stuck, 'forage', later, UTC, { hours: 2 }), { ok: false, reason: 'out' }, 'without it, she can never go again');
+
+  const fixed = rewindFuture(stuck, later, UTC)!;
+  assert.ok(fixed);
+  assert.ok(fixed.simAtMs <= later);
+  assert.equal(fixed.gift.lastClaimDay, dayKey(later, UTC, DAY_ROLLOVER_HOUR), "tomorrow's gift counts as today's: not locked, never twice");
+  assert.equal(giftReady(fixed, later, UTC), false);
+  const home = advance(fixed, later + STEP_MS, UTC);
+  assert.ok(home.events.some((e) => e.kind === 'forageDone'), 'the trip comes home');
+  assert.ok(act(home.state, 'forage', later + STEP_MS, UTC, { hours: 2 }).ok, 'and she can go again');
+
+  assert.equal(rewindFuture(pet(), NOON, UTC), null, 'a save from now is left alone');
+  assert.equal(rewindFuture(pet(NOON + 60_000), NOON, UTC), null, 'and one a little ahead');
+});
+
+test('a trip started on a clock running ahead keeps its length when brought back', () => {
+  const ahead = NOON + DAY_MS;
+  const s = pet(ahead);
+  const sent = act(s, 'forage', ahead, UTC, { hours: 4 });
+  assert.ok(sent.ok);
+  const fixed = rewindFuture(sent.state, NOON, UTC)!;
+  const t = fixed.timers.find((x) => x.kind === 'forage')!;
+  assert.ok(t.startedAtMs <= NOON + STEP_MS);
+  assert.equal(t.endsAtMs - t.startedAtMs, 4 * HOUR_MS);
 });

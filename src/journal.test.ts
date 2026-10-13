@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { addEntry, emptyJournal, GUESTBOOK_MAX, JOURNAL_MAX, mergeJournal, signGuestbook } from './journal';
+import { addEntry, emptyJournal, fitJournal, GUESTBOOK_MAX, JOURNAL_MAX, mergeJournal, signGuestbook } from './journal';
 
 test('journal keeps the newest entries and records each first once', () => {
   let j = emptyJournal();
@@ -34,4 +34,26 @@ test('the guest book keeps each visit once, newest first, and merges across devi
   assert.deepEqual(j.guestbook!.map((g) => g.visitUuid), ['b', 'c', 'a']);
   for (let i = 0; i < GUESTBOOK_MAX + 10; i++) j = signGuestbook(j, [v(`x${i}`, 100 + i)]);
   assert.equal(j.guestbook!.length, GUESTBOOK_MAX);
+});
+
+test('a journal too big for its room loses its oldest entries and signatures, in step', () => {
+  const bytes = (x: unknown) => new TextEncoder().encode(JSON.stringify(x)).length;
+  let j = emptyJournal();
+  j = addEntry(j, { atMs: 1, text: 'Found a marble' }, 'find:marble');
+  for (let i = 0; i < JOURNAL_MAX; i++) j = addEntry(j, { atMs: 10 + i, text: `She came home from foraging with clover and strawberries ${i}`, art: 'basket' });
+  const visits = Array.from({ length: GUESTBOOK_MAX }, (_, i) => ({ visitUuid: `v${i}`, atMs: 1000 + i, from: 'friend', rabbit: 'Biscuit', care: 'pet', note: 'Hope she likes it ’ ✿' }));
+  j = { ...signGuestbook(j, visits), pinned: ['v0'] };
+
+  const fit = fitJournal(j, 4_000);
+  assert.ok(bytes(fit) <= 4_000, 'counted in bytes, as storage counts them');
+  assert.ok(bytes(fit) > 3_000, 'and nearly all the room used');
+  assert.equal(fit.entries[0], j.entries[0], 'the newest entry stays');
+  assert.equal(fit.guestbook![0]!.visitUuid, 'v59', 'and the newest signature');
+  assert.ok(fit.entries.length > 5 && fit.guestbook!.length > 3, 'neither is cut away to make room for the other');
+  assert.ok(fit.guestbook!.some((g) => g.visitUuid === 'v0'), 'a pinned one is never cut');
+  assert.deepEqual(fit.firsts, ['find:marble'], 'firsts are kept, so they still happen once');
+
+  const small = emptyJournal();
+  assert.equal(fitJournal(small, 4_000), small, 'one that fits is left alone');
+  assert.ok(fitJournal(j, 0).entries.length === 0, 'no room at all: no entries');
 });

@@ -34,6 +34,37 @@ export function signGuestbook(j: Journal, visits: GuestEntry[]): Journal {
   return { ...j, guestbook: all.filter((g, i) => i < GUESTBOOK_MAX || pinned.has(g.visitUuid)) };
 }
 
+/**
+ * Her journal cut down to `maxBytes` (UTF-8 bytes of its JSON, as storage
+ * counts them): everything she saves shares one 16 KB (store.ts
+ * STORAGE_TOTAL_BYTES), so the journal gets what her own save leaves. The
+ * oldest entries and the oldest unpinned signatures go together, in step, so
+ * neither crowds the other out. Pinned signatures and firsts are always kept
+ * (firsts stop a first being written twice). Returns the same journal if it
+ * already fits.
+ */
+export function fitJournal(j: Journal, maxBytes: number): Journal {
+  const size = (x: Journal) => new TextEncoder().encode(JSON.stringify(x)).length;
+  if (size(j) <= maxBytes) return j;
+  const pinned = new Set(j.pinned ?? []);
+  const book = j.guestbook ?? [];
+  // the newest `share` of each (both are newest first), pinned signatures whatever their age
+  const keep = (share: number): Journal => {
+    const loose = book.filter((g) => !pinned.has(g.visitUuid));
+    const kept = new Set(loose.slice(0, Math.floor(loose.length * share)).map((g) => g.visitUuid));
+    const out: Journal = { ...j, entries: j.entries.slice(0, Math.floor(j.entries.length * share)) };
+    if (j.guestbook) out.guestbook = book.filter((g) => pinned.has(g.visitUuid) || kept.has(g.visitUuid));
+    return out;
+  };
+  // the largest share that fits, to within a few entries
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2;
+    if (size(keep(mid)) <= maxBytes) lo = mid; else hi = mid;
+  }
+  return keep(lo);
+}
+
 export function emptyJournal(): Journal {
   return { v: 1, rev: 0, entries: [], firsts: [] };
 }

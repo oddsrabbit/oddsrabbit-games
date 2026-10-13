@@ -8,7 +8,7 @@ import { blank, toSprite, type PixelGrid, type Sprite } from './art/pixels';
 import { drawPadlock } from './art/garden';
 import { drawRabbit, dressKey, type Dress, type Face, type Frame } from './art/rabbit';
 import { drawBurrow, moonPhase, roomColours, SCENE_H, SCENE_W, WALL_INSET, WINDOW, type RoomStyle } from './art/burrow';
-import { clockOffset, now, syncClock } from './clock';
+import { clockOffset, isServerTime, now, syncClock } from './clock';
 import {
   addStarterLantern, addSurface, burrowForSave, byId, CATALOG, clampToZone, hasBed, hasLantern, isOutdoor, meadowPieces, meadowItems, WELCOME_BOUGHT, ownsDecor, ownsSurface, starterBurrow, surfaceById, surfacesOf, SURFACES, useSurface, ZONES,
   type BurrowState, type DecorDef, type PlacedItem, type SurfaceDef,
@@ -33,7 +33,7 @@ import { GardenScene, pieceBox, type GardenModel } from './garden-scene';
 import { CRITTERS, critterById } from './wildlife';
 import { isOut, trip as tripOf, type Loot } from './forage';
 import { drawTicket, prizeWon, ticketsBought } from './raffle';
-import { addEntry, emptyJournal, mergeJournal, MILESTONE_DAYS, signGuestbook, type Journal } from './journal';
+import { addEntry, emptyJournal, fitJournal, mergeJournal, MILESTONE_DAYS, signGuestbook, type Journal } from './journal';
 import {
   applyGift, applyVisits, buildShowcase, careHint, friendNeeds, friendRank, findGiftKind, takeGolden, visitPay, findOfGift, friendGardenPet, GIFT_INFO, GIFT_KINDS, giftInfo, giveFind, noteText, spareFinds, visitKind, readShowcase, rewardGiftSent, rewardVisit, showcaseSignature, VISIT_INFO, visitInfo, VISIT_KINDS,
   type ShowcaseData, type VisitIn, type VisitKind,
@@ -50,9 +50,9 @@ import { newPetId } from './rng';
 import { pauseSound, play, resumeSound, setMuted } from './sound';
 import {
   act, advance, thriving, bondLevel, COATS, giftReady, isAsleep, isNight, mood, newPet,
-  FOOD_IDS, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
+  FOOD_IDS, rewindFuture, spendClover, timer, visit, earsOf, EARS, type Action, type FoodId, type Coat, type Ears, type Mood, type NeedKey, type PetEvent, type PetState,
 } from './sim';
-import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, Saver, type Loaded, type Settings } from './store';
+import { defaultSettings, deleteGame, KEYS, loadBurrow, loadJournal, loadPet, loadSettings, savedBytes, Saver, STORAGE_TOTAL_BYTES, type Loaded, type Settings } from './store';
 import { THRIVING, BOND_DAILY_CAP, BOND_LEVEL_CLOVER, CARE, CLOVER, DAY_ROLLOVER_HOUR, SPROUT_CLOVER, SUPPORTER_BONUS, RATE, FORAGE, FRIEND_CLOVER, HOUR_MS, MEADOW, RAFFLE, SOIL, STREAK_MILESTONES, FRIEND_MILESTONES } from './tuning';
 import { dayKey, localParts } from './localtime';
 import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherName, weatherOf, WEATHER_NAME, type Season, type SeasonalEvent, type Weather } from './world';
@@ -205,8 +205,33 @@ function fmtCountdown(ms: number): string {
  */
 function savePet(changed = true): void {
   if (changed) pet.rev += 1;
-  saver.queue(KEYS.pet, () => pet);
+  // a copy, taken when the batch goes: `pet` itself can change (its rev too)
+  // while the write is in flight, and the guard must record the rev that was
+  // actually written, or the next batch reads its own write as another device's
+  saver.queue(KEYS.pet, () => structuredClone(pet));
   queueShowcase();
+}
+
+/** Save her journal, cut to the room her other saves leave (journal.ts fitJournal). */
+function queueJournal(): void {
+  saver.queue(KEYS.journal, () => fitJournal(journal, journalRoom()));
+}
+
+/**
+ * Room she grows into before the journal's next save makes way: her save
+ * grows a little as she's played (a friend, a find, an outfit), and the
+ * journal is saved often (every line in it), so this is plenty.
+ */
+const JOURNAL_HEADROOM_BYTES = 1_500;
+
+/**
+ * What's left for her journal: everything shares STORAGE_TOTAL_BYTES (store.ts),
+ * and her own save, her burrow and the settings come first. The journal is
+ * the one that can lose its oldest pages; the rest can't be cut.
+ */
+function journalRoom(): number {
+  const others = (pet ? savedBytes(pet) : 0) + (burrow ? savedBytes(burrowForSave(burrow)) : 0) + savedBytes(settings);
+  return Math.max(0, STORAGE_TOTAL_BYTES - others - JOURNAL_HEADROOM_BYTES);
 }
 
 /**
@@ -245,7 +270,15 @@ async function othersHaventWritten(docs: Map<string, unknown>): Promise<Map<stri
     docs.has(KEYS.journal) ? loadJournal(OR) : null,
   ]);
   if ((rp && petMoved(rp)) || (rb && burrowMoved(rb)) || rj?.kind === 'newer') {
-    void returnToPage(false).then(() => { if (pet && rp?.kind === 'ok' && rp.value.petId === pet.petId) toast('Picked up changes from your other device.'); });
+    void returnToPage(false).then(() => {
+      if (!pet) return;
+      if (rp?.kind === 'ok' && rp.value.petId === pet.petId) toast('Picked up changes from your other device.');
+      // the whole batch was dropped, but settings and the journal never
+      // conflict (settings are only this player's choices, the journal merges):
+      // send them again rather than lose them
+      if (docs.has(KEYS.settings)) saver.queue(KEYS.settings, () => settings);
+      if (docs.has(KEYS.journal)) queueJournal();
+    });
     return null;
   }
   const p = docs.get(KEYS.pet) as PetState | undefined;
@@ -254,9 +287,12 @@ async function othersHaventWritten(docs: Map<string, unknown>): Promise<Map<stri
   if (b) inStorage.burrow = b.rev;
   if (rj?.kind === 'ok') {
     journal = mergeJournal(journal, rj.value);
-    docs.set(KEYS.journal, mergeJournal(docs.get(KEYS.journal) as Journal, rj.value));
+    docs.set(KEYS.journal, fitJournal(mergeJournal(docs.get(KEYS.journal) as Journal, rj.value), journalRoom()));
   }
-  return docs;
+  // the journal goes first: when it's being cut down, that makes the room the
+  // rest of the batch needs (storage counts every key against one total)
+  if (!docs.has(KEYS.journal)) return docs;
+  return new Map([[KEYS.journal, docs.get(KEYS.journal)], ...[...docs].filter(([k]) => k !== KEYS.journal)]);
 }
 
 function saveBurrow(): void {
@@ -366,7 +402,7 @@ function note(text: string, art?: ItemArt, first?: string): void {
   const next = addEntry(journal, { atMs: now(), text, art }, first);
   if (next === journal) return;
   journal = { ...next, rev: journal.rev + 1 };
-  saver.queue(KEYS.journal, () => journal);
+  queueJournal();
 }
 
 // ------------------------------------------------------------------ boot
@@ -416,6 +452,9 @@ async function loadAndStart(attempt = 0): Promise<void> {
   }
   pet = p.value;
   pet.supporter = !!OR.user?.supporter;
+  // a journal saved before it had to share storage with her can fill it, and
+  // then nothing of hers saves: cut it down now, before anything else is saved
+  if (savedBytes(journal) > journalRoom()) queueJournal();
   startGame(true);
 }
 
@@ -1034,6 +1073,10 @@ function toggleSound(): void {
 // ------------------------------------------------------------------ time passing
 
 function catchUp(showSummary: boolean): void {
+  // saved on a clock running ahead: back to the server's now, or she sits
+  // frozen until it comes (and a finished trip never brings her home)
+  const rewound = isServerTime() ? rewindFuture(pet, now(), tz) : null;
+  if (rewound) { pet = rewound; savePet(); }
   const before = pet;
   const gap = now() - before.simAtMs;
   const { state, events } = advance(pet, now(), tz);
@@ -5272,7 +5315,7 @@ function signGuestbookFrom(visits: VisitIn[]): void {
   }));
   if (next === journal) return;
   journal = { ...next, rev: journal.rev + 1 };
-  saver.queue(KEYS.journal, () => journal);
+  queueJournal();
 }
 
 function guestbookLine(): string {
@@ -5319,7 +5362,7 @@ function pinNote(visitUuid: string): void {
   const pinned = togglePin(before, visitUuid);
   const pinning = pinned.includes(visitUuid);
   journal = { ...journal, pinned, rev: journal.rev + 1 };
-  saver.queue(KEYS.journal, () => journal);
+  queueJournal();
   play('flip');
   if (pinning && before.length >= MAX_PINS) toast(`The corkboard holds ${MAX_PINS}: the oldest note came down to make room.`);
   else if (pinning && !corkboardUp()) toast('Pinned. Hang the corkboard (in the Shop) and friends can read it too.');

@@ -292,6 +292,41 @@ export function advance(input: PetState, toMs: number, tz: string): { state: Pet
   return { state, events };
 }
 
+/**
+ * A save from the future: one written on a device clock running ahead (when
+ * the server's time didn't answer in time, or a clock set forward). Left
+ * alone, advance() does nothing until real time catches up, so a trip that's
+ * over never comes home: she can't be sent out ("she's out") or called back
+ * ("she's home"), and her sleep and baking jam the same way.
+ *
+ * Brings her back to `nowMs` (server time: only call it with that): her last
+ * step, and anything started after now moved back by as much, so a trip or
+ * nap keeps its length. Days recorded ahead of today become today, so her
+ * gift and care don't stay locked until that day comes (her gift counts as
+ * opened today: never a second one). Returns null when she's not ahead.
+ */
+export function rewindFuture(input: PetState, nowMs: number, tz: string, slackMs = 2 * 60_000): PetState | null {
+  if (!(input.simAtMs > nowMs + slackMs)) return null;
+  const state = structuredCloneState(input);
+  const sim = nowMs - (nowMs % STEP_MS);
+  const back = state.simAtMs - sim;
+  state.simAtMs = sim;
+  state.timers = state.timers.map((t) => (t.startedAtMs > nowMs ? { ...t, startedAtMs: t.startedAtMs - back, endsAtMs: t.endsAtMs - back } : t));
+  // the garden and yard keep their own times: crops planted, the yard's tally, a visitor's stay
+  if (state.garden) {
+    state.garden = { ...state.garden, plots: state.garden.plots.map((p) => (p && p.plantedAtMs > nowMs ? { ...p, plantedAtMs: p.plantedAtMs - back, readyAtMs: p.readyAtMs - back } : p)) };
+  }
+  if (state.yard?.atMs != null && state.yard.atMs > nowMs) state.yard = { ...state.yard, atMs: nowMs };
+  const here = state.critters?.here;
+  if (here && here.untilMs > nowMs) state.critters = { ...state.critters!, here: { ...here, untilMs: Math.max(nowMs, here.untilMs - back) } };
+  const today = dayKey(nowMs, tz, DAY_ROLLOVER_HOUR);
+  const notAhead = (d: string | null) => (d !== null && d > today ? today : d);
+  state.bondDay = notAhead(state.bondDay)!;
+  state.lastVisitDay = notAhead(state.lastVisitDay);
+  state.gift = { ...state.gift, lastClaimDay: notAhead(state.gift.lastClaimDay) };
+  return state;
+}
+
 /** Food, joy and clean all looked after: better finds, more wild visitors, a bigger gift (THRIVING). */
 export function thriving(n: Needs): boolean {
   return n.hunger >= THRIVING.above && n.happy >= THRIVING.above && n.clean >= THRIVING.above;
