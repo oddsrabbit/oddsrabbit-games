@@ -207,3 +207,24 @@ test('with storage full, a smaller journal written first makes room for her save
   assert.equal(JSON.parse(stored['v1:pet']!).name, 'Clover', 'pet first: refused, storage full');
   await plain.drop();
 });
+
+test("a failed write stops the batch: what comes after it waits for the retry", async () => {
+  const stored: Record<string, string> = {};
+  let full = true;
+  const storage = {
+    get: async (k: string) => stored[k] ?? null,
+    set: async (k: string, v: string) => { if (full && k === 'v1:burrow') throw new Error('storage/tuple-size-exceeded'); stored[k] = v; },
+    delete: async () => undefined,
+  };
+  // the burrow before her (main.ts othersHaventWritten): a purchase is never paid for and lost
+  const saver = new Saver({ storage } as never, () => undefined, async (docs) => new Map([...docs].reverse()));
+  saver.queue('v1:pet', () => ({ ...pet(), clover: 0 }));
+  saver.queue('v1:burrow', () => ({ v: 2, items: ['pumpkin'] }));
+  await saver.flush();
+  assert.equal(stored['v1:burrow'], undefined);
+  assert.equal(stored['v1:pet'], undefined, 'the clover is not taken while the piece is not saved');
+  full = false;
+  await saver.flush();
+  assert.deepEqual(JSON.parse(stored['v1:burrow']!).items, ['pumpkin']);
+  assert.equal(JSON.parse(stored['v1:pet']!).clover, 0);
+});

@@ -238,12 +238,15 @@ export class Saver {
         docs = new Map();
         for (const [k] of batch) retry(k);
       }
+      // in order, and none after a failed one: the guard orders the batch so
+      // that stopping part way never leaves a purchase paid for but not had
       for (const [key, doc] of docs) {
+        if (failed !== null) { retry(key); continue; }
         try {
           // every save says which schema wrote it
           await timeLimit(this.OR.storage.set(key, JSON.stringify(doc && typeof doc === 'object' ? { ...doc, schema: SAVE_SCHEMA } : doc)), this.timeoutMs);
         } catch (e) {
-          failed ??= e;
+          failed = e;
           retry(key);
         }
       }

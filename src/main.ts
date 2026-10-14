@@ -289,10 +289,14 @@ async function othersHaventWritten(docs: Map<string, unknown>): Promise<Map<stri
     journal = mergeJournal(journal, rj.value);
     docs.set(KEYS.journal, fitJournal(mergeJournal(docs.get(KEYS.journal) as Journal, rj.value), journalRoom()));
   }
-  // the journal goes first: when it's being cut down, that makes the room the
-  // rest of the batch needs (storage counts every key against one total)
-  if (!docs.has(KEYS.journal)) return docs;
-  return new Map([[KEYS.journal, docs.get(KEYS.journal)], ...[...docs].filter(([k]) => k !== KEYS.journal)]);
+  // The journal goes first: when it's being cut down, that makes the room the
+  // rest of the batch needs (storage counts every key against one total).
+  // Her own save goes last: writes land one at a time and the batch stops at
+  // a failed one (store.ts Saver), and every purchase takes clover from her
+  // and puts the piece in the burrow, so a refresh or failure mid-batch can
+  // only leave a piece unpaid for, never clover spent on nothing.
+  const rank = (k: string) => (k === KEYS.journal ? 0 : k === KEYS.pet ? 2 : 1);
+  return new Map([...docs].sort(([a], [b]) => rank(a) - rank(b)));
 }
 
 function saveBurrow(): void {
