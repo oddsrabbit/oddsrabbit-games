@@ -54,7 +54,7 @@ export const CONTENT_REVEAL_MAX_INDEX = 63;
 export const SCORE_METADATA_MAX_BYTES = 2 * 1024;
 
 // ---- Matches (async turn-based multiplayer) ----
-// See docs/proposals/multiplayer-matches.md. The bridge is game-agnostic: a
+// The bridge is game-agnostic: a
 // `move` and a `view` are opaque objects that the server-side rules class for
 // `game` validates and filters. Nothing here knows what Connect Four is.
 
@@ -93,8 +93,18 @@ export const MATCH_ERROR_CODES = {
   notFound: 'match/not-found',
   /** The join code's table is already full or the lobby has closed. */
   full: 'match/full',
-  /** An invitee is not connected to the creator on the follow graph. */
+  /**
+   * An invitee cannot be challenged by this creator: a block between them, or
+   * their "Game challenges from" setting is "people I follow". One code for
+   * both, so a refusal never reveals a block.
+   */
   notConnected: 'match/not-connected',
+  /**
+   * The creator already has `MATCH_MAX_PENDING_STRANGER_INVITES` unanswered
+   * challenges out to people they are not connected to. Accepted, declined
+   * and expired invites free the slot; `message` says so in plain words.
+   */
+  inviteLimit: 'match/invite-limit',
   /**
    * `matches.nudge` or `matches.claim` came before it is allowed: the turn is
    * too young, or this player already nudged in the last day. `message` says
@@ -113,6 +123,13 @@ export const MATCH_ERROR_CODES = {
    */
   chatRefused: 'match/chat-refused',
 } as const;
+
+/** Unanswered `matches.create` invites one creator may have out to people with no follow either way. */
+export const MATCH_MAX_PENDING_STRANGER_INVITES = 10;
+/** Shortest `matches.searchPlayers` query the host answers; shorter resolves `[]`. */
+export const MATCH_SEARCH_MIN_CHARS = 2;
+/** Most rows one `matches.searchPlayers` answers. */
+export const MATCH_SEARCH_MAX = 50;
 
 /** How long the seat on turn must have been idle before `matches.nudge`, and the gap between one sender's nudges. */
 export const MATCH_NUDGE_AFTER_SECONDS = 24 * 3600;
@@ -548,6 +565,19 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
       // a caller detects as "no new rows" and stops on — the same result as
       // today, never a loop.
       offset: z.number().int().min(0).max(10000).optional(),
+    }),
+  }),
+  // Anyone the viewer could challenge, by username prefix: invites are open
+  // to everyone (the invitee accepts or declines), so the picker searches the
+  // platform rather than only the follow graph. Same row shape as
+  // `matches.invitable`, connected people first, `relation: 'none'` for the
+  // rest. Never someone `matches.create` would refuse.
+  z.object({
+    type: z.literal('matches.searchPlayers'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      query: z.string().max(60),
+      limit: z.number().int().min(1).max(MATCH_SEARCH_MAX).optional(),
     }),
   }),
   // The server's clock, for games that measure real elapsed time. Public: it
@@ -1025,9 +1055,10 @@ export const InvitablePlayerSchema = z.object({
   uuid: z.string().uuid(),
   username: z.string().min(1).max(64),
   avatar: z.string().url().nullable().default(null),
-  // Whether the viewer follows them, is followed by them, or both. Purely
-  // for the picker's ordering and badge; the server accepts any of the three.
-  relation: z.enum(['following', 'follower', 'mutual']).default('following'),
+  // Whether the viewer follows them, is followed by them, both, or neither
+  // ('none', only from `matches.searchPlayers`). For the picker's ordering
+  // and badge; the server accepts an invite to any of them.
+  relation: z.enum(['following', 'follower', 'mutual', 'none']).default('following'),
 });
 
 export type InvitablePlayer = z.infer<typeof InvitablePlayerSchema>;
@@ -1074,6 +1105,11 @@ export const MatchSummarySchema = z.object({
   // Set when `finished`. Null with `finished` means a draw.
   winnerSeat: MatchSeat.nullable().default(null),
   mySeat: MatchSeat,
+  // The viewer's own seat status. `invited` means a challenge waiting on
+  // them: accept with `matches.join({ matchUuid })`, decline with
+  // `matches.resign({ matchUuid })`. Null for a viewer with no seat, and
+  // from a host that predates invites (read `players` there).
+  mySeatStatus: MatchPlayerStatusSchema.nullable().default(null),
   isMyTurn: z.boolean().default(false),
   updatedAt: z.string(),
   // The last move, filtered for this viewer exactly as on a view, so a list

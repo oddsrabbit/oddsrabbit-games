@@ -158,6 +158,12 @@ const baseOpts = {
 };
 
 const browserOpts = { ...baseOpts, platform: 'browser' };
+
+// Games ship without source maps. apps.oddsrabbit.com is public, and a `.map`
+// next to a minified bundle hands anyone the original TypeScript — which is
+// exactly what keeping the games out of the public SDK repo is meant to avoid.
+// The SDK, UI and host bundles keep theirs: that source is public anyway.
+const gameOpts = { sourcemap: false };
 const neutralOpts = { ...baseOpts, platform: 'neutral' };
 
 const buildTargets = [
@@ -223,6 +229,7 @@ const buildTargets = [
   // RabbitWords — reference game
   {
     ...browserOpts,
+    ...gameOpts,
     entryPoints: ['rabbit-words/src/main.ts'],
     outfile: 'dist/rabbit-words/main.js',
     format: 'esm',
@@ -231,6 +238,7 @@ const buildTargets = [
   // RabbitGlobe — daily photo-pin geo-guess game (bundles Leaflet)
   {
     ...browserOpts,
+    ...gameOpts,
     entryPoints: ['rabbit-globe/src/main.ts'],
     outfile: 'dist/rabbit-globe/main.js',
     format: 'esm',

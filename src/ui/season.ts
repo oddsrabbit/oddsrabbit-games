@@ -2,9 +2,9 @@
  * Season-board presentation for the shared leaderboard panel.
  *
  * A season is one calendar month of a daily game's rows collapsed into a single
- * ranked number. Which number depends on the app — see §3.7 of
- * docs/proposals/unified-leaderboard.md — but the *presentation* is identical
- * everywhere, so it lives here rather than four times over.
+ * ranked number. Which number depends on the app (the server's `metric`), but
+ * the *presentation* is identical everywhere, so it lives here rather than four
+ * times over.
  *
  * Like `leaderboard.ts`, this never calls the SDK. The caller hands it a promise
  * for a board; the type import is erased at build time.

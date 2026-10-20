@@ -1,4 +1,5 @@
 import {
+  MATCH_SEARCH_MIN_CHARS,
   FriendScoreSchema,
   TopScoreEntrySchema,
   ScoreDistributionEntrySchema,
@@ -106,6 +107,8 @@ export type {
 export {
   CONTENT_ERROR_CODES,
   MATCH_ERROR_CODES,
+  MATCH_MAX_PENDING_STRANGER_INVITES,
+  MATCH_SEARCH_MIN_CHARS,
   NOTIFICATION_ERROR_CODES,
   SOCIAL_ERROR_CODES,
   GIFT_ERROR_CODES,
@@ -530,7 +533,7 @@ export interface OddsRabbitGlobal {
   };
 
   /**
-   * Async turn-based multiplayer. See docs/proposals/multiplayer-matches.md.
+   * Async turn-based multiplayer.
    *
    * Every verb is authenticated and every read is PER-VIEWER: the server
    * filters `view` to what the requesting seat may see, so a game reads
@@ -549,12 +552,21 @@ export interface OddsRabbitGlobal {
    */
   readonly matches: {
     /**
-     * Start a match. Resolves the new match's view: `lobby` while seats are
-     * empty, or straight to `active` when invitees fill the table and the game
-     * needs no accept step. The creator always holds seat 0.
+     * Start a match. Resolves the new match's view, which is a `lobby` while
+     * any seat is empty or invited. The creator always holds seat 0.
+     *
+     * Invitees can be anyone (see `searchPlayers`): each is seated as
+     * `invited` and pushed a challenge, and the match starts only once every
+     * seat has accepted. Rejects `match/not-connected` for someone who can't
+     * be challenged by this creator, and `match/invite-limit` when they
+     * already have too many unanswered challenges out to strangers.
      */
     create(payload: MatchCreatePayload): Promise<MatchView>;
-    /** Take a seat, by invitation (`matchUuid`) or by join code. */
+    /**
+     * Take a seat, by invitation (`matchUuid`) or by join code. For a viewer
+     * whose `mySeatStatus` is `invited` this is ACCEPT: the seat becomes
+     * `joined`, and the match starts if it was the last one.
+     */
     join(payload: MatchJoinPayload): Promise<MatchView>;
     /**
      * The viewer's matches, newest activity first. `[]` when signed out (no
@@ -571,7 +583,11 @@ export interface OddsRabbitGlobal {
      * Resolves the post-move view, already advanced to the next seat.
      */
     move(payload: MatchMovePayload): Promise<MatchView>;
-    /** Leave the match. Ends a 2-player match; a larger table plays on without you. */
+    /**
+     * Leave the match. Ends a 2-player match; a larger table plays on without
+     * you. For a viewer whose `mySeatStatus` is `invited` this is DECLINE: an
+     * invite-only lobby closes (`abandoned`), an open one frees the seat.
+     */
     resign(payload: { matchUuid: string }): Promise<MatchView>;
     /**
      * Push the seat on turn a reminder that it is their move. Only from a
@@ -657,6 +673,17 @@ export interface OddsRabbitGlobal {
      * returns no unseen uuids, never on a fixed count.
      */
     invitable(payload?: { limit?: number; offset?: number }): Promise<InvitablePlayer[]>;
+    /**
+     * Anyone the viewer could challenge whose username starts with `query`:
+     * connected people first, then everyone else (`relation: 'none'`). Never
+     * someone `create` would refuse. `[]` when signed out, for a query under
+     * `MATCH_SEARCH_MIN_CHARS` (no round trip), or on a host without the verb.
+     * `limit` defaults to 20, max 50.
+     *
+     * Gate the search on `capabilities.has('matches.searchPlayers')`, and fall
+     * back to filtering `invitable` without it.
+     */
+    searchPlayers(payload: { query: string; limit?: number }): Promise<InvitablePlayer[]>;
     /**
      * Poll one match while the page is visible and the match is unfinished,
      * calling `onChange` with each view whose `version` moved (the first poll
@@ -1185,6 +1212,15 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
     invitable: (payload: { limit?: number; offset?: number } = {}): Promise<InvitablePlayer[]> => {
       if (!this.user) return Promise.resolve([]);
       return this.requestRows<InvitablePlayer>('matches.invitable', payload, InvitablePlayerSchema);
+    },
+    searchPlayers: (payload: { query: string; limit?: number }): Promise<InvitablePlayer[]> => {
+      const query = typeof payload?.query === 'string' ? payload.query.trim() : '';
+      if (!this.user || query.length < MATCH_SEARCH_MIN_CHARS) return Promise.resolve([]);
+      return this.requestRows<InvitablePlayer>(
+        'matches.searchPlayers',
+        payload.limit !== undefined ? { query, limit: payload.limit } : { query },
+        InvitablePlayerSchema
+      );
     },
     watch: (
       matchUuid: string,
