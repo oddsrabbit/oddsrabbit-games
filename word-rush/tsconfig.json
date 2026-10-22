@@ -16,13 +16,13 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    // The SDK is a sibling checkout (../apps-sdk), read from source. Types come
+    // The SDK lives at the repo root (../src), read from source. Types come
     // from the SDK itself (at runtime the game uses the host's `../sdk-v1.js`,
     // so esbuild drops those imports); the shared leaderboard UI is bundled
     // in, the same way rabbit-words bundles it. esbuild reads these paths too.
     "paths": {
-      "@oddsrabbit/apps-sdk": ["../apps-sdk/src/sdk/sdk.ts"],
-      "@oddsrabbit/apps-sdk/ui/*": ["../apps-sdk/src/ui/*"]
+      "@oddsrabbit/apps-sdk": ["../src/sdk/sdk.ts"],
+      "@oddsrabbit/apps-sdk/ui/*": ["../src/ui/*"]
     }
   },
   "include": ["src/**/*", "tools/**/*.ts"],

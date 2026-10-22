@@ -4,22 +4,22 @@
 // Plain JS with no bundling: the build only copies files and stamps the
 // cache-bust tokens into index.html. The game loads the shared SDK and the
 // leaderboard UI from the host (`../sdk-v1.js`, `../leaderboard-v1.*`), so
-// neither is bundled here. They're read from the sibling apps-sdk checkout
+// neither is bundled here. They're read from the repo root
 // because `__SDK_VERSION__` and `__UI_VERSION__` must be the same content
-// hashes apps-sdk stamps into its own games, so every game busts the cached
-// files together. Run `npm run build` in ../apps-sdk first.
+// hashes the root build stamps into its own games, so every game busts the cached
+// files together. Run `npm run build` at the repo root first.
 
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
-const SDK_DIST = process.env.SDK_DIST || '../apps-sdk/dist';
+const SDK_DIST = process.env.SDK_DIST || '../dist';
 const JS = ['rules.js', 'board.js', 'application.js'];
 
 async function hash(files) {
   const bufs = await Promise.all(files.map((f) => readFile(`${SDK_DIST}/${f}`))).catch(() => null);
   if (!bufs) {
-    console.warn(`${SDK_DIST}/${files[0]} not found; build apps-sdk first. Using BUILD_ID for its stamp.`);
+    console.warn(`${SDK_DIST}/${files[0]} not found; run npm run build at the repo root first. Using BUILD_ID for its stamp.`);
     return BUILD_ID;
   }
   const h = createHash('sha256');
@@ -27,7 +27,7 @@ async function hash(files) {
   return h.digest('hex').slice(0, 12);
 }
 
-// Hashed the same way as apps-sdk's build.config.mjs: the SDK alone, and the
+// Hashed the same way as the root build.config.mjs: the SDK alone, and the
 // leaderboard JS and CSS together.
 const SDK_VERSION = await hash(['sdk-v1.js']);
 const UI_VERSION = await hash(['leaderboard-v1.js', 'leaderboard-v1.css']);

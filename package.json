@@ -1,16 +1,16 @@
 {
-  "name": "@oddsrabbit/apps-sdk",
+  "name": "@oddsrabbit/games",
   "version": "0.1.0-alpha.0",
-  "description": "OddsRabbit Apps SDK — bridge contract for apps hosted on OddsRabbit (mobile + web).",
+  "description": "OddsRabbit games and the in-development Apps SDK (private).",
   "private": true,
-  "license": "MIT",
-  "homepage": "https://github.com/oddsrabbit/apps-sdk",
+  "license": "SEE LICENSE IN README.md",
+  "homepage": "https://github.com/oddsrabbit/oddsrabbit-games",
   "repository": {
     "type": "git",
-    "url": "https://github.com/oddsrabbit/apps-sdk.git"
+    "url": "https://github.com/oddsrabbit/oddsrabbit-games.git"
   },
   "bugs": {
-    "url": "https://github.com/oddsrabbit/apps-sdk/issues"
+    "url": "https://github.com/oddsrabbit/oddsrabbit-games/issues"
   },
   "type": "module",
   "main": "./dist/sdk-v1.cjs",

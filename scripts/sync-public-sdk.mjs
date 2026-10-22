@@ -12,7 +12,7 @@
 //
 //   node scripts/sync-public-sdk.mjs [path-to-public-checkout]
 //
-// Defaults to apps-sdk-public next to this repo. Review `git diff` there before committing.
+// Defaults to the apps-sdk checkout next to this repo. Review `git diff` there before committing.
 
 import { cp, rm, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -39,7 +39,13 @@ const PUBLIC_PATHS = [
 
 const target = process.argv[2]
   ? resolve(process.argv[2])
-  : resolve(root, '../apps-sdk-public');
+  : resolve(root, '../apps-sdk');
+
+// rm-then-cp onto ourselves would delete the sources, so refuse outright.
+if (target === root) {
+  console.error(`${target} is this repo, not the public checkout.`);
+  process.exit(1);
+}
 
 try {
   await stat(resolve(target, '.git'));

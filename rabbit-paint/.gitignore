@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.test-build/
+__pycache__/
+*.log
+.DS_Store
+.env
+.env.*
+*.tsbuildinfo
+.idea/
+.vscode/
+promo/out/
+promo/.promo/
+.tools-build/
+
+# per-page curator check image; regenerate with npm run prep-page
+art/*/preview.png

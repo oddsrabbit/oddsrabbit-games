@@ -2,12 +2,12 @@
 // apps.oddsrabbit.com/rabbit-pets/ next to the SDK's own dist.
 //
 // The game loads the shared SDK from the host (`../sdk-v1.js`), so it's not
-// bundled here. It's read from the sibling apps-sdk checkout for two reasons:
-//   - `__SDK_VERSION__` must be the same content hash apps-sdk stamps into its
+// bundled here. It's read from the repo root for two reasons:
+//   - `__SDK_VERSION__` must be the same content hash the root build stamps into its
 //     own games, so every game busts the cached SDK together.
 //   - dist/sdk-v1.js is copied in so dev/harness.html runs locally. It's for
 //     local use only; don't upload it from here.
-// Run `npm run build` in ../apps-sdk first.
+// Run `npm run build` at the repo root first.
 
 import * as esbuild from 'esbuild';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,14 +15,14 @@ import { createHash } from 'node:crypto';
 
 const watch = process.argv.includes('--watch');
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
-const SDK_DIST = process.env.SDK_DIST || '../apps-sdk/dist';
+const SDK_DIST = process.env.SDK_DIST || '../dist';
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/rabbit-pets/fonts', { recursive: true });
 
 const sdk = await readFile(`${SDK_DIST}/sdk-v1.js`).catch(() => null);
 if (!sdk) {
-  console.warn(`${SDK_DIST}/sdk-v1.js not found; build apps-sdk first. Using BUILD_ID for the SDK stamp.`);
+  console.warn(`${SDK_DIST}/sdk-v1.js not found; run npm run build at the repo root first. Using BUILD_ID for the SDK stamp.`);
 }
 const SDK_VERSION = sdk ? createHash('sha256').update(sdk).digest('hex').slice(0, 12) : BUILD_ID;
 if (sdk) await writeFile('dist/sdk-v1.js', sdk);

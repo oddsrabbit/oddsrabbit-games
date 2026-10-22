@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    // The SDK lives at the repo root (../src), read from source for types.
+    // At runtime the game uses the host's `../sdk-v1.js`, so these imports are
+    // type-only.
+    "paths": {
+      "@oddsrabbit/apps-sdk": ["../src/sdk/sdk.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  // The prep worker shares tools/lib/regions.ts and has its own tsconfig.
+  "exclude": ["node_modules", "dist", "src/worker/page-prep.ts", "src/worker/prep.worker.ts"]
+}

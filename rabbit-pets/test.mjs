@@ -1,4 +1,4 @@
-// Test runner, the same approach as apps-sdk's test.config.mjs: esbuild compiles
+// Test runner, the same approach as the root test.config.mjs: esbuild compiles
 // the `*.test.ts` files to ESM and Node's built-in runner runs them. No test
 // framework.
 //

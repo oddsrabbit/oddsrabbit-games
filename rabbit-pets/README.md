@@ -6,18 +6,18 @@ Design and decisions: [`./docs/rabbit-pets.md`](./docs/rabbit-pets.md).
 
 ## Build and deploy
 
-Private repo. It expects the public SDK checked out next to it at `../apps-sdk`: types come from its source (see `tsconfig.json`), and the build reads its `dist/sdk-v1.js`.
+Lives in the private games repo. Types come from the SDK source at the repo root (see `tsconfig.json`), and the build reads the root `dist/sdk-v1.js`.
 
 ```bash
-(cd ../apps-sdk && npm run build)   # the SDK first
+(cd .. && npm run build)            # the SDK first
 npm install
 npm test && npm run type-check
 npm run build                        # → dist/rabbit-pets/
 ```
 
-Upload `dist/rabbit-pets/` to `apps.oddsrabbit.com/rabbit-pets/`, the same place it went when apps-sdk built it. `dist/sdk-v1.js` is a copy for `dev/harness.html` only; the live SDK is deployed from apps-sdk. Then bump the cache version as usual (see apps-sdk `build.config.mjs`).
+Upload `dist/rabbit-pets/` to `apps.oddsrabbit.com/rabbit-pets/`, `dist/sdk-v1.js` is a copy for `dev/harness.html` only; the live SDK is deployed from the root build. Then bump the cache version as usual (see the root `build.config.mjs`).
 
-New bridge verbs still go in apps-sdk (schema, SDK, hosts). This game picks them up from source straight away.
+New bridge verbs go in the root `src/` (schema, SDK) and the hosts. This game picks them up from source straight away.
 
 ## How it works
 

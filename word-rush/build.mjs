@@ -3,10 +3,10 @@
 //
 // The game loads the shared SDK and leaderboard stylesheet from the host
 // (`../sdk-v1.js`, `../leaderboard-v1.css`), so neither is bundled. Both are
-// read from the sibling apps-sdk checkout so their cache-bust stamps are the
-// same content hashes apps-sdk stamps into its own games, and copied into
+// read from the repo root so their cache-bust stamps are the
+// same content hashes the root build stamps into its own games, and copied into
 // dist/ so dev/harness.html runs locally. Those copies are for local use only;
-// don't upload them from here. Run `npm run build` in ../apps-sdk first.
+// don't upload them from here. Run `npm run build` at the repo root first.
 
 import * as esbuild from 'esbuild';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 
 const watch = process.argv.includes('--watch');
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
-const SDK_DIST = process.env.SDK_DIST || '../apps-sdk/dist';
+const SDK_DIST = process.env.SDK_DIST || '../dist';
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/word-rush', { recursive: true });
@@ -26,11 +26,11 @@ const hash = (...parts) => {
 };
 
 const sdk = await readFile(`${SDK_DIST}/sdk-v1.js`).catch(() => null);
-if (!sdk) console.warn(`${SDK_DIST}/sdk-v1.js not found; build apps-sdk first. Using BUILD_ID for the SDK stamp.`);
+if (!sdk) console.warn(`${SDK_DIST}/sdk-v1.js not found; run npm run build at the repo root first. Using BUILD_ID for the SDK stamp.`);
 const SDK_VERSION = sdk ? hash(sdk) : BUILD_ID;
 if (sdk) await writeFile('dist/sdk-v1.js', sdk);
 
-// Same hash apps-sdk computes for `__UI_VERSION__`: the leaderboard JS and CSS
+// Same hash the root build computes for `__UI_VERSION__`: the leaderboard JS and CSS
 // together (see its build.config.mjs).
 const uiJs = await readFile(`${SDK_DIST}/leaderboard-v1.js`).catch(() => null);
 const uiCss = await readFile(`${SDK_DIST}/leaderboard-v1.css`).catch(() => null);

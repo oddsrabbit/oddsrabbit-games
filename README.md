@@ -1,19 +1,19 @@
-# OddsRabbit Apps SDK — private dev repo
+# OddsRabbit Games
 
 > **Private.** This repo holds the OddsRabbit games, internal proposals and the
 > deploy for apps.oddsrabbit.com. It is also where the SDK is developed.
 
 The public SDK is a one-way mirror of part of this repo:
 [`oddsrabbit/apps-sdk`](https://github.com/oddsrabbit/apps-sdk), checked out
-locally at `../apps-sdk-public`. The SDK's **API docs live in that repo's
+locally at `../apps-sdk`. The SDK's **API docs live in that repo's
 README**, not here, so there is only one copy to keep current. When you add or
-change a bridge verb, update `../apps-sdk-public/README.md` in the same change.
+change a bridge verb, update `../apps-sdk/README.md` in the same change.
 
 ## Publishing the public SDK
 
 ```bash
-node scripts/sync-public-sdk.mjs   # copies the allowlisted paths into ../apps-sdk-public
-git -C ../apps-sdk-public diff     # review, then commit and push there
+node scripts/sync-public-sdk.mjs   # copies the allowlisted paths into ../apps-sdk
+git -C ../apps-sdk diff            # review, then commit and push there
 ```
 
 `PUBLIC_PATHS` in the script is an allowlist: a new game or proposal folder
@@ -37,12 +37,19 @@ match3/         Fruit Match — match-3
 solitaire/      Solitaire — Klondike with daily deals, full-bleed elastic board
 flappy-rabbits/ Flappy Rabbits — one-button side-scroller, full-bleed scene
 liquid/         Liquid WebGL toy — no scopes
+rabbit-pets/    Rabbit Pets — virtual pet with clovers, visits and gifts
+word-battle/    Word Battle — async multiplayer word tiles (rules: TilesRules.php)
+word-rush/      Word Rush — daily word grid, Ranked + Casual
+rabbit-paint/   Rabbit Paint — tap-to-fill coloring with a daily gallery
 docs/           Deploy cache policy, header guidelines, proposals
 scripts/        sync-public-sdk.mjs
 ```
 
 `npm install && npm run build` produces `dist/`, which is what gets uploaded to
-apps.oddsrabbit.com; `npm test` runs the unit tests. After an upload, bump the
+apps.oddsrabbit.com; `npm test` runs the unit tests. `rabbit-pets/`,
+`word-battle/`, `word-rush/` and `rabbit-paint/` have their own `package.json`
+and build: build the root first, since they read its `dist/` and `src/`, then
+see each game's README. After an upload, bump the
 cache version, or clients keep the build they already hold: see
 [`docs/deploy-cache-policy.md`](./docs/deploy-cache-policy.md).
 

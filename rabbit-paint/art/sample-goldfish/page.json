@@ -1,0 +1,72 @@
+{
+ "slug": "sample-goldfish",
+ "title": "Goldfish",
+ "category": "animals",
+ "width": 2100,
+ "height": 2100,
+ "regions": [
+  {
+   "id": 0,
+   "area": 3794330,
+   "label": [
+    1521,
+    461
+   ],
+   "bbox": [
+    0,
+    0,
+    2099,
+    2099
+   ]
+  },
+  {
+   "id": 1,
+   "area": 516207,
+   "label": [
+    1058,
+    1050
+   ],
+   "bbox": [
+    331,
+    730,
+    1511,
+    1370
+   ]
+  },
+  {
+   "id": 2,
+   "area": 86099,
+   "label": [
+    1711,
+    1050
+   ],
+   "bbox": [
+    1512,
+    797,
+    1837,
+    1303
+   ]
+  },
+  {
+   "id": 3,
+   "area": 13364,
+   "label": [
+    721,
+    951
+   ],
+   "bbox": [
+    657,
+    886,
+    787,
+    1016
+   ]
+  }
+ ],
+ "stats": {
+  "rawRegions": 4,
+  "droppedStrokes": 0,
+  "tinyMerged": 0,
+  "regions": 4,
+  "smallestArea": 13364
+ }
+}

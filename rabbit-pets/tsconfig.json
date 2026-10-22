@@ -16,12 +16,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    // The SDK is a sibling checkout (../apps-sdk), read from source so a new
+    // The SDK lives at the repo root (../src), read from source so a new
     // bridge verb is visible here without building or publishing the SDK.
     // Only types come from it: at runtime the game uses the host's
     // `../sdk-v1.js`, and esbuild drops the type-only imports.
     "paths": {
-      "@oddsrabbit/apps-sdk": ["../apps-sdk/src/sdk/sdk.ts"]
+      "@oddsrabbit/apps-sdk": ["../src/sdk/sdk.ts"]
     }
   },
   "include": ["src/**/*", "dev/**/*.ts"],

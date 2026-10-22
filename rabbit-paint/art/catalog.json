@@ -1,0 +1,18 @@
+{
+  "epoch": "2026-10-27",
+  "categories": [
+    { "id": "animals", "name": "Animals" },
+    { "id": "garden", "name": "Garden" },
+    { "id": "vehicles", "name": "Things that go" },
+    { "id": "home", "name": "Home" }
+  ],
+  "daily": [
+    "monkey-sun-hat",
+    "sample-butterfly",
+    "sample-cottage",
+    "sample-rocket",
+    "sample-daisy",
+    "sample-cat",
+    "sample-road-trip"
+  ]
+}

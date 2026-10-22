@@ -1,0 +1,72 @@
+{
+ "slug": "sample-cat",
+ "title": "Sleepy Cat",
+ "category": "animals",
+ "width": 2100,
+ "height": 2100,
+ "regions": [
+  {
+   "id": 0,
+   "area": 3599554,
+   "label": [
+    1030,
+    508
+   ],
+   "bbox": [
+    0,
+    0,
+    2099,
+    2099
+   ]
+  },
+  {
+   "id": 1,
+   "area": 783729,
+   "label": [
+    720,
+    1510
+   ],
+   "bbox": [
+    525,
+    734,
+    1574,
+    1706
+   ]
+  },
+  {
+   "id": 2,
+   "area": 13356,
+   "label": [
+    885,
+    1312
+   ],
+   "bbox": [
+    821,
+    1247,
+    951,
+    1377
+   ]
+  },
+  {
+   "id": 3,
+   "area": 13361,
+   "label": [
+    1214,
+    1312
+   ],
+   "bbox": [
+    1149,
+    1247,
+    1279,
+    1377
+   ]
+  }
+ ],
+ "stats": {
+  "rawRegions": 4,
+  "droppedStrokes": 1,
+  "tinyMerged": 0,
+  "regions": 4,
+  "smallestArea": 13356
+ }
+}

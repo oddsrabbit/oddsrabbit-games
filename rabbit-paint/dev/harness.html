@@ -1,0 +1,154 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rabbit Paint harness</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<iframe id="g"></iframe>
+<script>
+// Local stand-in for the OddsRabbit host: answers the bridge from memory so the
+// game runs without the platform. Not shipped.
+//   (cd .. && npm run build) && npm run build:dev
+//   python3 -m http.server 8767        (at the repo root)
+//   open http://localhost:8767/dev/harness.html
+// Params:
+//   day=N        today is day N (default 0); the harness moves the server clock there
+//   user=0       signed out (account storage and posting refused, as on the real hosts)
+//   fresh=1      forget saved progress and posts
+//   others=N     how many other players have posted today (default 14; 0 for an empty gallery)
+//   likes=0      a host without scores.like: no hearts, earliest first
+//   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
+//   submit=0     a host without content.submit: no "Share with everyone" for players' pictures
+//                (with it, the harness fakes the proposed verb; see docs/content-submit.md)
+const q = new URLSearchParams(location.search);
+const STORE_KEY = 'rp-harness-store';
+if (q.get('fresh')) { localStorage.removeItem(STORE_KEY); for (const k of Object.keys(localStorage)) if (k.startsWith('rabbit-paint:')) localStorage.removeItem(k); }
+const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{"storage":{},"posts":{},"liked":{}}');
+saved.liked ??= {};
+const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(saved));
+const frame = document.getElementById('g');
+frame.src = '../dist/rabbit-paint/index.html';
+
+const DAY = 86400000;
+const TODAY = Number(q.get('day') ?? 0);
+const startReal = Date.now();
+let EPOCH_MS = 0;
+const serverNow = () => EPOCH_MS + TODAY * DAY + Math.min(startReal % DAY, DAY - 4 * 3600e3) + (Date.now() - startReal);
+
+const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester', avatar: null, createdAt: null, supporter: false };
+const NAMES = ['pip_fan', 'mochi.mama', 'bun.bun', 'maple_leaf', 'thumper', 'clover', 'hazel.h', 'juniper', 'biscuit', 'nutmeg', 'pebble', 'willow', 'sprout', 'basil', 'fern', 'poppy', 'olive', 'acorn'];
+const PALETTES = [
+  ['#e8746a', '#f4d27a', '#7fb7e6', '#9c6b47', '#f6d7b8', '#b48ce0', '#cfe8f7', '#fff8ee'],
+  ['#3b2a55', '#8e3b62', '#d9604c', '#f2a541', '#f7d88b', '#fbe3b8'],
+  ['#1f3a2e', '#3e6b48', '#8cab6a', '#c9b78a', '#7a5434', '#e8efe0'],
+  ['#f7c6cf', '#fbe3b8', '#cdebc5', '#c6def7', '#dccdf2', '#ffffff'],
+];
+// A stable pseudo-random number in [0,1) per string.
+const rnd = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+const ready = fetch('../dist/rabbit-paint/catalog.json').then((r) => r.json()).then(async (cat) => {
+  EPOCH_MS = Date.parse(`${cat.epoch}T00:00:00Z`);
+  const slug = cat.daily[((TODAY % cat.daily.length) + cat.daily.length) % cat.daily.length];
+  const info = await fetch(`../dist/rabbit-paint/pages/${slug}/page.json`).then((r) => r.json());
+  const key = `day-${TODAY}`;
+  saved.posts[key] ??= {};
+  const n = Number(q.get('others') ?? 14);
+  NAMES.slice(0, n).forEach((username, i) => {
+    const uuid = `${(0x22222200 + i).toString(16)}-2222-4222-8222-222222222222`;
+    if (saved.posts[key][uuid]) return;
+    // Pack like packColoring() in src/fills.ts: a few solids, gradients and patterns.
+    const pal = PALETTES[i % PALETTES.length];
+    const f = [];
+    let r = '';
+    info.regions.forEach((reg) => {
+      const x = rnd(`${username}${reg.id}`);
+      const a = pal[Math.floor(x * pal.length)];
+      const b = pal[Math.floor(rnd(`${username}b${reg.id}`) * pal.length)];
+      const fill = x < 0.75 ? a : x < 0.88 ? `g${Math.floor(x * 97) % 4}${a.slice(1)}${b.slice(1)}` : `p${Math.floor(x * 89) % 5}${a.slice(1)}${b.slice(1)}`;
+      let k = f.indexOf(fill);
+      if (k < 0) { f.push(fill); k = f.length - 1; }
+      r += B64[k];
+    });
+    saved.posts[key][uuid] = { uuid, username, avatar: null, score: info.regions.length, likes: Math.floor(rnd(`likes${username}`) * 15), createdAt: new Date(serverNow() - (n - i) * 600e3).toISOString(), metadata: { v: 1, slug, f, r, t: 300 + i * 40 } };
+  });
+  persist();
+});
+
+// likes=0 plays a host from before scores.like (no hearts, earliest first).
+const caps = ['storage.get', 'storage.set', 'storage.delete', 'actions.share', 'actions.haptic', 'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'time.now', ...(q.get('likes') === '0' ? [] : ['scores.like', 'scores.myLikes']), ...(q.get('submit') === '0' ? [] : ['content.submit'])];
+function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
+let initSent = false;
+function init() { send({ type: 'init', user: q.get('user') === '0' ? null : ME, sessionToken: 'x', expiresAt: null, colorScheme: 'light', capabilities: caps }); }
+frame.addEventListener('load', () => {
+  if (q.get('chrome') === 'app') {
+    const s = frame.contentDocument.documentElement.style;
+    s.setProperty('--oddsrabbit-safe-top', '47px'); s.setProperty('--oddsrabbit-chrome-height', '56px');
+    s.setProperty('--oddsrabbit-chrome-start', '56px'); s.setProperty('--oddsrabbit-safe-bottom', '34px');
+  }
+  // The SDK has no content.submit yet: stand one in on its content namespace.
+  if (q.get('submit') !== '0') {
+    frame.contentWindow.OddsRabbit.content.submit = async (p) => {
+      if (q.get('user') === '0') throw Object.assign(new Error('unauthorized'), { code: 'content/unauthorized' });
+      console.log('content.submit', p.kind, p.title, Math.round(p.image.length / 1024) + ' KB', p);
+      await new Promise((r) => setTimeout(r, 600));
+      return { id: `sub-${Date.now().toString(36)}` };
+    };
+  }
+  if (initSent) return;
+  initSent = true;
+  init(); setTimeout(init, 200);
+});
+
+const rows = (roundKey) => Object.values(saved.posts[roundKey] ?? {}).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+window.addEventListener('message', async (e) => {
+  const r = e.data; if (!r || !r.correlationId) return;
+  const ok = (result) => send({ type: 'response', correlationId: r.correlationId, ok: true, result });
+  const fail = (code) => send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code, message: code } });
+  const p = r.payload || {};
+  const guest = q.get('user') === '0';
+  switch (r.type) {
+    case 'storage.get': await ready; if (guest) return fail('storage/unauthorized'); return ok(saved.storage[p.key] ?? null);
+    case 'storage.set': if (guest) return fail('storage/unauthorized'); saved.storage[p.key] = p.value; persist(); return ok(undefined);
+    case 'storage.delete': delete saved.storage[p.key]; persist(); return ok(undefined);
+    case 'time.now': await ready; return ok({ serverTime: new Date(serverNow()).toISOString() });
+    case 'scores.submit': {
+      await ready;
+      if (guest) return fail('scores/unauthorized');
+      const json = JSON.stringify(p.metadata ?? {});
+      console.log('submit', p.roundKey, p.score, json.length + ' bytes', json);
+      if (json.length > 2048) return fail('scores/invalid-metadata');
+      saved.posts[p.roundKey] ??= {};
+      if (saved.posts[p.roundKey][ME.uuid]) return fail('scores/already-submitted');
+      saved.posts[p.roundKey][ME.uuid] = { ...ME, score: p.score, likes: 2, createdAt: new Date(serverNow()).toISOString(), metadata: p.metadata ?? null };
+      persist();
+      return ok({ submittedAt: new Date().toISOString() });
+    }
+    case 'scores.top': {
+      await ready;
+      const list = rows(p.roundKey);
+      if (p.order === 'latest') list.reverse();
+      if (p.order === 'likes') list.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
+      return ok(list.slice(0, p.limit ?? 20));
+    }
+    case 'scores.like': {
+      await ready;
+      if (guest) return fail('scores/unauthorized');
+      if (p.uuid === ME.uuid) return fail('scores/own-entry');
+      const row = saved.posts[p.roundKey]?.[p.uuid];
+      if (!row) return fail('scores/not-found');
+      const mine = (saved.liked[p.roundKey] ??= []);
+      const had = mine.includes(p.uuid);
+      if (p.liked && !had) { mine.push(p.uuid); row.likes = (row.likes ?? 0) + 1; }
+      if (!p.liked && had) { mine.splice(mine.indexOf(p.uuid), 1); row.likes = Math.max(0, (row.likes ?? 0) - 1); }
+      persist();
+      return ok({ liked: p.liked, likes: row.likes });
+    }
+    case 'scores.myLikes': await ready; if (guest) return fail('scores/unauthorized'); return ok(saved.liked[p.roundKey] ?? []);
+    case 'scores.friends': await ready; return ok(rows(p.roundKey).filter((x, i) => i % 3 === 0 || x.uuid === ME.uuid).map((x) => ({ ...x, isSelf: x.uuid === ME.uuid })));
+    case 'actions.share': console.log('share', p); return ok(undefined);
+    case 'actions.requestSignIn': console.log('requestSignIn', p); return ok(undefined);
+    default: return ok(undefined);
+  }
+});
+</script>
+</body></html>
