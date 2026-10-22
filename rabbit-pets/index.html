@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Edge to edge: every screen runs under the status bar and home
+         indicator, and the burrow's HUD is laid out in the host's back-button
+         row. Must come before the SDK script. See
+         docs/game-header-guidelines.md. -->
+    <meta name="oddsrabbit-chrome" content="edge" />
+    <title>Rabbit Pets</title>
+    <link rel="stylesheet" href="./styles.css?v=__BUILD_ID__" />
+    <script src="../sdk-v1.js?v=__SDK_VERSION__"></script>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Filled by main.ts: the adopt screen, the sign-in screen, or the burrow. -->
+      <p class="boot" id="boot">Opening the burrow…</p>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./main.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

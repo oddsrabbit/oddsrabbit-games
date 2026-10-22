@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rabbit Lab</title>
+<!--
+  The real rabbit from src/art/rabbit.ts, with TUNE (head height and where
+  outfits sit) on sliders. Not shipped.
+    npm run build          (writes dist/dev/rabbit-lab.js)
+    python3 -m http.server 8765   (at the repo's parent)
+    open http://localhost:8765/rabbit-pets/dev/rabbit-lab.html
+  Tweak, then "Copy as TS" and paste over TUNE in src/art/rabbit.ts.
+-->
+<style>
+:root{--bg:#1d1a22;--panel:#2a2631;--ink:#eee8f2;--dim:#9a92a6;--line:#3b3645;--accent:#f3a6b3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,sans-serif;display:grid;grid-template-columns:320px 1fr;min-height:100vh}
+@media (max-width:760px){body{grid-template-columns:1fr}}
+aside{background:var(--panel);padding:14px;border-right:1px solid var(--line)}
+main{padding:20px;display:flex;flex-direction:column;gap:18px;align-items:flex-start;min-width:0}
+h1{font-size:15px;margin:0 0 6px}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:16px 0 6px}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+select,button{background:#3a3543;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+.knob{display:grid;grid-template-columns:110px 1fr 34px;gap:6px;align-items:center;margin:3px 0}
+.knob output{text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+.hint{color:var(--dim);font-size:12px}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.stage{background:repeating-conic-gradient(#2b2732 0 25%,#241f2a 0 50%) 0 0/16px 16px;border:1px solid var(--line);border-radius:8px;padding:10px}
+.strip{display:flex;gap:10px;flex-wrap:wrap}
+.strip figure{margin:0;text-align:center;color:var(--dim);font-size:11px;cursor:pointer}
+.strip figure.on .stage{border-color:var(--accent)}
+.strip .stage{padding:4px}
+pre{background:#15131a;border:1px solid var(--line);border-radius:8px;padding:10px;max-width:100%;overflow:auto;font-size:12px;margin:0}
+#hover{color:var(--dim);font-variant-numeric:tabular-nums;min-height:1.4em}
+</style></head><body>
+<aside>
+  <h1>Rabbit lab</h1>
+  <div class="hint">Draws the game's own <code>rabbit.ts</code>. Sliders move <code>TUNE</code>, in pixels; negative is up/left.</div>
+
+  <h2>Pose</h2>
+  <div class="row">
+    <select id="coat"></select>
+    <select id="ears"></select>
+    <select id="face"><option>content</option><option>happy</option><option>eating</option><option>grumpy</option><option>asleep</option></select>
+    <select id="frame"><option value="0">rest</option><option value="1">breathe</option><option value="2">blink</option></select>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <select id="head"><option value="">no hat</option></select>
+    <select id="neck"><option value="">no neck</option></select>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label><input type="checkbox" id="animate"> animate</label>
+    <label><input type="checkbox" id="grid" checked> pixel grid</label>
+    <label><input type="checkbox" id="before"> show original</label>
+  </div>
+
+  <h2>Head</h2>
+  <div id="k-head"></div>
+  <h2>Belly spot</h2>
+  <div id="k-belly"></div>
+  <h2>All outfits of a kind</h2>
+  <div id="k-kind"></div>
+  <h2>This outfit only</h2>
+  <div id="k-item"></div>
+
+  <h2>Output</h2>
+  <div class="row">
+    <button id="copy">Copy as TS</button>
+    <button id="reset">Reset all</button>
+  </div>
+  <pre id="out" style="margin-top:8px"></pre>
+</aside>
+<main>
+  <div class="row" style="align-items:flex-start;gap:14px">
+    <div class="stage"><canvas id="big"></canvas></div>
+    <div class="stage" id="before-wrap" hidden><canvas id="orig"></canvas></div>
+  </div>
+  <div id="hover">Hover the rabbit for pixel coordinates.</div>
+  <div>
+    <h2 style="margin-top:0">Neck outfits (click to wear)</h2>
+    <div class="strip" id="neck-strip"></div>
+  </div>
+  <div>
+    <h2 style="margin-top:0">Head outfits (click to wear)</h2>
+    <div class="strip" id="head-strip"></div>
+  </div>
+  <div>
+    <h2 style="margin-top:0">Every coat and face, wearing the current outfit</h2>
+    <div class="strip" id="faces"></div>
+  </div>
+</main>
+<script type="module" src="../dist/dev/rabbit-lab.js"></script>
+</body></html>

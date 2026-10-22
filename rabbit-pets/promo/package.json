@@ -1,0 +1,14 @@
+{
+  "name": "rabbit-pets-promo",
+  "private": true,
+  "type": "module",
+  "description": "Promo reel and shorts for Rabbit Pets (see promo.config.mjs).",
+  "scripts": {
+    "all": "promo all",
+    "reel": "promo reel",
+    "shorts": "promo shorts"
+  },
+  "devDependencies": {
+    "promo-kit": "file:../../promo-kit"
+  }
+}

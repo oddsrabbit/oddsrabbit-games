@@ -1,0 +1,213 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rabbit Pets harness</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<iframe id="g" src="../dist/rabbit-pets/index.html"></iframe>
+<script>
+// Local stand-in for the OddsRabbit host: answers the bridge from memory so the
+// game can be run without the platform. Not shipped; see ../README.md.
+//   npm run build
+//   python3 -m http.server 8765   (any static server at the repo root)
+//   open http://localhost:8765/rabbit-pets/dev/harness.html?seed=day&at=14
+// It lives outside dist/ so rebuilding never deletes it.
+// Params:
+//   seed=day|away|night-cushion   pre-save a pet
+//   at=HH                         shift the clock so local time is HH:30
+//   user=0                        signed out
+//   coat=cocoa                    coat for the seeded pet
+//   ask=1                         reminders never asked, no timers running
+//   bed=0                         seeded burrow has no bed (she sleeps on the floor)
+//   nap=1                         seeded pet is asleep, two hours from waking
+//   holiday=1                     seeded pet is away on holiday for two days
+//   save=newer|broken             a save from a newer version, or one that can't be read
+//   flaky=N                       the first N storage reads and writes fail, as a connection waking up does
+//   date=2026-12-20               shift the clock to that date (seasons, weather, events)
+//   extras=1                      seeded pet also has a garden, finds, outfits, a journal, a visitor
+//   critter=fox                   which visitor is in the burrow with extras=1 (default robin)
+//   rich=1                        seeded pet is well off: new decor, walls, the moon window, a yard
+//   rooms=1                       with rich=1: the nook and the loft dug out
+//   friends=0                     no social verbs (hides Friends and gifts)
+//   inbox=0                       no gift waiting from a friend
+//   visits=0                      no friends visited while you were away
+//   lonely=1                      the social verbs are on but no one you follow has a rabbit yet
+//   lane=1                        the Friends tab's lane of doors (a prototype, main.ts LANE)
+//   guests=4                      that many friends visited (up to 4), to see them take turns
+//   seen=55                       the visits were seen that many minutes ago (guests leave on the hour)
+//   starter=ready                 Getting started step 1's goals are all done, waiting to be claimed
+//   raffle=9                      that many tickets already bought in every event's raffle (9: the next one wins)
+//   click=Feed,Pet                press buttons in order after load (an exact text match first)
+//   drag=x1,y1,x2,y2              then drag on the burrow, in scene pixels
+const q = new URLSearchParams(location.search);
+const store = {};
+let offset = 0;
+if (q.get('at')) { const d = new Date(); const want = Number(q.get('at')); offset = ((want - d.getHours() + 24) % 24) * 3600e3 + (30 - d.getMinutes()) * 60e3; }
+if (q.get('date')) { const [y, m, dd] = q.get('date').split('-').map(Number); const t = new Date(Date.now() + offset); offset += new Date(y, m - 1, dd, t.getHours(), t.getMinutes()).getTime() - t.getTime(); }
+const now = () => Date.now() + offset;
+const seed = q.get('seed');
+if (seed) {
+  const t = now();
+  const gap = seed === 'away' ? 7 * 3600e3 + 12 * 60e3 : 10 * 60e3;
+  store['v1:pet'] = JSON.stringify({
+    v: 1, petId: 'harness', name: 'Clover', coat: q.get('coat') || 'snow', bornAtMs: t - 5 * 864e5,
+    simAtMs: t - gap - ((t - gap) % 600000), stepIndex: 900, rev: 3,
+    needs: seed === 'away' ? { hunger: 58, happy: 50, energy: 60, clean: 70 } : { hunger: 64, happy: 76, energy: 52, clean: 58 },
+    bond: 24, bondToday: 2, bondDay: '2000-01-01', daysVisited: 5, lastVisitDay: '2000-01-01',
+    timers: seed === 'away' ? [{ kind: 'bake', startedAtMs: t - gap, endsAtMs: t - gap + 3600e3 }] : [{ kind: 'bake', startedAtMs: t - 18 * 60e3, endsAtMs: t + 42 * 60e3 }],
+    treats: 1, clover: 128, gift: { lastClaimDay: null, streak: 4 }, visitorsClaimed: [],
+  });
+  store['v1:burrow'] = JSON.stringify({ v: 1, rev: 2, items: [
+    { uid: 'a', id: 'cushion', slot: 'b2' }, { uid: 'b', id: 'plant', slot: 'b1' }, { uid: 'c', id: 'rug', slot: 'r1' },
+    { uid: 'd', id: 'lantern', slot: 'h2' }, { uid: 'e', id: 'jar', slot: 'f3' },
+  ] });
+  store['v1:settings'] = JSON.stringify({ v: 1, rev: 1, reminders: q.get('ask') ? null : 'on', scheduled: {} });
+  if (q.get('ask')) { const p = JSON.parse(store['v1:pet']); p.timers = []; store['v1:pet'] = JSON.stringify(p); }
+  // nap=1: she's asleep, two hours in; holiday=1: she's away for two days
+  if (q.get('nap')) { const p = JSON.parse(store['v1:pet']); p.needs.energy = 30; p.timers.push({ kind: 'nap', startedAtMs: t - gap, endsAtMs: t + 2 * 3600e3 }); store['v1:pet'] = JSON.stringify(p); }
+  if (q.get('holiday')) { const p = JSON.parse(store['v1:pet']); p.vacationUntilMs = t + 2 * 864e5; store['v1:pet'] = JSON.stringify(p); }
+  // save=newer: the pet was saved by a newer schema; save=broken: the burrow can't be read (store.ts, "versions")
+  if (q.get('save') === 'newer') store['v1:pet'] = JSON.stringify({ ...JSON.parse(store['v1:pet']), schema: 99 });
+  if (q.get('save') === 'broken') store['v1:burrow'] = '{oops';
+  if (q.get('raffle')) { const p = JSON.parse(store['v1:pet']); const n = Number(q.get('raffle')); p.raffle = { snowday: n, bloom: n, summer: n, harvest: n, spooky: n, winterfest: n }; store['v1:pet'] = JSON.stringify(p); }
+  if (q.get('starter') === 'ready') { const p = JSON.parse(store['v1:pet']); p.starter = { counts: { feed: 1, bed: 1, toy: 1, dress: 1 }, paid: [] }; store['v1:pet'] = JSON.stringify(p); }
+  if (q.get('bed') === '0') { const b = JSON.parse(store['v1:burrow']); b.items = b.items.filter((i) => i.id !== 'cushion'); store['v1:burrow'] = JSON.stringify(b); }
+  if (q.get('extras')) {
+    const p = JSON.parse(store['v1:pet']);
+    Object.assign(p, {
+      daysVisited: 9, meals: 20,
+      collection: { pebble: 3, feather: 1, acorn: 2, marble: 1 },
+      garden: { plots: [{ crop: 'berry', plantedAtMs: t - 9 * 3600e3, readyAtMs: t - 3600e3 }, { crop: 'golden', plantedAtMs: t - 5 * 3600e3, readyAtMs: t + 7 * 3600e3 }, null] },
+      pantry: { berries: 1, golden: 1 },
+      critters: { seen: { hedgehog: 2, robin: 1, fox: 1 }, here: { id: q.get('critter') || 'robin', untilMs: t + 3600e3 } },
+      wardrobe: { owned: ['bow', 'bandana'], head: 'bow', neck: 'bandana' },
+    });
+    store['v1:pet'] = JSON.stringify(p);
+    store['v1:journal'] = JSON.stringify({ v: 1, rev: 1, firsts: ['adopted', 'find:marble'], entries: [
+      { atMs: t - 3 * 864e5, text: 'Found a marble for the shelf. A rare one!', art: 'marble' },
+      { atMs: t - 9 * 864e5, text: 'Clover came home to the burrow.', art: 'heart' },
+    ] });
+  }
+}
+if (seed && q.get('rich')) {
+  // a well-off rabbit: new decor, walls, the moon window, a yard
+  const t = now();
+  const p = JSON.parse(store['v1:pet']);
+  Object.assign(p, {
+    clover: 20000, bond: 400, upgrades: ['plot2', 'plot3', 'can', 'meadow'], soilLevel: 2, toys: ['yarn', 'box'],
+    // three friends visited back and forth: three fruit on the friendship tree
+    friends: Object.fromEntries(['a', 'b', 'c'].map((k) => [k, { points: 4, in: 'x', out: 'x' }])),
+    yard: { counts: { patch: 5, hive: 2 }, sheds: 1, stored: 40.5, atMs: t - 3600e3 }, paid: ['bond:2', 'bond:3', 'bond:4', 'bond:5', 'bond:6', 'bond:7'],
+  });
+  store['v1:pet'] = JSON.stringify(p);
+  store['v1:burrow'] = JSON.stringify({ v: 2, rev: 4, items: [
+    { uid: 'a', id: 'hayloft', x: 72, y: 110, flip: false, placed: true }, { uid: 'b', id: 'fireplace', x: 22, y: 100, flip: false, placed: true },
+    { uid: 'c', id: 'bookshelf', x: 86, y: 99, flip: false, placed: true }, { uid: 'd', id: 'bunting', x: 56, y: 12, flip: false, placed: true },
+    { uid: 'e', id: 'lamp', x: 52, y: 100, flip: false, placed: true }, { uid: 'f', id: 'rug', x: 46, y: 108, flip: false, placed: true },
+    { uid: 'g', id: 'clock', x: 64, y: 99, flip: false, placed: true },
+    // the meadow: somewhere for visiting friends to sit, and the friendship tree
+    { uid: 'm1', id: 'guestchairs', x: 230, y: 108, flip: false, placed: true }, { uid: 'm2', id: 'teacorner', x: 262, y: 112, flip: false, placed: true },
+    { uid: 'm3', id: 'friendtree', x: 214, y: 96, flip: false, placed: true },
+  ], surfaces: { owned: ['starrywall', 'oakfloor', 'moonwindow'], wall: 'starrywall', floor: 'oakfloor', window: 'moonwindow' } });
+  if (q.get('rooms')) {
+    // the nook and the loft dug out, a few pieces in each
+    const b = JSON.parse(store['v1:burrow']);
+    b.rooms = {
+      nook: { items: [{ uid: 'n1', id: 'windowseat', x: 70, y: 104, flip: false, placed: true }, { uid: 'n2', id: 'plant', x: 20, y: 104, flip: false, placed: true }] },
+      loft: { items: [{ uid: 'l1', id: 'bookshelf', x: 20, y: 99, flip: false, placed: true }, { uid: 'l2', id: 'lamp', x: 76, y: 100, flip: false, placed: true }] },
+    };
+    store['v1:burrow'] = JSON.stringify(b);
+  }
+}
+// two friends with rabbits, and a gift waiting
+const FRIENDS = [
+  { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, updatedAt: new Date().toISOString(),
+    data: { v: 1, name: 'Pip', coat: 'ginger', needs: { hunger: 70, happy: 80, energy: 60, clean: 75 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
+      daysVisited: 23, bondLevel: 4, head: 'flowercrown', neck: null, missing: ['acorn', 'bat', 'marble'],
+      garden: { plots: [{ crop: 'berry', plantedAtMs: now() - 9 * 3600e3, readyAtMs: now() - 3600e3 }, { crop: 'sprout', plantedAtMs: now() - 3600e3, readyAtMs: now() + 3 * 3600e3 }], yard: { patch: 4, hive: 1 }, sheds: 1, meadow: null },
+      items: [{ id: 'rug', x: 49, y: 106, flip: false }, { id: 'mushroom', x: 20, y: 104, flip: false }, { id: 'garland', x: 50, y: 12, flip: false }, { id: 'jar', x: 80, y: 110, flip: true }, { id: 'corkboard', x: 20, y: 14, flip: false }],
+      // her corkboard: two notes from her guest book (guestbook.ts), on the berry cover
+      pinned: [{ r: 'Bun', n: 'n2014', s: 'acorn', c: 'silver' }, { r: 'Mochi', n: 'n1000', s: 'goldleaf', c: 'midnight' }], cover: 'berry' } },
+  { uuid: '33333333-3333-4333-8333-333333333333', username: 'mochi.mama', avatar: null, updatedAt: new Date().toISOString(),
+    data: { v: 1, name: 'Mochi', coat: 'midnight', needs: { hunger: 50, happy: 60, energy: 40, clean: 80 }, simAtMs: now(), napEndsAtMs: null, vacationUntilMs: null,
+      daysVisited: 4, bondLevel: 1, head: 'beanie', neck: 'redscarf',
+      items: [{ id: 'cushion', x: 70, y: 108, flip: false }, { id: 'lantern', x: 30, y: 14, flip: false }] } },
+];
+const inbox = q.get('inbox') === '0' ? [] : [{ giftUuid: '44444444-4444-4444-8444-444444444444', from: { uuid: FRIENDS[0].uuid, username: 'pip_fan', avatar: null }, kind: 'berry', message: null, sentAt: new Date().toISOString() }];
+const sentToday = [];
+// both friends dropped by while you were away (visits=0 for none; guests=N for more, who
+// only visit, not in the friends list; seen=M for visits already seen M minutes ago)
+const EXTRA = [['Bun', 'silver', 'bun.bun'], ['Maple', 'cream', 'maple_leaf']].map(([name, coat, username], i) => ({
+  uuid: `8888888${i}-8888-4888-8888-888888888888`, username,
+  data: { ...FRIENDS[0].data, name, coat, head: null, neck: i ? 'bell' : null, items: [] },
+}));
+const visitors = [...FRIENDS, ...EXTRA].slice(0, Math.max(0, Math.min(4, Number(q.get('guests') ?? 2))));
+const seenAt = q.get('seen') ? new Date(now() - Number(q.get('seen')) * 60e3).toISOString() : null;
+const visits = q.get('visits') === '0' ? [] : visitors.map((f, i) => ({
+  // each with a note and a stamp (guestbook.ts): "Wow, your burrow is so cozy!", "Aww, <her> is adorable!", "Your fireplace is so cozy!"
+  visitUuid: `6666666${i}-6666-4666-8666-666666666666`, kind: ['snack-n1000-s07', 'pat-n2014-s1c', 'brush-n00u0-s03', 'pat'][i], visitedAt: new Date(now() - (i + 1) * 3600e3).toISOString(), seenAt,
+  from: { uuid: f.uuid, username: f.username, avatar: null }, showcase: f.data, counts: true,
+}));
+const visitedToday = [];
+const frame = document.getElementById('g');
+if (q.get('lane') === '1') frame.src = '../dist/rabbit-pets/index.html?lane=1';
+const caps = ['storage.get','storage.set','storage.delete','content.daily','actions.share','actions.haptic','actions.requestSignIn','session.refresh','time.now','notifications.schedule','notifications.cancel','notifications.list','notifications.status'];
+if (q.get('friends') !== '0') caps.push('showcase.publish', 'showcase.friends', 'showcase.get', 'gifts.send', 'gifts.inbox', 'gifts.claim', 'gifts.sentToday',
+  'visits.record', 'visits.inbox', 'visits.seen', 'visits.sentToday');
+function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
+function init() {
+  send({ type: 'init', user: q.get('user') === '0' ? null : { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester', avatar: null, createdAt: null },
+    sessionToken: 'x', expiresAt: null, colorScheme: 'light', capabilities: caps });
+}
+frame.addEventListener('load', () => {
+  init(); setTimeout(init, 200);
+  // click=Text1,Text2: press buttons whose text contains each, in order
+  const clicks = (q.get('click') || '').split(',').filter(Boolean);
+  // drag=x1,y1,x2,y2 in scene pixels: drag on the burrow canvas after the clicks
+  const drag = (q.get('drag') || '').split(',').map(Number);
+  if (drag.length === 4) setTimeout(() => {
+    const cv = frame.contentDocument.querySelector('canvas');
+    const r = cv.getBoundingClientRect(), k = r.width / 98;
+    const at = (x, y) => ({ clientX: r.left + x * k, clientY: r.top + y * k, pointerId: 1, bubbles: true });
+    cv.dispatchEvent(new frame.contentWindow.PointerEvent('pointerdown', at(drag[0], drag[1])));
+    for (let t = 1; t <= 5; t++) cv.dispatchEvent(new frame.contentWindow.PointerEvent('pointermove', at(drag[0] + (drag[2] - drag[0]) * t / 5, drag[1] + (drag[3] - drag[1]) * t / 5)));
+    cv.dispatchEvent(new frame.contentWindow.PointerEvent('pointerup', at(drag[2], drag[3])));
+  }, 1500 + clicks.length * 700);
+  clicks.forEach((text, i) => setTimeout(() => {
+    const doc = frame.contentDocument;
+    const all = [...doc.querySelectorAll('button')];
+    const b = all.find((x) => (x.textContent || '').trim() === text) ?? all.find((x) => (x.textContent || '').includes(text) || (x.getAttribute('aria-label') || '').includes(text));
+    if (b) b.click(); else console.log('no button', text);
+  }, 1500 + i * 700));
+});
+let flaky = Number(q.get('flaky') ?? 0);
+window.addEventListener('message', (e) => {
+  const r = e.data; if (!r || !r.correlationId) return;
+  const ok = (result) => send({ type: 'response', correlationId: r.correlationId, ok: true, result });
+  const p = r.payload || {};
+  if (r.type.startsWith('storage.') && flaky > 0) { flaky--; return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'network', message: 'offline' } }); }
+  switch (r.type) {
+    case 'storage.get': return ok(store[p.key] ?? null);
+    case 'storage.set': store[p.key] = p.value; return ok(undefined);
+    case 'storage.delete': delete store[p.key]; return ok(undefined);
+    case 'time.now': return ok({ serverTime: new Date(now()).toISOString() });
+    case 'content.daily': return ok({ roundKey: p.roundKey, content: { visitor: 'hedgehog', line: 'Brought you a dandelion!' } });
+    case 'notifications.schedule': console.log('schedule', p.key, p.fireAt, p.body); return ok({ key: p.key, fireAt: p.fireAt.replace(/\.\d+Z$/, 'Z'), deliverAt: p.fireAt.replace(/\.\d+Z$/, 'Z'), serverTime: new Date(now()).toISOString() });
+    case 'notifications.cancel': return ok({ key: p.key, cancelled: true });
+    case 'notifications.list': return ok({ pending: [], serverTime: new Date(now()).toISOString() });
+    case 'notifications.status': return ok({ push: true });
+    case 'showcase.publish': console.log('showcase', JSON.stringify(p.data).length, 'bytes', p.data); return ok({ updatedAt: new Date(now()).toISOString() });
+    case 'showcase.friends': return ok(q.get('lonely') === '1' ? [] : FRIENDS);
+    case 'showcase.get': return ok(FRIENDS.find((f) => f.uuid === p.userUuid) ?? null);
+    case 'gifts.inbox': return ok(inbox);
+    case 'gifts.claim': { const i = inbox.findIndex((g) => g.giftUuid === p.giftUuid); if (i < 0) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'gifts/claimed', message: 'claimed' } }); const [g] = inbox.splice(i, 1); return ok({ giftUuid: g.giftUuid, kind: g.kind, claimedAt: new Date(now()).toISOString() }); }
+    case 'gifts.send': if (sentToday.includes(p.toUserUuid)) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'gifts/already-sent-today', message: 'already' } }); sentToday.push(p.toUserUuid); return ok({ giftUuid: '55555555-5555-4555-8555-' + String(Date.now()).slice(-12).padStart(12, '0'), sentAt: new Date(now()).toISOString() });
+    case 'gifts.sentToday': return ok(sentToday.slice());
+    case 'visits.inbox': return ok(visits.map((v) => ({ ...v })));
+    case 'visits.seen': { const at = new Date(now()).toISOString(); const seen = []; for (const v of visits) if (p.visitUuids.includes(v.visitUuid) && !v.seenAt) { v.seenAt = at; seen.push(v.visitUuid); } return ok({ seen, seenAt: at }); }
+    case 'visits.record': if (visitedToday.includes(p.toUserUuid)) return send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: 'visits/already-visited-today', message: 'already' } }); visitedToday.push(p.toUserUuid); return ok({ visitUuid: '77777777-7777-4777-8777-777777777777', visitedAt: new Date(now()).toISOString() });
+    case 'visits.sentToday': return ok(visitedToday.slice());
+    default: return ok(undefined);
+  }
+});
+</script>
+</body></html>

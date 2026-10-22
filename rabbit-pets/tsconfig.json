@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    // The SDK is a sibling checkout (../apps-sdk), read from source so a new
+    // bridge verb is visible here without building or publishing the SDK.
+    // Only types come from it: at runtime the game uses the host's
+    // `../sdk-v1.js`, and esbuild drops the type-only imports.
+    "paths": {
+      "@oddsrabbit/apps-sdk": ["../apps-sdk/src/sdk/sdk.ts"]
+    }
+  },
+  "include": ["src/**/*", "dev/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eat Lab</title>
+<!--
+  Mock-ups of the eating reaction, side by side, drawn with the game's own
+  rabbit and food art. Not shipped.
+    npm run build          (writes dist/dev/eat-lab.js)
+    python3 -m http.server 8765   (at the repo root)
+    open http://localhost:8765/dev/eat-lab.html
+-->
+<style>
+:root{--bg:#1d1a22;--panel:#2a2631;--ink:#eee8f2;--dim:#9a92a6;--line:#3b3645;--accent:#f3a6b3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:1;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:10px 16px;flex-wrap:wrap;align-items:center}
+h1{font-size:15px;margin:0 8px 0 0}
+label{color:var(--dim);display:flex;gap:6px;align-items:center}
+select,button{background:#3a3543;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--accent)}
+#time{color:var(--dim);font-variant-numeric:tabular-nums}
+main{padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px}
+.card{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+.stage{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:6px;max-width:100%}
+canvas.small{outline:1px solid var(--line)}
+figcaption{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+figcaption span{color:var(--dim)}
+.sec{padding:16px 16px 0}.sec h2{font-size:14px;margin:0 0 4px}.sec p{color:var(--dim);margin:0 0 12px}
+#muzzles{display:grid;grid-template-columns:1fr;gap:12px}
+.card.muzzle{cursor:pointer}.card.muzzle:hover{border-color:#6b6078}.card.muzzle.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card code{color:var(--dim);font-size:11px}
+@media (max-width:420px){main{grid-template-columns:1fr;padding:10px}}
+</style></head><body>
+<header>
+  <h1>Eat lab</h1>
+  <label>Coat <select id="coat"></select></label>
+  <label>Ears <select id="ears"></select></label>
+  <label>Food <select id="food"></select></label>
+  <label>She… <select id="outcome"><option value="loves">loves it</option><option value="happy" selected>is happy</option><option value="okay">finds it just okay</option></select></label>
+  <label>Speed <select id="speed"><option value="1">1×</option><option value="0.5">½×</option><option value="0.25">¼×</option></select></label>
+  <label>Zoom <select id="zoom"><option>4</option><option selected>5</option><option>7</option></select></label>
+  <label title="How the in-game card looks with the device's reduced-motion setting on"><input type="checkbox" id="still"> reduced motion</label>
+  <button id="replay">Replay all</button>
+  <label><input type="checkbox" id="pause"> pause at</label>
+  <input type="range" id="scrub" min="0" max="1" step="0.005" value="0.4">
+  <span id="time"></span>
+</header>
+<section class="sec">
+  <h2>Muzzle: the light patch round her mouth</h2>
+  <p>Six coats with her content face, then the chosen coat nibbling, happy and licking. Click one to use it in the eating cards below. Using: <b id="using"></b></p>
+  <div id="muzzles"></div>
+</section>
+<section class="sec"><h2>Eating</h2></section>
+<main id="cards"></main>
+<script type="module" src="../dist/dev/eat-lab.js"></script>
+</body></html>
