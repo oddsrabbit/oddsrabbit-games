@@ -39,6 +39,7 @@ flappy-rabbits/ Flappy Rabbits — one-button side-scroller, full-bleed scene
 liquid/         Liquid WebGL toy — no scopes
 rabbit-pets/    Rabbit Pets — virtual pet with clovers, visits and gifts
 word-battle/    Word Battle — async multiplayer word tiles (rules: TilesRules.php)
+chess/          Chess — async two-player chess (rules: ChessRules.php)
 word-rush/      Word Rush — daily word grid, Ranked + Casual
 rabbit-paint/   Rabbit Paint — tap-to-fill coloring with a daily gallery
 docs/           Deploy cache policy, header guidelines, proposals
@@ -47,7 +48,7 @@ scripts/        sync-public-sdk.mjs
 
 `npm install && npm run build` produces `dist/`, which is what gets uploaded to
 apps.oddsrabbit.com; `npm test` runs the unit tests. `rabbit-pets/`,
-`word-battle/`, `word-rush/` and `rabbit-paint/` have their own `package.json`
+`word-battle/`, `chess/`, `word-rush/` and `rabbit-paint/` have their own `package.json`
 and build: build the root first, since they read its `dist/` and `src/`, then
 see each game's README. After an upload, bump the
 cache version, or clients keep the build they already hold: see

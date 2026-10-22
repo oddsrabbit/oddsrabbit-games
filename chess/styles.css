@@ -1,0 +1,1067 @@
+/* Chess. The frame (screens, list, sheet, chat, dialogs) is Word Battle's,
+   so the two games feel like one family; the board and pieces are this
+   game's own. Colours follow the host theme via data-theme on <html>, and
+   every colour the board and pieces use is a custom property here, read by
+   board.js and pieces.js through CSS, so the two themes cannot drift. */
+
+
+/* The display face, for headings and the tiles drawn outside the board.
+   Bundled (fonts/, SIL OFL — licence alongside) rather than fetched from a
+   font CDN, so the game makes no third-party request. Latin only, one
+   weight; body text stays on the system font. */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("./fonts/bricolage-grotesque-800-latin.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+}
+
+:root {
+  --display: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg: #f3efe4;
+  --card: #ffffff;
+  --ink: #1f2330;
+  --muted: #6b6f7c;
+  --line: #d9d3c2;
+  /* Darkened so white button text clears 4.5:1. */
+  --accent: #c0491f;
+  --accent-ink: #ffffff;
+  --primary-bg: var(--accent);
+  --badge-bg: var(--turn);
+  --danger: #a32b1f;
+  --danger-ink: #ffffff;
+  --warn-bg: #fdf3d8;
+  --warn-ink: #7a5510;
+  --warn-line: #e6cf95;
+  --turn: #2b7a52;
+  --up-bg: #dcefe3; --up-ink: #1f6b45;
+  --down-bg: #f7e0d6; --down-ink: #9c3c17;
+
+  /* The board: walnut and maple. */
+  --sq-light: #eedfc0;
+  --sq-dark: #b4855a;
+  --sq-light-ink: #9a6f45;   /* coordinates on a light square */
+  --sq-dark-ink: #f6ead2;    /* and on a dark one */
+  --board-edge: #7d5634;
+  --sq-last: rgb(222 178 52 / 0.5);
+  --sq-select: rgb(43 122 82 / 0.5);
+  --sq-dot: rgb(28 30 38 / 0.26);
+  --sq-check: #e0452a;
+
+  /* Pieces (pieces.js). Cream and ink in both themes: the board under
+     them does not change much either, so neither do they. */
+  --piece-w: #fbf6ea;
+  --piece-w-edge: #2b2724;
+  --piece-b: #2b2724;
+  --piece-b-edge: #1b1816;
+  --piece-b-line: #efe6d2;
+}
+html[data-theme="dark"] {
+  --bg: #14151b;
+  --card: #1e2029;
+  --ink: #e8e6df;
+  --muted: #9a9daa;
+  --line: #2c2f3b;
+  --accent: #e0693d;
+  --danger: #e2685c;
+  --danger-ink: #23110e;
+  --warn-bg: #34291180;
+  --warn-ink: #e8cf95;
+  --warn-line: #5b4a20;
+  --turn: #43a97a;
+  --up-bg: #1d3a2b; --up-ink: #8fd6b0;
+  --primary-bg: #c0491f; /* 5.0:1 with white */
+  --badge-bg: #2b7a52;   /* 5.2:1 with white */
+  --down-bg: #3d2219; --down-ink: #f2a384;
+
+  --sq-light: #cdb68f;
+  --sq-dark: #7f5b3b;
+  --sq-light-ink: #6e4e30;
+  --sq-dark-ink: #eadcc0;
+  --board-edge: #3a2a1c;
+  --sq-last: rgb(230 186 60 / 0.45);
+  --sq-select: rgb(67 169 122 / 0.5);
+  --sq-dot: rgb(16 17 22 / 0.4);
+}
+
+   application.js sets data-overlay while the dialog is open. */
+html[data-overlay] { --oddsrabbit-edge-top: #7a7872; }
+html[data-theme="dark"][data-overlay] { --oddsrabbit-edge-top: #0a0b0e; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+body { display: flex; flex-direction: column; min-height: 100dvh; }
+button { font: inherit; color: inherit; }
+/* The UA rule for [hidden] is display:none at the lowest specificity, so any
+   class here that sets `display` silently beats it and the element stays on
+   screen. Everything on these screens is shown and hidden with the attribute,
+   so make the attribute win once, here, rather than remembering to pair every
+   flex container with its own [hidden] rule. */
+[hidden] { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.fatal { margin: 24px; text-align: center; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Text fields already have a border to work with, so focus thickens it —
+   inside the box. A ring drawn outside (as this was) is clipped wherever the
+   field sits in a scrolling list, and came out lopsided. */
+.invite-input:focus, .invite-input:focus-visible,
+.join-field:focus, .join-field:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+/* The same clipping hits the keyboard ring on anything inside a scroller
+   (game rows, friend rows, the chooser's cards), so there it sits inside. */
+.match-list :focus-visible,
+.screen-scroll :focus-visible,
+.invitable-list :focus-visible { outline-offset: -3px; }
+
+.screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* No top padding: the .bar is the first row and sits flush with the top,
+     in the host's back-button row. The page runs edge to edge, so the sides
+     and the bottom (under the Play button) clear the safe areas. */
+  padding: 0
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           calc(12px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(12px + var(--oddsrabbit-safe-left, 0px));
+  gap: 8px;
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  min-height: 0;
+}
+.screen[hidden] { display: none; }
+.screen-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+/* The header row (docs/game-header-guidelines.md): below the status bar, as
+   tall as the host's back-button row, with the button's lane kept empty at the
+   start. The negative margins undo .screen's side padding, taking it out to the
+   screen's edges so the lane is measured from the edge, as the host measures
+   it. */
+.bar {
+  display: flex; align-items: center; gap: 8px;
+  box-sizing: border-box;
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+  margin: 0
+          calc(-12px - var(--oddsrabbit-safe-right, 0px))
+          0
+          calc(-12px - var(--oddsrabbit-safe-left, 0px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 12px) + var(--oddsrabbit-safe-left, 0px));
+}
+.bar .title {
+  flex: 1; min-width: 0; margin: 0; font-family: var(--display); font-size: 22px; font-weight: 800;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.back-button, .icon-button {
+  position: relative;
+  width: 32px; height: 32px; flex: 0 0 auto; border-radius: 10px; padding: 0;
+  border: 1px solid var(--line); background: var(--card);
+  line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+/* 32px to match the host's back button; the tap area stays 44px. */
+.back-button::after, .icon-button::after { content: ""; position: absolute; inset: -6px; }
+.back-button { font-size: 15px; font-weight: 700; }
+.icon-button { font-size: 16px; font-weight: 700; }
+
+.primary, .subtle, .join-open-button, .dialog-cancel {
+  border-radius: 12px; padding: 10px 16px; cursor: pointer; border: 1px solid var(--line);
+  background: var(--card);
+}
+.primary { background: var(--primary-bg); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+.primary.is-danger { background: var(--danger); color: var(--danger-ink); }
+.primary:disabled, .subtle:disabled, .join-open-button:disabled { opacity: 0.45; cursor: default; }
+.subtle { padding: 8px 12px; font-size: 14px; }
+
+.group-title { margin: 12px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.notice {
+  margin: 0; padding: 10px 12px; border-radius: 12px;
+  background: var(--card); border: 1px solid var(--line); font-size: 14px;
+}
+.notice-warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+/* Someone has gone quiet: an action to take, so it carries a little accent. */
+.stall {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.stall[hidden] { display: none; }
+.stall-text { margin: 0; flex: 1 1 160px; color: var(--ink); }
+.stall-actions { display: flex; gap: 6px; }
+.stall-actions button {
+  padding: 7px 14px; font-size: 14px; font-weight: 700; border-radius: 10px; cursor: pointer;
+  border: 1.5px solid var(--accent); background: var(--card); color: var(--accent);
+}
+.stall-actions button:disabled { opacity: 0.55; cursor: default; }
+
+/* ---- list + hero */
+
+/* With no games (or signed out) the hero owns the screen; with games the list
+   does and the hero is not rendered at all. application.js sets `.is-landing`
+   on the list screen while the hero is up. Neither shows the bar title, so it
+   starts hidden (no flash through the handshake) and only `.is-bare` — the
+   "none" mode on a host that cannot play — brings it back. */
+.screen-list:not(.is-bare) .bar .title { visibility: hidden; }
+/* Centred with auto margins rather than justify-content: on a short phone the
+   hero is taller than the screen, and centring would push its top out of
+   reach of the scroll. */
+.hero {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center;
+  gap: 14px; text-align: center; padding: 8px 4px 16px;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+.hero[hidden] { display: none; }
+.hero > :first-child { margin-top: auto; }
+.hero > :last-child { margin-bottom: auto; }
+@media (max-height: 640px) {
+  .hero { gap: 10px; }
+  .hero-board { --sz: min(40px, calc((100vw - 64px) / 6)); }
+  .hero-title { font-size: 18px; }
+  .hero-steps { gap: 6px; font-size: 13px; }
+  .hero-actions button { padding: 11px 16px; }
+}
+
+/* A corner of a board mid-game, tilted, its pieces dropping in. */
+.hero-board {
+  --sz: min(54px, calc((100vw - 72px) / 5));
+  display: grid; grid-template-columns: repeat(5, var(--sz)); grid-auto-rows: var(--sz);
+  border-radius: 10px; overflow: hidden; margin: 8px 0 10px;
+  box-shadow: 0 0 0 4px var(--board-edge), 0 16px 32px -14px rgb(0 0 0 / 0.5);
+  rotate: -3deg;
+}
+.hero-sq { display: block; }
+.hero-sq.is-light { background: var(--sq-light); }
+.hero-sq.is-dark { background: var(--sq-dark); }
+.hero-sq svg { display: block; width: 100%; height: 100%; }
+.hero-sq.has-piece svg { animation: hero-drop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; animation-delay: inherit; }
+@keyframes hero-drop {
+  from { opacity: 0; transform: translateY(-14px) scale(1.08); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-sq.has-piece svg { animation: none; }
+}
+
+
+.hero-title { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.25; max-width: 22ch; }
+.hero-steps {
+  list-style: none; margin: 0; padding: 0; width: 100%; max-width: 340px;
+  display: flex; flex-direction: column; gap: 10px; text-align: left; font-size: 14px;
+}
+.hero-steps li { display: flex; gap: 10px; align-items: flex-start; }
+.hero-steps strong { color: var(--ink); }
+.hero-steps li > span:last-child { color: var(--muted); }
+.hero-step-mark {
+  flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  font-size: 13px; font-weight: 800;
+}
+.hero-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; margin-top: 4px; }
+.hero-actions button { width: 100%; padding: 14px 16px; font-size: 16px; }
+.sign-in-note { margin: 0; max-width: 34ch; }
+.help-link {
+  background: none; border: 0; padding: 6px 10px; cursor: pointer;
+  color: var(--muted); font-size: 14px; text-decoration: underline; text-underline-offset: 3px;
+}
+
+.list-status:empty { display: none; }
+.list-status { position: relative; z-index: 1; margin: 0; text-align: center; }
+/* Over the band, not in the flow: with games on screen a status line
+   ("Joining ABC234…", an error) must never move the sheet. */
+.screen-list.has-games .list-status {
+  position: absolute; z-index: 2; left: 50%; transform: translateX(-50%);
+  top: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px) + 6px);
+  max-width: calc(100% - 32px); padding: 6px 12px; border-radius: 999px;
+  background: var(--card); color: var(--ink); font-size: 13px; box-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.4);
+}
+
+/* ---- with games: the band, and the sheet pulled up over it */
+
+.screen-list { position: relative; }
+.screen-list .bar { position: relative; z-index: 1; }
+/* A strip of board running up under the status bar, and two rabbits facing
+   off on it. Anchored to the bottom so a taller safe area crops the top. */
+.list-band {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 0;
+  height: calc(var(--oddsrabbit-safe-top, 0px) + 150px);
+  background: var(--sq-dark); overflow: hidden;
+}
+.band-squares {
+  position: absolute; inset: 0;
+  background-image: repeating-conic-gradient(var(--sq-light) 0 25%, var(--sq-dark) 0 50%);
+  background-size: 112px 112px; background-position: calc(50% + 28px) calc(100% + 28px);
+}
+.band-pieces { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); display: flex; align-items: flex-end; }
+.band-piece { display: block; width: 104px; height: 104px; filter: drop-shadow(0 10px 10px rgb(0 0 0 / 0.35)); }
+.band-piece svg { display: block; width: 100%; height: 100%; }
+.band-piece.is-front { order: -1; transform: scaleX(-1) rotate(-6deg); margin-right: -10px; }
+.band-piece.is-back { transform: rotate(-6deg); }
+
+
+/* Full-bleed like .bar, starting 24px above the band's bottom edge. */
+.list-sheet {
+  position: relative; z-index: 1; flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  margin: calc(150px - var(--oddsrabbit-chrome-height, 48px) - 24px - 8px)
+          calc(-12px - var(--oddsrabbit-safe-right, 0px))
+          calc(-12px - var(--oddsrabbit-safe-bottom, 0px))
+          calc(-12px - var(--oddsrabbit-safe-left, 0px));
+  padding: 18px
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           calc(12px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(12px + var(--oddsrabbit-safe-left, 0px));
+  border-radius: 24px 24px 0 0; background: var(--bg);
+  box-shadow: 0 -8px 20px -12px rgb(0 0 0 / 0.35);
+}
+.sheet-head { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; }
+.sheet-title { margin: 0; flex: 1; font-family: var(--display); font-size: 28px; font-weight: 800; line-height: 1; }
+.record { font-size: 13px; color: var(--muted); padding-bottom: 2px; }
+.record b { color: var(--ink); }
+.match-list { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+.action-bar { display: flex; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.action-bar .new-game-button { flex: 2 1 0; }
+.action-bar .join-open-button { flex: 1 1 0; white-space: nowrap; }
+
+/* ---- the spotlight: the game waiting on you */
+.spotlight {
+  display: flex; flex-direction: column; gap: 12px; padding: 16px; margin-bottom: 4px;
+  border-radius: 20px; border: 1px solid var(--line); background: var(--card);
+  box-shadow: 0 12px 28px -18px rgb(0 0 0 / 0.4);
+}
+.spot-head { display: flex; align-items: center; gap: 12px; }
+.spot-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.spot-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--turn); }
+.spot-name {
+  font-family: var(--display); font-size: 20px; font-weight: 800;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.spot-body { display: grid; grid-template-columns: minmax(0, 148px) minmax(0, 1fr); gap: 14px; align-items: center; }
+.spot-body.is-loading { height: 148px; opacity: 0.35; border-radius: 8px; background: var(--sq-light); }
+.spot-facts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spot-last { margin: 0; font-size: 15px; color: var(--ink); }
+.spot-meta { margin: 0; font-size: 13px; color: var(--muted); }
+/* The board in miniature, for the spotlight. */
+.cb-preview {
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-auto-rows: 1fr; aspect-ratio: 1;
+  border-radius: 5px; overflow: hidden; box-shadow: 0 0 0 2px var(--board-edge);
+}
+.cb-preview .pv { position: relative; aspect-ratio: 1; min-width: 0; background: var(--sq-light); }
+.cb-preview .pv.is-dark { background: var(--sq-dark); }
+.cb-preview .pv.is-last::before { content: ""; position: absolute; inset: 0; background: var(--sq-last); }
+.cb-preview .pv svg { position: relative; display: block; width: 100%; height: 100%; }
+.san { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.spot-play { width: 100%; padding: 14px 16px; font-size: 16px; }
+.spot-play.is-busy { opacity: 0.6; }
+
+/* ---- rows */
+.match-row {
+  display: flex; align-items: center; gap: 4px; margin: 0 0 6px;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--card);
+}
+.match-row.is-mine { border-color: color-mix(in srgb, var(--turn) 40%, var(--line)); }
+.match-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 0; background: none; color: inherit; text-align: left; cursor: pointer; border-radius: 14px;
+}
+.match-open.is-busy { opacity: 0.6; cursor: progress; }
+.match-faces { display: flex; flex: 0 0 auto; }
+.match-faces > * + * { margin-left: -8px; }
+.match-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.match-names { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.match-detail { color: var(--muted); font-size: 13px; }
+.match-status { color: var(--muted); font-size: 12px; }
+.match-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: 0 0 auto; }
+.match-when { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.badge { background: var(--badge-bg); color: #fff; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; flex: 0 0 auto; }
+.row-nudge {
+  flex: 0 0 auto; margin-right: 10px; padding: 7px 12px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); font-size: 13px; font-weight: 600;
+}
+.row-nudge:disabled { opacity: 0.55; cursor: default; }
+/* A challenge row: the answer is on the row, so the two buttons sit under it. */
+.match-row.is-challenge { flex-wrap: wrap; border-color: color-mix(in srgb, var(--turn) 40%, var(--line)); }
+.row-actions { display: flex; gap: 8px; flex: 1 0 100%; box-sizing: border-box; padding: 0 12px 12px; }
+.row-actions button { flex: 1 1 0; padding: 10px 12px; }
+
+/* New game: the quick-match option, above the invite list. */
+/* ---- Play with friends: the table as seat chips */
+.table-seats { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 6px; }
+.table-seat {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; box-sizing: border-box;
+  padding: 4px 6px 4px 4px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+  font-size: 14px; font-weight: 600;
+}
+.table-seat.is-you { padding-right: 14px; }
+.table-seat.is-open {
+  padding-left: 12px; border: 1.5px dashed var(--accent); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+}
+.table-seat.is-add {
+  padding: 4px 14px; border: 1.5px dashed var(--line); background: none; color: var(--muted);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.table-seat.is-add:hover { border-color: var(--accent); color: var(--accent); }
+.seat-remove {
+  width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+  background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); font-size: 12px; font-weight: 700;
+}
+.seat-link-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+.table-note { margin: 0 0 4px; }
+
+/* Friend rows: the theme's own tick box rather than the platform's blue one. */
+.invitable-row input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; flex: 0 0 auto; margin: 0;
+  width: 22px; height: 22px; border-radius: 7px; background: var(--card);
+  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, var(--line));
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.invitable-row input[type="checkbox"]:checked { background: var(--primary-bg); border-color: var(--primary-bg); }
+.invitable-row input[type="checkbox"]:checked::after { content: "✓"; color: var(--accent-ink); font-size: 13px; font-weight: 800; }
+.invitable-row input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.invitable-row:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+
+/* ---- New game chooser: two doors, each a whole tappable card. */
+.choose-body { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.choose-card {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 18px 16px; text-align: left;
+  border-radius: 18px; border: 1px solid var(--line); background: var(--card); color: inherit; cursor: pointer;
+  box-shadow: 0 10px 24px -20px rgb(0 0 0 / 0.5);
+}
+.choose-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.choose-card:disabled { opacity: 0.6; cursor: progress; }
+.choose-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.choose-text strong { font-family: var(--display); font-size: 19px; font-weight: 800; }
+.choose-text span { color: var(--muted); font-size: 14px; line-height: 1.35; }
+.choose-go { flex: 0 0 auto; font-size: 26px; line-height: 1; color: var(--muted); }
+.choose-art { flex: 0 0 auto; display: flex; }
+.art-piece {
+  width: 46px; height: 46px; border-radius: 10px; background: var(--sq-light);
+  box-shadow: 0 0 0 2px var(--board-edge);
+}
+.art-piece:nth-child(even) { background: var(--sq-dark); margin-left: -6px; transform: rotate(6deg) translateY(4px); }
+.art-piece:nth-child(odd) { transform: rotate(-5deg); }
+.art-piece svg { display: block; width: 100%; height: 100%; }
+
+.choose-join { align-self: center; margin-top: 4px; }
+
+/* ---- Finding an opponent (a quick-match table still waiting) */
+.screen-match.is-finding .turn-strip,
+.screen-match.is-finding .last-move,
+.screen-match.is-finding .stall { display: none; }
+.finding-panel {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 20px 8px; text-align: center;
+}
+.finding-art { display: flex; align-items: center; gap: 14px; margin-bottom: 6px; }
+.find-tile {
+  width: 76px; height: 76px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  background: var(--sq-light); color: var(--ink);
+  box-shadow: 0 0 0 3px var(--board-edge), 0 12px 24px -14px rgb(0 0 0 / 0.5);
+  font-family: var(--display); font-weight: 800; font-size: 36px;
+}
+.find-tile svg { display: block; width: 86%; height: 86%; }
+/* The tilt is `rotate`, not `transform`, so the flip animation (a
+   transform) turns the tile without undoing its tilt. */
+.find-you { rotate: -6deg; }
+.find-them { rotate: 6deg; }
+.flip-tile { background: var(--sq-dark); color: var(--sq-dark-ink); }
+
+.flip-tile.is-flip { animation: find-flip 0.55s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes find-flip {
+  0% { transform: rotateY(90deg); }
+  100% { transform: rotateY(0deg); }
+}
+.find-vs { font-family: var(--display); font-weight: 800; font-size: 18px; color: var(--muted); }
+/* Three dots under the headline, breathing in turn: still looking. */
+.finding-title { margin: 0; font-family: var(--display); font-size: 24px; font-weight: 800; }
+.finding-title::after {
+  content: ""; display: inline-block; width: 1.2em; text-align: left;
+  animation: find-dots 1.4s steps(4, end) infinite;
+}
+@keyframes find-dots {
+  0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; }
+}
+.finding-text { margin: 0; max-width: 34ch; line-height: 1.45; }
+.finding-text strong { color: var(--ink); }
+.finding-since, .finding-fine { margin: 0; }
+.finding-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 280px; margin-top: 6px; }
+.finding-actions button { width: 100%; padding: 13px 16px; }
+.finding-stop { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  .flip-tile.is-flip { animation: none; }
+  .finding-title::after { animation: none; content: "…"; }
+}
+
+/* Lobby: the invite link itself, copyable. */
+.lobby-link { display: flex; gap: 6px; width: 100%; }
+.lobby-link-field {
+  flex: 1; min-width: 0; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font: inherit; font-size: 13px; text-overflow: ellipsis;
+}
+.copy-link-button {
+  flex: 0 0 auto; padding: 10px 14px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); font-weight: 600;
+}
+.lobby-hint { margin: 0; max-width: 32ch; }
+.hero-actions .quick-button {
+  border-radius: 12px; border: 1px solid var(--line); background: var(--card); cursor: pointer;
+}
+
+/* Finished: history, one thin line each. */
+.result-row {
+  display: grid; grid-template-columns: 64px minmax(0, 1fr) auto 52px; gap: 10px; align-items: center;
+  width: 100%; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--line);
+  background: none; color: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.result-row.is-busy { opacity: 0.6; }
+.result-label { font-weight: 700; }
+.result-label.is-up { color: var(--up-ink); }
+.result-label.is-down { color: var(--down-ink); }
+.result-label.is-even { color: var(--muted); }
+.result-names { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-score { color: var(--muted); font-variant-numeric: tabular-nums; }
+.result-when { font-size: 12px; color: var(--muted); text-align: right; }
+
+/* ---- new game */
+.invite-note { margin: 0 0 8px; }
+/* The roster can run to 200 people. Give it its own scroll so the seat count
+   and the open-table switch — which the note above points at — stay on screen
+   instead of sitting under a very long list. */
+.invitable-list { max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.invite-search { display: flex; position: relative; }
+.invite-input {
+  flex: 1; min-width: 0; padding: 10px 40px 10px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font: inherit;
+}
+/* The platform's own clear affordance is a fixed blue glyph that matches
+   nothing else here, so it is replaced with one that follows the theme. */
+.invite-input::-webkit-search-cancel-button,
+.invite-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+.invite-clear {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--muted); font-size: 19px; line-height: 1; cursor: pointer;
+}
+.invite-clear:hover { color: var(--ink); }
+.invite-count { margin: 2px 0 0; }
+.invite-count:empty { display: none; }
+.invite-group {
+  margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); font-weight: 700;
+}
+.invitable-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--card); margin-bottom: 6px; cursor: pointer;
+}
+.invitable-row input { width: 20px; height: 20px; flex: 0 0 auto; }
+.invitable-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.invitable-row .relation { flex: 0 0 auto; white-space: nowrap; }
+.table-note { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+.table-note .code-hint { color: var(--ink); font-weight: 600; }
+
+/* ---- match */
+.players { flex: 1; display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.players::-webkit-scrollbar { display: none; }
+.player {
+  display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); white-space: nowrap; flex: 0 0 auto;
+}
+/* Whose turn: a filled pill, not a glow. The strip scrolls sideways, so
+   anything drawn OUTSIDE a pill (a ring, a shadow) is clipped at its edges —
+   the old 2px ring came out lopsided. Fill and border stay inside the box. */
+.player.is-turn {
+  border-color: var(--turn);
+  background: var(--up-bg);
+  box-shadow: inset 0 0 0 1px var(--turn);
+}
+.player.is-turn .player-score { color: var(--up-ink); }
+.player-name { font-weight: 600; font-size: 13px; line-height: 1.1; }
+.player-score { font-size: 12px; color: var(--muted); line-height: 1.1; }
+/* Three or four players: the same pills as two, in a strip that scrolls
+   sideways (swipe, or drag with a mouse). It used to clip at the bar's edge
+   with no way to reach the rest, so the third score was cut in half and the
+   fourth was never seen. The edge that has more behind it fades out. Full
+   list on tap. */
+.players.is-many { cursor: pointer; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.players.is-many .player { scroll-snap-align: start; }
+.players.is-dragging { cursor: grabbing; scroll-snap-type: none; }
+.players.more-left { -webkit-mask-image: linear-gradient(to right, transparent, #000 18px); mask-image: linear-gradient(to right, transparent, #000 18px); }
+.players.more-right { -webkit-mask-image: linear-gradient(to left, transparent, #000 18px); mask-image: linear-gradient(to left, transparent, #000 18px); }
+.players.more-left.more-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 18px, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 18px, #000 calc(100% - 18px), transparent);
+}
+.players-list { display: grid; gap: 8px; }
+.players-list .player { border-radius: 12px; }
+
+/* Turn state and the bag were one run-on muted sentence. Split: the state
+   reads as a heading and the bag as a chip. */
+.turn-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 24px; }
+.turn-main { font-weight: 700; font-size: 15px; }
+.turn-main.is-mine { color: var(--turn); }
+.chip {
+  border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+}
+.chip[hidden] { display: none; }
+button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.last-move { margin: 0; font-size: 14px; }
+.last-move[hidden] { display: none; }
+
+/* ---- lobby: a table waiting for friends to fill it */
+.lobby-panel {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; text-align: center; padding: 20px 8px;
+}
+.lobby-panel[hidden] { display: none; }
+.screen-match.is-lobby .turn-strip { display: none; }
+.waiting-seats { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+.waiting-seat { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 72px; }
+.waiting-seat .find-tile { width: 60px; height: 64px; font-size: 32px; }
+.waiting-seat:nth-child(odd) .find-tile { rotate: -5deg; }
+.waiting-seat:nth-child(even) .find-tile { rotate: 5deg; }
+.waiting-name {
+  max-width: 100%; font-size: 12px; font-weight: 600; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.waiting-seat.is-open .waiting-name { color: var(--accent); }
+.waiting-title { margin: 0; font-family: var(--display); font-size: 24px; font-weight: 800; }
+.lobby-lead { margin: 0; max-width: 34ch; line-height: 1.45; }
+.lobby-lead:empty { display: none; }
+.share-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px; width: 100%; max-width: 360px;
+  padding: 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); box-sizing: border-box;
+}
+.share-card .share-code-button { padding: 13px 16px; }
+.lobby-code-row { margin: 0; }
+.lobby-code { color: var(--ink); letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.lobby-panel .finding-actions .subtle { padding: 11px 16px; font-size: 15px; }
+.lobby-close { color: var(--muted); }
+
+/* Lobby and finished states are not "a game with the controls greyed out":
+   the play surface is removed so the screen says what it is. */
+.screen-match.is-lobby .board-wrap,
+.screen-match.is-lobby .move-hint,
+.screen-match.is-lobby .move-bar,
+.screen-match.is-over .move-hint,
+.screen-match.is-over .move-bar,
+.screen-match.is-over .wait-bar { display: none; }
+
+/* The board takes all the height the screen leaves it, full bleed, and
+   board.js sizes the square inside to the shorter side in whole pixels. */
+.board-wrap {
+  position: relative; flex: 1; min-height: 200px;
+  width: calc(100% + 24px); margin: 0 -12px; overflow: hidden;
+}
+.board-host {
+  position: absolute; inset: 4px 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
+/* What each side has taken, and the material lead: a row of small pieces
+   the board's width, above it for the opponent and below it for you. */
+.captures {
+  display: flex; align-items: center; gap: 0; box-sizing: border-box;
+  width: var(--board, 100%); height: 24px; padding: 0 2px; overflow: hidden;
+}
+.captures .cap { display: block; width: 22px; height: 22px; flex: 0 0 auto; }
+.captures .cap + .cap.is-same { margin-left: -11px; }
+.captures .cap svg { display: block; width: 100%; height: 100%; }
+.captures .cap-lead { margin-left: 6px; font-size: 13px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.chess-board {
+  position: relative; flex: 0 0 auto; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 0 0 3px var(--board-edge), 0 16px 32px -20px rgb(0 0 0 / 0.6);
+  touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.cb-squares { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); }
+.cb-sq {
+  position: relative; display: block; margin: 0; padding: 0; border: 0; border-radius: 0;
+  -webkit-appearance: none; appearance: none; font: inherit; cursor: pointer;
+  background: var(--sq-light);
+}
+.cb-sq.is-dark { background: var(--sq-dark); }
+.cb-sq.is-last::before, .cb-sq.is-selected::before, .cb-sq.is-check::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+}
+.cb-sq.is-last::before { background: var(--sq-last); }
+.cb-sq.is-selected::before { background: var(--sq-select); }
+.cb-sq.is-check::before { background: radial-gradient(circle, var(--sq-check) 0, rgb(224 69 42 / 0.6) 40%, transparent 72%); }
+/* Where the picked-up piece can go: a dot on an empty square, a ring
+   around a piece it would capture. */
+.cb-sq.is-target::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 30%; height: 30%;
+  transform: translate(-50%, -50%); border-radius: 50%; background: var(--sq-dot); pointer-events: none;
+}
+.cb-sq.is-capture::after {
+  content: ""; position: absolute; inset: 3%; border-radius: 50%; pointer-events: none;
+  box-shadow: inset 0 0 0 calc(var(--sq, 40px) * 0.085) var(--sq-dot);
+}
+.cb-sq.is-hover { box-shadow: inset 0 0 0 3px rgb(255 255 255 / 0.75); }
+.cb-sq:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; z-index: 1; }
+.cb-rank, .cb-file {
+  position: absolute; pointer-events: none; line-height: 1;
+  font-size: calc(var(--sq, 40px) * 0.2); font-weight: 700;
+}
+.cb-rank { top: 3px; left: 3px; }
+.cb-file { right: 3px; bottom: 2px; }
+.cb-sq.is-light .cb-rank, .cb-sq.is-light .cb-file { color: var(--sq-light-ink); }
+.cb-sq.is-dark .cb-rank, .cb-sq.is-dark .cb-file { color: var(--sq-dark-ink); }
+.cb-pieces { position: absolute; inset: 0; pointer-events: none; }
+.cb-piece { position: absolute; left: 0; top: 0; width: 12.5%; height: 12.5%; }
+/* Inset a touch, so the coordinates in the corners stay readable. */
+.cb-piece svg { display: block; width: 92%; height: 92%; margin: 4%; }
+.cb-ghost svg { display: block; width: 100%; height: 100%; }
+.cb-piece.is-lifted { opacity: 0.3; }
+.cb-piece.is-moving { z-index: 2; }
+/* A dragged piece travels as a fixed-position copy, positioned by
+   board.js with one transform. */
+.cb-ghost {
+  position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none;
+  filter: drop-shadow(0 10px 10px rgb(0 0 0 / 0.35));
+}
+
+
+.game-over {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 16px; z-index: 6; overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+.game-over[hidden] { display: none; }
+.over-card {
+  position: relative; z-index: 1; width: 100%; max-width: 340px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  padding: 20px 18px 18px; border-radius: 20px; border: 1px solid var(--line); background: var(--card);
+  box-shadow: 0 18px 40px -20px rgb(0 0 0 / 0.5); max-height: 100%; overflow-y: auto;
+}
+.over-kicker { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.game-over h2 { margin: 0; font-family: var(--display); font-size: 30px; font-weight: 800; line-height: 1.1; }
+.game-over-text { margin: 0; color: var(--muted); }
+.game-over-text:empty { display: none; }
+.over-scores { list-style: none; margin: 6px 0 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.over-row {
+  display: grid; grid-template-columns: 22px auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 7px 12px 7px 8px; border-radius: 12px; background: color-mix(in srgb, var(--bg) 60%, var(--card));
+  text-align: left;
+}
+.over-row.is-winner { background: var(--up-bg); }
+.over-rank { width: 24px; height: 24px; }
+.over-rank svg { display: block; width: 100%; height: 100%; }
+
+.over-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.over-row.is-self .over-name { color: var(--ink); }
+.over-score { font-family: var(--display); font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+.over-highlights { display: flex; gap: 8px; width: 100%; }
+.over-highlights:empty { display: none; }
+.over-highlight {
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px 6px;
+  border-radius: 12px; border: 1px dashed var(--line);
+}
+.over-hl-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.over-hl-value { font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: 0.02em; }
+.over-hl-extra { font-family: inherit; font-size: 13px; color: var(--turn); }
+.game-over-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 6px; }
+.game-over-actions button { width: 100%; padding: 12px 16px; }
+/* The win: tiles fall through the card's backdrop. */
+.over-burst { position: absolute; inset: 0; pointer-events: none; }
+.burst-tile {
+  position: absolute; top: -48px; width: 40px; height: 40px;
+  animation: burst-fall 2.2s cubic-bezier(0.3, 0.6, 0.4, 1) both;
+}
+.burst-tile svg { display: block; width: 100%; height: 100%; }
+
+@keyframes burst-fall {
+  0% { transform: translateY(0) rotate(0); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(110vh) rotate(var(--spin)); opacity: 0.9; }
+}
+.screen-match.is-over .turn-strip,
+.screen-match.is-over .last-move { display: none; }
+.moves-button, .board-button, .game-over-back {
+  border-radius: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
+}
+
+/* ---- the move log, as a scoresheet */
+.sheet-players { display: flex; justify-content: space-between; gap: 10px; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.score-sheet { list-style: none; margin: 0; padding: 0; font-variant-numeric: tabular-nums; }
+.sheet-line {
+  display: grid; grid-template-columns: 2.6em minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
+  padding: 6px 6px; border-radius: 8px; font-size: 15px;
+}
+.sheet-line:nth-child(odd) { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.sheet-num { color: var(--muted); }
+.sheet-san { font-weight: 600; }
+.sheet-san.is-last { color: var(--accent); }
+.sheet-offer { color: var(--muted); font-weight: 400; }
+.sheet-note { padding: 8px 6px; font-size: 14px; color: var(--muted); }
+
+/* The last-move line opens the whole log. */
+.last-move.is-link { cursor: pointer; }
+.last-move.is-link::after { content: " ›"; color: var(--muted); font-weight: 700; }
+.last-move .more { color: var(--muted); white-space: nowrap; }
+/* The moves before the last, in the board's leftover room. */
+/* A short box (three rows) that scrolls through every earlier move, faded at
+   the edge with more behind it. Quieter than the line above it. */
+.recent-moves {
+  list-style: none; margin: 2px 0 0; padding: 0; cursor: pointer;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+}
+.recent-moves::-webkit-scrollbar { display: none; }
+.recent-moves[hidden] { display: none; }
+/* Sentences like the line above, a size down and greyed. */
+.recent-move {
+  font-size: 13px; line-height: 20px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.recent-moves.more-down { -webkit-mask-image: linear-gradient(to top, transparent, #000 14px); mask-image: linear-gradient(to top, transparent, #000 14px); }
+.recent-moves.more-up { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px); mask-image: linear-gradient(to bottom, transparent, #000 10px); }
+.recent-moves.more-up.more-down {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 14px), transparent);
+}
+.screen-match.is-finding .recent-moves,
+.screen-match.is-over .recent-moves { display: none; }
+/* Kept on the count's line rather than wrapping on its own. */
+.last-move.has-more::after { content: none; }
+.last-move .more::after { content: " ›"; font-weight: 700; }
+
+/* ---- your move: a hint, then the move made, to send or take back */
+/* The hint, the Send bar, and the waiting and review bars all take the same
+   height, so the board above does not jump as one replaces another. */
+.move-hint, .move-bar, .wait-bar, .review-bar { min-height: 56px; box-sizing: border-box; }
+.move-hint {
+  margin: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; text-align: center; color: var(--muted);
+}
+.move-bar { display: flex; align-items: center; gap: 8px; }
+.move-bar .undo-button { flex: 0 0 auto; padding: 13px 14px; font-size: 15px; }
+.move-bar .send-button { flex: 1 1 auto; min-width: 0; padding: 14px; font-size: 17px; white-space: nowrap; }
+.offer-draw {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  font-size: 13px; color: var(--muted); white-space: nowrap; cursor: pointer;
+}
+.offer-draw input {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 6px; background: var(--card);
+  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, var(--line));
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.offer-draw input:checked { background: var(--primary-bg); border-color: var(--primary-bg); }
+.offer-draw input:checked::after { content: "✓"; color: var(--accent-ink); font-size: 12px; font-weight: 800; }
+.offer-draw:has(input:checked) { color: var(--ink); }
+.wait-bar, .review-bar {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--card); font-size: 14px; color: var(--muted);
+}
+.wait-text, .review-text { flex: 1; min-width: 0; }
+.review-text { color: var(--ink); font-weight: 600; }
+.review-bar .result-button { flex: 0 0 auto; }
+
+
+/* ---- dialog */
+.dialog-backdrop {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgb(0 0 0 / 0.5); z-index: 20;
+  /* The scrim covers the whole screen; the card keeps clear of the status bar
+     and the app's back-button row, and of the home indicator. Same insets as
+     the shared leaderboard modal (src/ui/leaderboard.css). */
+  box-sizing: border-box;
+  padding: max(16px, calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px)))
+           calc(16px + var(--oddsrabbit-safe-right, 0px))
+           calc(16px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(16px + var(--oddsrabbit-safe-left, 0px));
+}
+.dialog-backdrop[hidden] { display: none; }
+.dialog {
+  background: var(--card); border-radius: 16px; padding: 16px; max-width: 420px; width: 100%;
+  max-height: min(calc(100dvh - 48px), 100%); overflow-y: auto; -webkit-overflow-scrolling: touch;
+}
+/* The card takes focus only to seat the reading context for long prose; it is
+   a container, not a control, so it does not wear a focus ring. The first Tab
+   lands on a real button, which does. */
+.dialog:focus, .dialog:focus-visible { outline: none; }
+.dialog-title { margin: 0 0 12px; font-family: var(--display); font-size: 19px; font-weight: 800; }
+.dialog-body { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.dialog-body.is-prose { display: block; text-align: left; }
+.dialog-body.is-menu { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 6px; }
+.dialog-confirm:disabled { opacity: 0.45; cursor: default; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.dialog-actions button[hidden] { display: none; }
+.picker-piece {
+  width: 68px; height: 68px; padding: 4px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--sq-light);
+}
+.picker-piece:nth-child(even) { background: var(--sq-dark); }
+.picker-piece svg { display: block; width: 100%; height: 100%; }
+
+.menu-item {
+  display: block; width: 100%; text-align: left; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer;
+}
+.menu-item.is-danger { color: var(--danger); font-weight: 600; }
+.join-field {
+  width: 100%; box-sizing: border-box; padding: 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font: inherit; font-size: 22px;
+  letter-spacing: 0.24em; text-transform: uppercase; text-align: center;
+}
+
+/* ---- how to play */
+.howto { text-align: left; font-size: 14px; }
+.howto h3 { margin: 14px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.howto h3:first-child { margin-top: 0; }
+/* Past the first two sections the rules fold away: a player who needs one
+   opens it, instead of scrolling a wall of text to find it. */
+.howto details { border-top: 1px solid var(--line); }
+.howto details:last-of-type { border-bottom: 1px solid var(--line); }
+.howto summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 2px; cursor: pointer; list-style: none;
+  font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+}
+.howto summary::-webkit-details-marker { display: none; }
+.howto summary::after { content: "+"; font-size: 18px; font-weight: 600; letter-spacing: 0; }
+.howto details[open] summary::after { content: "−"; }
+.howto details[open] { padding-bottom: 8px; }
+.howto details:first-of-type { margin-top: 12px; }
+.howto p { margin: 0 0 6px; }
+.howto ul { margin: 0 0 6px; padding-left: 18px; }
+.howto li { margin-bottom: 4px; }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; margin: 4px 0 8px; }
+.legend-swatch { width: 40px; height: 40px; border-radius: 8px; background: var(--sq-light); box-shadow: inset 0 0 0 1px var(--line); }
+.legend-swatch svg { display: block; width: 100%; height: 100%; }
+
+.keys { display: none; }
+@media (hover: hover) and (pointer: fine) { .keys { display: block; } }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + var(--oddsrabbit-safe-bottom, 0px)); transform: translateX(-50%);
+  margin: 0; padding: 10px 16px; border-radius: 999px; background: var(--ink); color: var(--bg);
+  font-size: 14px; max-width: 90vw; text-align: center; z-index: 30;
+}
+.toast.is-error { background: var(--danger); color: var(--danger-ink); }
+.toast[hidden] { display: none; }
+
+/* ---- chat: the match's conversation, a sheet over the lower screen */
+.chat-button { color: var(--ink); }
+.chat-badge {
+  position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; box-sizing: border-box;
+  padding: 0 5px; border-radius: 999px; background: var(--primary-bg); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.row-chat {
+  border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent);
+}
+
+.chat-backdrop {
+  position: fixed; inset: 0; z-index: 15; display: flex; align-items: flex-end; justify-content: center;
+  background: rgb(0 0 0 / 0.35);
+}
+html[data-overlay="chat"] { --oddsrabbit-edge-top: #9a978f; }
+html[data-theme="dark"][data-overlay="chat"] { --oddsrabbit-edge-top: #0d0e12; }
+.chat-sheet {
+  --chat-kb: 0px;
+  display: flex; flex-direction: column; box-sizing: border-box;
+  width: 100%; max-width: 640px;
+  /* The board's top rows stay in view above it. */
+  height: min(68dvh, 560px);
+  margin-bottom: var(--chat-kb);
+  max-height: calc(100dvh - var(--chat-kb) - var(--oddsrabbit-safe-top, 0px) - var(--oddsrabbit-chrome-height, 48px));
+  padding: 0
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           /* With the keyboard up, the home indicator is under it. */
+           calc(10px + max(0px, var(--oddsrabbit-safe-bottom, 0px) - var(--chat-kb)))
+           calc(12px + var(--oddsrabbit-safe-left, 0px));
+  background: var(--card); border-radius: 18px 18px 0 0;
+  box-shadow: 0 -10px 30px -12px rgb(0 0 0 / 0.35);
+  animation: chat-up 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@keyframes chat-up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .chat-sheet { animation: none; } }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 12px 0 8px; border-bottom: 1px solid var(--line); }
+.chat-heading { flex: 1; min-width: 0; }
+.chat-title { margin: 0; font-family: var(--display); font-size: 18px; font-weight: 800; }
+.chat-sub { margin: 1px 0 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.chat-log {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  padding: 8px 0; display: flex; flex-direction: column;
+}
+.chat-older { align-self: center; margin-bottom: 6px; }
+.chat-empty { margin: auto 16px; text-align: center; font-size: 14px; }
+.chat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; margin-top: auto; }
+.chat-time { align-self: center; margin: 10px 0 4px; font-size: 11px; color: var(--muted); }
+.chat-msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 80%; }
+.chat-msg.is-first { margin-top: 6px; }
+.chat-msg.is-self { align-self: flex-end; align-items: flex-end; }
+.chat-who { font-size: 11px; color: var(--muted); margin: 0 10px 2px; }
+.chat-bubble {
+  padding: 7px 12px; border-radius: 16px; background: var(--bg); color: var(--ink);
+  font-size: 15px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chat-msg.is-self .chat-bubble { background: var(--primary-bg); color: var(--accent-ink); }
+.chat-bubble.is-other { font-style: italic; color: var(--muted); }
+.chat-msg.is-sending .chat-bubble { opacity: 0.6; }
+.chat-msg.is-failed .chat-bubble { background: color-mix(in srgb, var(--danger) 18%, var(--card)); color: var(--ink); }
+.chat-retry {
+  margin: 3px 4px 0; padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--danger); text-align: right;
+}
+
+.chat-quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 6px 0; }
+.chat-quick::-webkit-scrollbar { display: none; }
+.chat-chip {
+  flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font-size: 13px; cursor: pointer;
+}
+.chat-form { display: flex; align-items: flex-end; gap: 8px; }
+.chat-input {
+  flex: 1; min-width: 0; box-sizing: border-box; resize: none; max-height: 120px;
+  padding: 10px 12px; border-radius: 18px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink);
+  /* 16px or iOS zooms the page in on focus. */
+  font: inherit; font-size: 16px; line-height: 1.3;
+}
+.chat-input:focus, .chat-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chat-send { border-radius: 18px; padding: 10px 16px; }
+/* ---- chess bits in the shared frame */
+.side-dot {
+  display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%;
+  vertical-align: 0; box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.side-dot.is-w { background: var(--piece-w); }
+.side-dot.is-b { background: var(--piece-b); box-shadow: inset 0 0 0 1.5px var(--muted); }
+.chip-check { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+.table-vs { align-self: center; font-family: var(--display); font-weight: 800; color: var(--muted); }
+.color-note { margin: 14px 0 0; }
+/* The other player's draw offer: like the quiet-opponent notice. */
+.draw-offer {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: color-mix(in srgb, var(--turn) 8%, var(--card));
+  border-color: color-mix(in srgb, var(--turn) 35%, var(--line));
+}
+.draw-offer-text { margin: 0; flex: 1 1 160px; color: var(--ink); }
+.draw-offer .stall-actions button { border-color: var(--turn); color: var(--turn); }
+

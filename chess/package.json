@@ -1,0 +1,13 @@
+{
+  "name": "chess",
+  "private": true,
+  "description": "Chess: an async two-player game for OddsRabbit.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

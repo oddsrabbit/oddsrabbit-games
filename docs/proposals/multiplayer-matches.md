@@ -402,6 +402,9 @@ table alive without anybody having to be the bad guy.
     the higher score in the players table wins, equal scores draw
     (`winnerSeat` null). No end-of-game rack adjustment, and both seats stay
     `joined`: the idle player did not lose on time, the game just stopped.
+    A rules class implementing the optional `MatchClaimWinner` names the
+    winner instead (added 2026‑10‑22 for chess, which keeps no score: scored
+    as it stands, every claim would be a draw, so there the claimer wins).
   - **3–4 seats:** the idle seat is `forfeited` exactly as a deadline forfeit
     does it (`setPlayerStatus` + `leaveRotation`, skip counter dropped), and
     the turn passes. The forfeited seat's rack is left in `state`, out of play

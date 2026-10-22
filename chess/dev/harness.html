@@ -1,0 +1,347 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess harness</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<iframe id="g" src="../dist/chess/index.html"></iframe>
+<script src="../js/rules.js"></script>
+<script>
+// Local stand-in for the OddsRabbit host: answers the matches bridge from
+// memory so the game runs without the platform. Not shipped.
+//   npm run build
+//   python3 -m http.server 8765        (in chess/)
+//   open http://localhost:8765/dev/harness.html
+// The referee is js/rules.js, standing in for ChessRules.php, and the view is
+// shaped like ChessRules::viewFor. The opponent plays a random legal move
+// (a capture when it has one) 2 s after yours.
+// Params:
+//   user=0          signed out
+//   matches=0       host without the matches verbs
+//   delay=ms        answer every request this late (default 50)
+//   games=0         start with no games (the first-run landing)
+//   finished=1      add a game won by checkmate (result card, Moves, Rematch)
+//   busy=1          add a game a few moves in, a stalled game and a lobby
+//   challenge=1     @hopper has challenged you (Accept / Decline)
+//   offer=1         the first game opens on @pip_fan's draw offer
+//   promo=1         add a game where your pawn can promote
+//   newverbs=0      host without matches.quick
+//   quickwait=ms    how long a quick match takes to find someone (default 4000)
+//   open=n          open the nth game straight away
+//   theme=dark      dark host theme
+//   opp=none        the opponent never moves; opp=draw accepts draw offers
+//   idle=days       every turn counts as having started this many days ago,
+//                   to show Nudge (1+) and Claim the win (14+)
+//   chat=0          host without matches.chat / matches.chatSend
+const q = new URLSearchParams(location.search);
+const R = window.ChessRules;
+const DELAY = Number(q.get('delay') || 50);
+const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester' };
+const PEOPLE = [
+  { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, relation: 'mutual' },
+  { uuid: '33333333-3333-4333-8333-333333333333', username: 'hopper', avatar: null, relation: 'following' },
+  { uuid: '44444444-4444-4444-8444-444444444444', username: 'clover', avatar: null, relation: 'follower' },
+];
+const OTHERS = [
+  { uuid: '66666666-6666-4666-8666-666666666666', username: 'rabbit_racer', avatar: null, relation: 'none' },
+  { uuid: '77777777-7777-4777-8777-777777777777', username: 'radish_king', avatar: null, relation: 'none' },
+];
+const STRANGER = { uuid: '55555555-5555-4555-8555-555555555555', username: 'stranger_danger' };
+const IDLE_MS = Number(q.get('idle') || 0) * 86400e3;
+const matches = {};
+const turnStart = () => new Date(Date.now() - IDLE_MS).toISOString();
+let n = 0;
+function uuid() { n++; return 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0'); }
+
+// A match, seat 0 always the viewer. `white` is the seat that moves first.
+function newMatch(person, ageMs = 0, opts = {}) {
+  const seats = person ? [ME, person] : [ME];
+  const m = {
+    uuid: uuid(), version: 1, status: person ? 'active' : 'lobby', joinCode: null, matchmaking: false,
+    updatedAt: new Date(Date.now() - ageMs).toISOString(), turnStartedAt: turnStart(), winner: null,
+    chat: [], chatSeen: 0, history: [], lastMove: null, ply: 0,
+    pos: R.start(), white: null, turn: opts.white === undefined ? 0 : opts.white, halfmove: 0, fullmove: 1,
+    drawOffer: null, last: null, result: null, positions: {},
+    players: seats.map((p, seat) => ({ seat, uuid: p.uuid, username: p.username, avatar: null, status: 'joined', score: 0 })),
+  };
+  if (opts.fen) {
+    m.pos = R.fromFen(opts.fen);
+    m.white = m.pos.turn === 'w' ? m.turn : 1 - m.turn;
+  }
+  matches[m.uuid] = m;
+  return m;
+}
+
+function seatColor(m, seat) { const w = m.white === null ? m.turn : m.white; return seat === w ? 'w' : 'b'; }
+
+function view(m) {
+  const me = m.players[0];
+  const sw = (s) => (m.challenge && (s === 0 || s === 1) ? 1 - s : s);
+  const active = m.status === 'active';
+  return {
+    matchUuid: m.uuid, game: 'chess', status: m.status, version: m.version, maxPlayers: 2,
+    players: m.players.map((p) => ({ seat: sw(p.seat), uuid: p.uuid, username: p.username, avatar: null, status: p.status, score: 0, isSelf: p.seat === 0 })).sort((a, b) => a.seat - b.seat),
+    turnSeat: active ? sw(m.turn) : null, turnDeadline: null, winnerSeat: m.winner === null ? null : sw(m.winner),
+    turnStartedAt: active ? m.turnStartedAt : null,
+    mySeat: sw(0), mySeatStatus: me.status, isMyTurn: active && m.turn === 0 && me.status === 'joined',
+    updatedAt: m.updatedAt, joinCode: m.joinCode,
+    recap: m.last ? { san: m.last.san } : null, matchmaking: m.matchmaking,
+    chatUnread: m.chat.length - m.chatSeen,
+    view: {
+      board: m.pos.board, white: m.white === null ? null : sw(m.white), turn: m.pos.turn, castling: m.pos.castling, ep: m.pos.ep,
+      halfmove: m.halfmove, fullmove: m.fullmove, ply: m.ply, drawOffer: m.drawOffer === null ? null : sw(m.drawOffer),
+      last: m.last, result: m.result, check: !m.result && R.inCheck(m.pos.board, m.pos.turn), history: m.history,
+    },
+    lastMove: m.lastMove,
+  };
+}
+
+function record(m, seat, move) {
+  m.lastMove = { ply: m.history.length, seat, move, scoreDelta: 0 };
+  m.history.push(m.lastMove);
+  m.version++;
+  m.updatedAt = new Date().toISOString();
+}
+
+function finish(m, winner) {
+  m.status = 'finished';
+  m.winner = winner;
+}
+
+function bare(board) {
+  const rest = board.replace(/[.kK]/g, '');
+  return rest === '' || (rest.length === 1 && /[nNbB]/.test(rest));
+}
+
+// ChessRules::applyMove, for one seat's move.
+function play(m, seat, move) {
+  if (move.type === 'acceptDraw') {
+    if (m.drawOffer === null || m.drawOffer === seat) throw { code: 'match/illegal-move', message: 'There is no draw offer to accept.' };
+    m.drawOffer = null; m.result = { type: 'agreed' };
+    record(m, seat, { type: 'acceptDraw' });
+    finish(m, null);
+    return;
+  }
+  const legal = R.legalMoves(m.pos);
+  const mv = R.find(m.pos, move.from, move.to, move.promo || null, legal);
+  if (!mv) throw { code: 'match/illegal-move', message: 'That move is not legal.' };
+  const capture = m.pos.board[mv.to] !== '.' || mv.flag === 'ep';
+  const pawn = m.pos.board[mv.from].toLowerCase() === 'p';
+  const san = R.san(m.pos, mv, legal);
+  if (m.white === null) m.white = seat;
+  if (m.pos.turn === 'b') m.fullmove++;
+  m.pos = R.play(m.pos, mv);
+  m.ply++;
+  m.halfmove = pawn || capture ? 0 : m.halfmove + 1;
+  if (pawn || capture) m.positions = {};
+  const key = [m.pos.board, m.pos.turn, m.pos.castling, m.pos.ep].join(' ');
+  m.positions[key] = (m.positions[key] || 0) + 1;
+  m.drawOffer = move.offerDraw ? seat : null;
+  m.last = { from: move.from, to: move.to, san };
+  const rec = { type: 'move', from: move.from, to: move.to };
+  if (move.promo) rec.promo = move.promo;
+  if (move.offerDraw) rec.offerDraw = true;
+  record(m, seat, rec);
+  if (!R.legalMoves(m.pos).length) {
+    m.result = R.inCheck(m.pos.board, m.pos.turn) ? { type: 'checkmate', winner: seat } : { type: 'stalemate' };
+  } else if (m.positions[key] >= 3) m.result = { type: 'repetition' };
+  else if (m.halfmove >= 100) m.result = { type: 'fifty' };
+  else if (bare(m.pos.board)) m.result = { type: 'material' };
+  if (m.result) { finish(m, m.result.type === 'checkmate' ? seat : null); return; }
+  m.turn = 1 - seat;
+  m.turnStartedAt = turnStart();
+}
+
+function opponentsMove(m) {
+  if (q.get('opp') === 'none') return;
+  setTimeout(() => {
+    if (m.status !== 'active' || m.turn !== 1) return;
+    if (q.get('opp') === 'draw' && m.drawOffer === 0) { play(m, 1, { type: 'acceptDraw' }); return; }
+    const legal = R.legalMoves(m.pos);
+    const takes = legal.filter((x) => m.pos.board[x.to] !== '.');
+    const pool = takes.length && Math.random() < 0.7 ? takes : legal;
+    const mv = pool[Math.floor(Math.random() * pool.length)];
+    play(m, 1, { type: 'move', from: R.squareName(mv.from), to: R.squareName(mv.to), promo: mv.promo || undefined });
+  }, 2000);
+}
+
+function playUci(m, list) {
+  for (const uci of list) {
+    play(m, m.turn, { type: 'move', from: uci.slice(0, 2), to: uci.slice(2, 4), promo: uci[4] });
+  }
+}
+
+function chatMessage(m, who, text) {
+  const p = m.players.find((x) => x.uuid === who.uuid);
+  const msg = {
+    messageUuid: uuid(), seat: p ? p.seat : null, uuid: who.uuid, username: who.username, avatar: null,
+    kind: 'text', text, sentAt: new Date().toISOString(), isSelf: who.uuid === ME.uuid, nonce: null,
+  };
+  m.chat.push(msg);
+  return msg;
+}
+const REPLIES = ['hmm, interesting move', 'didn’t see that coming', 'gg so far', 'you’re going down 😤', 'my rabbit is coming for you', '👀'];
+
+if (q.get('games') !== '0') {
+  // Your move against @pip_fan, who plays White and opened 1.e4.
+  const first = newMatch(PEOPLE[0], 3 * 3600e3, { white: 1 });
+  playUci(first, ['e2e4']);
+  const hour = (h, msg) => { msg.sentAt = new Date(Date.now() - h * 3600e3).toISOString(); };
+  hour(26, chatMessage(first, PEOPLE[0], 'rematch from last week? 😄'));
+  hour(25.9, chatMessage(first, ME, 'you’re on'));
+  first.chatSeen = first.chat.length;
+  hour(0.2, chatMessage(first, PEOPLE[0], 'good luck, you’ll need it'));
+  if (q.get('offer') === '1') { playUci(first, ['e7e5']); play(first, 1, { type: 'move', from: 'g1', to: 'f3', offerDraw: true }); }
+  // Their move: you are White against @hopper.
+  const second = newMatch(PEOPLE[1], 2 * 86400e3, { white: 0 });
+  playUci(second, ['d2d4', 'd7d5', 'c2c4']);
+}
+if (q.get('busy') === '1') {
+  const a = newMatch(PEOPLE[2], 20 * 60e3, { white: 0 });
+  playUci(a, ['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1c4', 'g8f6', 'f3g5', 'd7d5', 'e4d5', 'f6d5', 'g5f7']);
+  const b = newMatch(PEOPLE[0], 2 * 86400e3, { white: 0 });
+  playUci(b, ['c2c4']);
+  b.turnStartedAt = new Date(Date.now() - 2 * 86400e3).toISOString();
+  const lobby = newMatch(null, 5 * 3600e3);
+  lobby.joinCode = 'KNJGHT';
+}
+if (q.get('promo') === '1') {
+  const p = newMatch(PEOPLE[1], 10 * 60e3, { fen: 'k7/4P3/8/8/8/8/6p1/K7 w - - 0 50', white: 0 });
+}
+if (q.get('finished') === '1') {
+  const f = newMatch(STRANGER, 9 * 86400e3, { white: 1 });
+  playUci(f, ['f2f3', 'e7e5', 'g2g4', 'd8h4']);
+  f.updatedAt = new Date(Date.now() - 9 * 86400e3).toISOString();
+}
+if (q.get('challenge') === '1') {
+  const c = newMatch(PEOPLE[1], 15 * 60e3);
+  c.challenge = true; c.status = 'lobby'; c.players[0].status = 'invited';
+}
+
+const frame = document.getElementById('g');
+const caps = ['storage.get', 'storage.set', 'actions.share', 'actions.haptic', 'actions.requestSignIn'];
+if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'matches.list', 'matches.get', 'matches.move', 'matches.resign', 'matches.invitable', 'matches.nudge', 'matches.claim');
+if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.quick');
+if (q.get('matches') !== '0' && q.get('chat') !== '0') caps.push('matches.chat', 'matches.chatSend');
+if (q.get('matches') !== '0' && q.get('search') !== '0') caps.push('matches.searchPlayers');
+function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
+function init() {
+  const open = Object.keys(matches)[Number(q.get('open')) - 1];
+  send({ type: 'init', user: q.get('user') === '0' ? null : { ...ME, avatar: null, createdAt: null },
+    sessionToken: 'x', expiresAt: null, colorScheme: q.get('theme') === 'dark' ? 'dark' : 'light', capabilities: caps,
+    initialState: open ? { target: 'match', matchUuid: open } : undefined });
+}
+frame.addEventListener('load', () => { init(); setTimeout(init, 200); });
+
+function start(m) {
+  m.status = 'active'; m.turnStartedAt = turnStart(); m.version++; m.updatedAt = new Date().toISOString();
+  opponentsMove(m);
+}
+
+function handle(type, p) {
+  const m = p.matchUuid && matches[p.matchUuid];
+  switch (type) {
+    case 'matches.list': return Object.values(matches).map((x) => { const v = view(x); delete v.view; delete v.joinCode; return v; });
+    case 'matches.quick': {
+      const mine = Object.values(matches).find((x) => x.matchmaking && x.status === 'lobby');
+      if (mine) return view(mine);
+      const lobby = newMatch(null);
+      lobby.matchmaking = true;
+      setTimeout(() => {
+        if (lobby.status !== 'lobby') return;
+        lobby.players.push({ seat: 1, uuid: STRANGER.uuid, username: STRANGER.username, avatar: null, status: 'joined', score: 0 });
+        lobby.turn = Math.random() < 0.5 ? 0 : 1;
+        start(lobby);
+      }, Number(q.get('quickwait') || 4000));
+      return view(lobby);
+    }
+    case 'matches.chat': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      const limit = p.limit || 30;
+      const end = p.before ? m.chat.findIndex((x) => x.messageUuid === p.before) : m.chat.length;
+      const s = Math.max(0, end - limit);
+      if (p.markSeen) m.chatSeen = m.chat.length;
+      return { conversationUuid: m.chat.length ? m.uuid : null, messages: m.chat.slice(s, end), unread: m.chat.length - m.chatSeen, hasMore: s > 0 };
+    }
+    case 'matches.chatSend': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      const text = String(p.text || '').trim();
+      if (/spam/i.test(text)) throw { code: 'match/chat-refused', message: 'That message can’t be sent.' };
+      const again = p.nonce && m.chat.find((x) => x.nonce === p.nonce);
+      if (again) return again;
+      const msg = chatMessage(m, ME, text);
+      msg.nonce = p.nonce || null;
+      m.chatSeen = m.chat.length;
+      const other = m.players.find((x) => x.seat !== 0 && x.status === 'joined');
+      if (other && q.get('opp') !== 'none') setTimeout(() => chatMessage(m, other, REPLIES[Math.floor(Math.random() * REPLIES.length)]), 2500);
+      return msg;
+    }
+    case 'matches.get': if (!m) throw { code: 'match/not-found', message: 'No such match.' }; return view(m);
+    case 'matches.invitable': return PEOPLE;
+    case 'matches.searchPlayers': {
+      const qy = String(p.query || '').trim().toLowerCase();
+      return [...PEOPLE, ...OTHERS].filter((x) => x.username.toLowerCase().startsWith(qy)).slice(0, p.limit || 20);
+    }
+    case 'matches.create': {
+      if (p.game !== 'chess' || p.maxPlayers !== 2) throw { code: 'match/invalid', message: 'chess is played by 2 to 2 players.' };
+      const asked = [...PEOPLE, ...OTHERS].find((x) => (p.invitees || []).includes(x.uuid));
+      const made = newMatch(asked || null, 0, { white: Math.random() < 0.5 ? 0 : 1 });
+      if (!asked) { made.status = 'lobby'; made.joinCode = 'R4BBJT'; return view(made); }
+      made.status = 'lobby';
+      made.players[1].status = 'invited';
+      setTimeout(() => { made.players[1].status = 'joined'; start(made); }, Number(q.get('acceptms') || 4000));
+      return view(made);
+    }
+    case 'matches.join': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      if (m.status === 'lobby' && m.players[0].status === 'invited') {
+        m.players[0].status = 'joined';
+        m.turn = Math.random() < 0.5 ? 0 : 1;
+        start(m);
+      }
+      return view(m);
+    }
+    case 'matches.move': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      if (m.turn !== 0 || m.status !== 'active') throw { code: 'match/not-your-turn', message: 'It is not your turn.' };
+      if (p.version !== m.version) throw { code: 'match/version-conflict', message: 'The match has changed since you last looked.' };
+      play(m, 0, p.move);
+      opponentsMove(m);
+      return view(m);
+    }
+    case 'matches.nudge': {
+      const waited = Date.now() - new Date(m.turnStartedAt).getTime();
+      if (m.turn === 0 || waited < 86400e3) throw { code: 'match/too-soon', message: 'You can nudge in a few hours.' };
+      if (m.nudgedAt && Date.now() - m.nudgedAt < 86400e3) throw { code: 'match/too-soon', message: 'You can nudge again in 23 hours.' };
+      m.nudgedAt = Date.now();
+      return { nudgedAt: new Date().toISOString() };
+    }
+    case 'matches.claim': {
+      const waited = Date.now() - new Date(m.turnStartedAt).getTime();
+      if (m.turn === 0 || waited < 14 * 86400e3) throw { code: 'match/too-soon', message: 'You can end this game in a few days.' };
+      record(m, m.turn, { type: 'claim', claimedBy: 0 });
+      finish(m, 0);
+      return view(m);
+    }
+    case 'matches.resign': {
+      if (m.status === 'lobby') { m.status = 'abandoned'; m.version++; m.updatedAt = new Date().toISOString(); return view(m); }
+      m.players[0].status = 'resigned'; m.version++;
+      finish(m, 1);
+      return view(m);
+    }
+  }
+  return undefined;
+}
+
+window.addEventListener('message', (e) => {
+  const r = e.data; if (!r || !r.correlationId) return;
+  setTimeout(() => {
+    try {
+      send({ type: 'response', correlationId: r.correlationId, ok: true, result: handle(r.type, r.payload || {}) });
+    } catch (err) {
+      console.error(err);
+      send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code: err.code || 'bridge/error', message: err.message || String(err) } });
+    }
+  }, DELAY);
+});
+</script>
+</body></html>
