@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Word Rush test launcher</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6efe3; --fg: #2b2118; --card: #fffaf2; --line: #e2d5c1; --accent: #4d8a3a; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1712; --fg: #f2eadf; --card: #26201a; --line: #3d342b; --accent: #7cbf5f; } }
+  body { margin: 0; padding: 20px 16px 40px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; } h2 { margin: 24px 0 8px; font-size: 17px; }
+  p { margin: 0 0 8px; opacity: 0.8; }
+  ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  a { display: block; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; color: inherit; text-decoration: none; }
+  a:hover { border-color: var(--accent); }
+  a b { color: var(--accent); }
+  small { display: block; opacity: 0.7; }
+  code { font-size: 13px; }
+</style></head>
+<body><main>
+<h1>Word Rush: test launcher</h1>
+<p>Each link opens the game in the local stand-in host with five fake players. Progress is saved in this browser; links marked <em>fresh</em> start clean. Phone-sized? Open dev tools' device mode.</p>
+
+<h2>Ranked (competitive)</h2>
+<ul>
+  <li><a href="harness.html?fresh=1&day=3&chrome=app"><b>Thursday 4×4</b>, start a run<small>A 90-second run on a 4×4. Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=4&chrome=app"><b>Friday 5×5</b>, start a run<small>A 2-minute run on a 5×5. Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=6&chrome=app"><b>Sunday · Corners</b>, start a run<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=13&chrome=app"><b>Sunday · Hollow</b> (centre tile missing)<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=20&chrome=app"><b>Sunday · Lantern</b> (corners and centre missing)<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=3&ending=1&chrome=app"><b>20 seconds left</b><small>Watch the clock run out and the score go in.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=3&ran=1&chrome=app"><b>Run already finished</b><small>The done screen: points, words, "#4 of 6 so far".</small></a></li>
+  <li><a href="harness.html?fresh=1&day=4&yesterday=1&chrome=app"><b>Yesterday's results</b><small>Results card for Thursday’s ranked board (rare-word bonus, your words vs others), then today's 5×5.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=4&yesterday=1&tallying=1&chrome=app"><b>Results still tallying</b><small>Day closed, results not written yet.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=3&ran=1&closed=1&chrome=app"><b>Score arrived after midnight</b><small>The server refused it as closed.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=3&user=0&chrome=app"><b>Signed out</b><small>Plays, but isn't ranked.</small></a></li>
+</ul>
+
+<h2>Casual (regular)</h2>
+<p>Press <em>Got it</em>, then the <b>Casual</b> tab. Each has a start card; <em>Play past boards</em> opens the archive (earlier days of the test calendar).</p>
+<ul>
+  <li><a href="harness.html?fresh=1&day=3&chrome=app"><b>Thursday 4×4</b> casual board<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=5&chrome=app"><b>Saturday 5×5</b> casual board<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=6&chrome=app"><b>Sunday · Corners</b> casual board<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=13&chrome=app"><b>Sunday · Hollow</b> casual board<small>Fresh.</small></a></li>
+  <li><a href="harness.html?fresh=1&day=20&chrome=app"><b>Sunday · Lantern</b> casual board<small>Fresh.</small></a></li>
+</ul>
+
+<h2>Other</h2>
+<ul>
+  <li><a href="harness.html?fresh=1&day=4&dark=1&chrome=app"><b>Dark mode</b><small>Friday, fresh.</small></a></li>
+  <li><a href="harness.html?day=3&chrome=app"><b>Continue where you left off</b><small>Keeps saved progress (not fresh).</small></a></li>
+  <li><a href="harness.html?fresh=1&unavailable=1"><b>Boards not ready</b><small>Server has no content.</small></a></li>
+</ul>
+<p style="margin-top:20px">Desktop tip: you can type a word and press Enter instead of dragging. Parameters are documented at the top of <code>dev/harness.html</code>.</p>
+</main></body></html>

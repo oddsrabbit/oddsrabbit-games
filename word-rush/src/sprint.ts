@@ -1,0 +1,655 @@
+// The daily Ranked run ("sprint" in the code): 90 seconds or 2 minutes,
+// by board, on a board everyone shares, classic Boggle
+// points, one run a day. Your points are locked in when the clock stops; when
+// the day closes the server doubles every word nobody else found, and the
+// next day's results card shows how your words compared.
+
+import {
+  boardOf,
+  DAY_MS,
+  EPOCH_MS,
+  parseDay,
+  parseResults,
+  resultsRoundKey,
+  roundKey,
+  SHAPES,
+  type SprintContent,
+  type SprintResults,
+} from './puzzle';
+import { decodeMask } from './scoring';
+import { showSprintLeaderboard } from './leaderboard';
+import {
+  basePoints,
+  checkSprintWord,
+  CLOSE_MARGIN_MS,
+  clockLabel,
+  freshSprint,
+  isSprintProgress,
+  phaseOf,
+  pointsFor,
+  remainingMs,
+  rowMeta,
+  rowPoints,
+  runFitsDay,
+  sprintMetadata,
+  sprintLabel,
+  sprintMs,
+  type SprintPhase,
+  type SprintProgress,
+} from './sprint-rules';
+import { banner, floatScore, praiseFor, rollNumber } from './juice';
+import { fillLengthRow, lengthRow } from './lengths';
+import { play, playWord } from './sound';
+import { openShareSheet } from './share';
+import { createTracer, type Tracer } from './tracer';
+import { button, el, haptic, OR, readJson, resetTimeLine, SHARE_URL, writeJson } from './ui';
+
+export interface SprintContext {
+  index: number;
+  content: SprintContent;
+  /** Server-synced clock (ms). */
+  now(): number;
+  /** Tell the shell when a run starts or stops, so it can hide the tabs mid-run. */
+  onPhase(phase: SprintPhase): void;
+  openCasual(): void;
+}
+
+export interface SprintMode {
+  tracer(): Tracer | null;
+  flush(): void;
+  /** Send a finished run's score again if it hasn't reached the server (on resume, back online). */
+  retrySubmit(): void;
+  /** Whether yesterday's results card is on the Ranked screen (once it has loaded). */
+  hasResultsCard(): Promise<boolean>;
+  /** Stop timers before the shell swaps this day out for the next. */
+  dispose(): void;
+}
+
+// A guest's ranked run on this device, by puzzle index. Signing in afterwards
+// doesn't give a second, ranked go at a board already seen. Device storage,
+// not the player's: a guest's storage is not the account's.
+const GUEST_RUN_LOCAL = 'word-rush:guest-ranked';
+
+function guestRanIndex(): number | null {
+  try {
+    const v = localStorage.getItem(GUEST_RUN_LOCAL);
+    return v === null ? null : Number(v);
+  } catch {
+    return null;
+  }
+}
+
+function rememberGuestRun(index: number): void {
+  try {
+    localStorage.setItem(GUEST_RUN_LOCAL, String(index));
+  } catch {
+    /* best-effort */
+  }
+}
+
+const errorCode = (e: unknown): string => (e && typeof e === 'object' && 'code' in e ? String((e as { code: unknown }).code) : '');
+
+export async function mountSprint(root: HTMLElement, ctx: SprintContext): Promise<SprintMode> {
+  const { index } = ctx;
+  let content = ctx.content;
+  const stored = await readJson<unknown>('sprint', null);
+  let progress: SprintProgress = freshSprint(index);
+
+  if (isSprintProgress(stored)) {
+    if (stored.puzzleIndex === index) {
+      progress = stored;
+    } else if (stored.puzzleIndex === index - 1 && stored.startedAt !== null) {
+      // Yesterday's run. If it started before midnight and is still going (or
+      // ended without reaching the server), finish it on yesterday's board
+      // first; otherwise it becomes the results card's "your words". Only a
+      // signed-in player has a score to send, so only they carry one over.
+      if (!stored.submitted && OR().user) {
+        const prevDay = await OR().content.daily({ roundKey: roundKey(index - 1) }).then((d) => parseDay(d?.content)).catch(() => null);
+        if (prevDay && phaseOf(stored, ctx.now(), sprintMs(prevDay.sprint.shape)) !== 'ready') {
+          content = prevDay.sprint;
+          progress = stored;
+        }
+      }
+      if (progress !== stored) await writeJson('sprint-prev', stored);
+    }
+  }
+
+  /** This run's length: from the board being played (yesterday's, for a run carried over). */
+  const runMs = (): number => sprintMs(content.shape);
+  const save = (): Promise<boolean> => writeJson('sprint', progress);
+  let tracer: Tracer | null = null;
+  let clockTimer: number | undefined;
+  let readyTimer: number | undefined;
+  let rankLine: string | null = null;
+  let disposed = false;
+  /** The last submission failed for a reason worth retrying (network, server error). */
+  let sendFailed = false;
+  /**
+   * Yesterday's results card, fetched once per day rather than on every
+   * screen change. Dropped when it's only the "still being tallied" note, so
+   * the next render asks again.
+   */
+  let resultsCard: Promise<HTMLElement | null> | null = null;
+
+  // ---------- Screens ----------
+
+  function render(): void {
+    window.clearInterval(clockTimer);
+    window.clearTimeout(readyTimer);
+    if (disposed) return;
+    root.innerHTML = '';
+    const phase = phaseOf(progress, ctx.now(), runMs());
+    ctx.onPhase(phase);
+    if (phase === 'playing') {
+      renderPlaying();
+      return;
+    }
+    tracer = null;
+    const slot = el('div', 'results-slot');
+    root.appendChild(slot);
+    resultsCard ??= buildResults();
+    void resultsCard.then((card) => {
+      if (card && slot.isConnected) slot.appendChild(card);
+    });
+    if (phase === 'ready') renderReady();
+    else renderDone();
+    root.appendChild(resetTimeLine());
+  }
+
+  function renderReady(): void {
+    const card = el('section', 'sprint-card');
+    card.append(
+      // The board's details in one place: its size and how long the run lasts,
+      // both of which change through the week.
+      el('p', 'eyebrow', `Today's board · ${SHAPES[content.shape].name} · ${sprintLabel(content.shape)}`),
+      el('h2', 'sprint-title', 'Compete for the leaderboard'),
+      el('p', 'sprint-rules', 'Find words of 3+ letters through touching tiles. Longer words are worth more:')
+    );
+    // A points scale, not counters: labelled in letters and points so it can't
+    // be read as the "words left" row the run shows in the same place.
+    const table = el('div', 'points-scale');
+    for (const [len, pts] of [['3–4', 1], ['5', 2], ['6', 3], ['7', 5], ['8+', 11]] as const) {
+      const item = el('div', 'points-step');
+      item.append(el('span', 'points-step-len', `${len} letters`), el('span', 'points-step-pts', `+${pts} ${pts === 1 ? 'pt' : 'pts'}`));
+      table.appendChild(item);
+    }
+    card.append(
+      table,
+      el('p', 'sprint-rules', 'Words nobody else finds score double. Those are added after midnight UTC, when the day closes.'),
+      el('p', 'sprint-rules muted', 'One run a day, the same board for everyone. It appears when you press Start.')
+    );
+    const closesAt = EPOCH_MS + (progress.puzzleIndex + 1) * DAY_MS;
+    if (OR().user && guestRanIndex() === progress.puzzleIndex) {
+      const seen = button('primary-btn start-btn', 'Already played today', () => undefined);
+      seen.disabled = true;
+      card.append(
+        seen,
+        el('p', 'sprint-rules muted', 'You played today’s ranked board before signing in on this device, so it can’t be ranked now. A new board opens at midnight UTC.')
+      );
+    } else if (runFitsDay(progress.puzzleIndex, ctx.now(), runMs())) {
+      card.appendChild(button('primary-btn start-btn', 'Start', () => void start()));
+      // Swap Start for the closed note when the last full run's window passes.
+      readyTimer = window.setTimeout(render, closesAt - CLOSE_MARGIN_MS - runMs() - ctx.now() + 50);
+    } else {
+      const closed = button('primary-btn start-btn', 'Closed for today', () => undefined);
+      closed.disabled = true;
+      card.append(closed, el('p', 'sprint-rules muted', 'Too close to midnight UTC to finish a run. A new board opens at midnight.'));
+    }
+    if (!OR().user) {
+      card.append(
+        el('p', 'sprint-rules muted', "You're not signed in, so this run won't be ranked, and signing in afterwards won't give you another go at today's board."),
+        button('secondary-btn small', 'Sign in', () => void OR().actions.requestSignIn('Get on the daily leaderboard'))
+      );
+    }
+    root.appendChild(card);
+    root.appendChild(button('link-btn', 'Or take it easy on the casual board →', ctx.openCasual));
+  }
+
+  function renderPlaying(): void {
+    const hud = el('div', 'sprint-hud');
+    const clock = el('div', 'sprint-clock');
+    const score = el('div', 'sprint-score');
+    hud.append(clock, score);
+    const bar = el('div', 'timer-bar');
+    const fill = el('div', 'timer-fill');
+    bar.appendChild(fill);
+    const found = el('div', 'chips sprint-found');
+    const lengths = lengthRow();
+
+    const board = boardOf(content);
+    const words = new Set(content.words);
+    tracer = createTracer(
+      board,
+      (path, word) => {
+        const result = checkSprintWord(content, progress, word);
+        const t = tracer!;
+        if (result.kind === 'short') t.flashLine('3+ letters', 'info');
+        else if (result.kind === 'unknown') {
+          t.flashLine(`${word}?`, 'bad');
+          t.flashTiles(path, 'bad');
+          play('nope');
+          haptic('error');
+        } else if (result.kind === 'already') {
+          t.flashLine(`${word}: got it already`, 'info');
+          play('already');
+        } else {
+          const before = basePoints(progress.found);
+          progress.found.push(word);
+          void save();
+          const big = result.points >= 5;
+          t.flashLine(`${word} +${result.points}`, big ? 'star' : 'good');
+          t.flashTiles(path, 'good');
+          floatScore(t.grid, path[path.length - 1]!, board.cols, board.rows, `+${result.points}`, big ? 'star' : 'good');
+          const praise = praiseFor(word.length);
+          if (praise) banner(t.grid, praise, big ? 'star' : 'good');
+          playWord(result.points);
+          haptic(big ? 'success' : 'medium');
+          update(before);
+          // Every word on the board: no point running the clock down.
+          if (progress.found.length >= content.words.length) void finish(true, 'Every word!');
+        }
+      },
+      (word) => (word.length < 3 ? 'none' : progress.found.includes(word) ? 'had' : words.has(word) ? 'new' : 'none')
+    );
+
+    let lastTick = -1;
+    const pointsLabel = (n: number): string => `${n} ${n === 1 ? 'pt' : 'pts'}`;
+    const ptsEl = el('span', 'sprint-pts');
+    const countEl = el('span', 'sprint-count');
+    score.append(ptsEl, countEl);
+
+    const update = (from?: number): void => {
+      const left = remainingMs(progress, ctx.now(), runMs());
+      clock.textContent = clockLabel(left);
+      clock.classList.toggle('low', left <= 10_000);
+      fill.style.width = `${(left / runMs()) * 100}%`;
+      // The last ten seconds tick, once a second.
+      const secs = Math.ceil(left / 1000);
+      if (secs <= 10 && secs > 0 && secs !== lastTick) {
+        lastTick = secs;
+        play('tick');
+      }
+      const pts = basePoints(progress.found);
+      if (from !== undefined) rollNumber(ptsEl, from, pts, pointsLabel);
+      else if (!ptsEl.textContent) ptsEl.textContent = pointsLabel(pts);
+      countEl.textContent = ` · ${progress.found.length} of ${content.words.length} words`;
+      // Rebuilt only when a word lands, not on every clock tick.
+      if (from !== undefined || lengths.row.childElementCount === 0) fillLengthRow(lengths.row, content.words, progress.found);
+      if (from !== undefined || found.childElementCount !== progress.found.length) {
+        found.innerHTML = '';
+        progress.found.slice().reverse().forEach((w, i) => {
+          const chip = el('span', i === 0 && from !== undefined ? 'chip new' : 'chip', w);
+          found.appendChild(chip);
+        });
+      }
+    };
+
+    root.append(hud, bar, lengths.caption, lengths.row, tracer.wordLine, tracer.grid, found);
+    update();
+    clockTimer = window.setInterval(() => {
+      if (remainingMs(progress, ctx.now(), runMs()) <= 0) void finish(true);
+      else update();
+    }, 200);
+  }
+
+  function renderDone(): void {
+    const pts = basePoints(progress.found);
+    const longest = progress.found.reduce((a, w) => (w.length > a.length ? w : a), '');
+    const card = el('section', 'sprint-card done-card');
+    card.append(
+      el('p', 'eyebrow', `Today's ranked board · ${SHAPES[content.shape].name}`),
+      el('h2', 'sprint-points', `${pts} pts`),
+      el(
+        'p',
+        'sprint-sub',
+        progress.found.length === 0
+          ? 'No words this time.'
+          : `${progress.found.length} of ${content.words.length} words${longest ? ` · longest ${longest}` : ''}`
+      )
+    );
+    if (progress.closed) {
+      card.appendChild(el('p', 'sprint-rank', 'This ranked board closed at midnight UTC before your score arrived, so it isn’t on the leaderboard.'));
+    } else if (!OR().user) {
+      card.append(
+        el('p', 'sprint-rank', 'Not ranked: you weren’t signed in.'),
+        button('secondary-btn small', 'Sign in for tomorrow', () => void OR().actions.requestSignIn('Get on the daily leaderboard'))
+      );
+    } else if (!progress.submitted) {
+      // The score hasn't reached the server. Say so, rather than "checking":
+      // it's retried here, on resume and when the connection comes back.
+      card.append(
+        el('p', 'sprint-rank', sendFailed ? 'Your score hasn’t reached the server yet.' : 'Sending your score…'),
+        el('p', 'sprint-rules muted', 'Keep a connection before midnight UTC so it counts. We’ll keep trying.')
+      );
+      if (sendFailed) card.appendChild(button('secondary-btn small', 'Try again', () => void retrySubmit()));
+    } else {
+      card.appendChild(el('p', 'sprint-rank', rankLine ?? 'Checking your place…'));
+      card.appendChild(el('p', 'sprint-rules muted', 'Final places after midnight UTC, when words nobody else found score double.'));
+    }
+
+    if (progress.found.length > 0) {
+      const chips = el('div', 'chips');
+      for (const w of progress.found.slice().sort((a, b) => pointsFor(b) - pointsFor(a) || a.localeCompare(b))) {
+        const chip = el('span', 'chip', w);
+        chip.appendChild(el('sup', 'chip-pts', String(pointsFor(w))));
+        chips.appendChild(chip);
+      }
+      card.appendChild(chips);
+    }
+
+    const actions = el('div', 'done-actions');
+    actions.append(
+      button('primary-btn', 'Share', () => openSprintShare()),
+      button('secondary-btn', 'Leaderboard', () => showSprintLeaderboard(progress.puzzleIndex, index))
+    );
+    card.appendChild(actions);
+    root.appendChild(card);
+    root.appendChild(button('link-btn', 'Now try the casual board →', ctx.openCasual));
+  }
+
+  function openSprintShare(): void {
+    const pts = basePoints(progress.found);
+    const longest = progress.found.reduce((a, w) => (w.length > a.length ? w : a), '');
+    const rank = rankLine && rankLine.startsWith('#') ? rankLine : null;
+    const title = `Word Rush Ranked #${progress.puzzleIndex + 1} · ${SHAPES[content.shape].name}`;
+    const stats = `${progress.found.length} words${longest ? ` · longest ${longest.length} letters` : ''}`;
+    openShareSheet({
+      text: [
+        title,
+        `⏱️ ${pts} pts · ${stats}`,
+        ...(rank ? [`🏆 ${rank}`] : []),
+        SHARE_URL,
+      ].join('\n'),
+      card: {
+        title,
+        headline: `${pts} pts`,
+        lines: [stats, ...(rank ? [rank] : [])],
+        rows: content.rows,
+        cols: content.cols,
+        tiles: content.tiles.map((t) => t !== null),
+      },
+      file: `word-rush-ranked-${progress.puzzleIndex + 1}`,
+    });
+  }
+
+  // ---------- Flow ----------
+
+  async function start(): Promise<void> {
+    if (!runFitsDay(progress.puzzleIndex, ctx.now(), runMs())) {
+      render();
+      return;
+    }
+    progress.startedAt = ctx.now();
+    progress.found = [];
+    if (!OR().user) rememberGuestRun(progress.puzzleIndex);
+    // Saved before the board shows, so reopening mid-run carries on the same
+    // clock rather than starting a fresh one.
+    await save();
+    haptic('medium');
+    play('start');
+    render();
+  }
+
+  let finishing = false;
+
+  /**
+   * `live` when the run ended on screen (the clock ran out, or every word was
+   * found): then there's a moment, "Time!", before the results.
+   */
+  async function finish(live = false, label = 'Time!'): Promise<void> {
+    if (finishing) return;
+    finishing = true;
+    window.clearInterval(clockTimer);
+    tracer?.setEnabled(false);
+    if (live && tracer) {
+      play('time');
+      haptic('success');
+      if (label === 'Time!') root.querySelector('.sprint-clock')!.textContent = '0:00';
+      banner(tracer.grid, label, 'time');
+      await Promise.all([submit(), new Promise((r) => window.setTimeout(r, 1400))]);
+    } else {
+      await submit();
+    }
+    // A run carried over from yesterday is done: today's board is next.
+    if (progress.puzzleIndex !== index) {
+      await writeJson('sprint-prev', progress);
+      content = ctx.content;
+      progress = freshSprint(index);
+      await save();
+    }
+    finishing = false;
+    render();
+    void loadRank();
+  }
+
+  /** One run per day: no keepBest, so a second submission is refused and the first stands. */
+  async function submit(): Promise<void> {
+    if (progress.submitted || !OR().user || progress.startedAt === null) return;
+    try {
+      await OR().scores.submit({
+        roundKey: roundKey(progress.puzzleIndex),
+        score: basePoints(progress.found),
+        metadata: sprintMetadata(content, progress),
+      });
+      progress.submitted = true;
+      sendFailed = false;
+    } catch (e) {
+      const code = errorCode(e);
+      if (code === 'scores/already-submitted') progress.submitted = true;
+      if (code === 'scores/round-closed') {
+        progress.submitted = true;
+        progress.closed = true;
+      }
+      sendFailed = !progress.submitted;
+    }
+    await save();
+  }
+
+  let retrying = false;
+
+  /** A finished run whose score never arrived: send it again and refresh the done screen. */
+  async function retrySubmit(): Promise<void> {
+    if (retrying || finishing || disposed || progress.submitted || !OR().user) return;
+    if (phaseOf(progress, ctx.now(), runMs()) !== 'done') return;
+    retrying = true;
+    sendFailed = false;
+    render(); // "Sending your score…"
+    await submit();
+    retrying = false;
+    render();
+    if (progress.submitted) void loadRank();
+  }
+
+  async function loadRank(): Promise<void> {
+    if (!OR().user || !progress.submitted || progress.closed || !OR().capabilities.has('scores.rank')) return;
+    try {
+      const r = await OR().scores.rank({ roundKey: roundKey(progress.puzzleIndex), order: 'top' });
+      rankLine = r ? `#${r.rank} of ${r.total} so far` : null;
+      if (r && restoreFound(r.entry.metadata)) {
+        await save();
+        if (phaseOf(progress, ctx.now(), runMs()) === 'done') render();
+      }
+    } catch {
+      rankLine = null;
+    }
+    if (phaseOf(progress, ctx.now(), runMs()) === 'done') {
+      const line = root.querySelector('.sprint-rank');
+      if (line) line.textContent = rankLine ?? 'Ranked once the server catches up.';
+    }
+  }
+
+  /**
+   * The words on your score row, when this device's copy of the run has fewer
+   * (a save that never landed, or a run finished in another session). The row
+   * is what counted, so it wins. True when words were added.
+   */
+  function restoreFound(metadata: Record<string, unknown> | null): boolean {
+    const mask = metadata?.['f'];
+    if (typeof mask !== 'string') return false;
+    const have = new Set(progress.found);
+    const missing = decodeMask(content.words, mask).filter((w) => !have.has(w));
+    if (missing.length === 0) return false;
+    progress.found.push(...missing);
+    return true;
+  }
+
+  // ---------- Yesterday's results ----------
+
+  /** The card for yesterday's Sprint, once its day has closed: place, bonus, and how your words compared. */
+  async function buildResults(): Promise<HTMLElement | null> {
+    const y = index - 1;
+    if (y < 0) return null;
+    if ((await readJson<number | null>('results-seen', null)) === y) return null;
+    const or = OR();
+    const prev = await readJson<unknown>('sprint-prev', null);
+    const [day, rawResults, rank, top] = await Promise.all([
+      or.content.daily({ roundKey: roundKey(y) }).then((d) => parseDay(d?.content)).catch(() => null),
+      or.content.daily({ roundKey: resultsRoundKey(y) }).then((d) => d?.content ?? null).catch(() => null),
+      or.user && or.capabilities.has('scores.rank')
+        ? or.scores.rank({ roundKey: roundKey(y), order: 'top' }).catch(() => null)
+        : Promise.resolve(null),
+      or.capabilities.has('scores.top')
+        ? or.scores.top({ roundKey: roundKey(y), order: 'top', limit: 3 }).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    if (!day) {
+      // Likely offline: ask again on the next screen change.
+      resultsCard = null;
+      return null;
+    }
+    const words = day.sprint.words;
+    // Your words: from this device, else from your row's mask.
+    let mine: string[] = isSprintProgress(prev) && prev.puzzleIndex === y ? prev.found : [];
+    const meta = rank ? rowMeta(rank.entry.metadata) : null;
+    const mask = rank?.entry.metadata?.['f'];
+    if (mine.length === 0 && typeof mask === 'string') mine = decodeMask(words, mask);
+    if (mine.length === 0 && !rank) return null;
+
+    const results: SprintResults | null = parseResults(rawResults, words.length);
+    const card = el('section', 'results-card');
+    const head = el('div', 'results-head');
+    head.append(
+      el('p', 'eyebrow', `Yesterday's ranked board · #${y + 1}`),
+      button('icon-btn small', '×', () => {
+        void writeJson('results-seen', y);
+        card.remove();
+        resultsCard = Promise.resolve(null);
+      }, 'Dismiss')
+    );
+    card.appendChild(head);
+
+    if (!results) {
+      card.appendChild(el('p', 'sprint-rules', 'Results are still being tallied. Check back in a few minutes.'));
+      // Not kept: the next screen change looks again.
+      resultsCard = null;
+      return card;
+    }
+
+    const counts = new Map(words.map((w, i) => [w, results.counts[i] ?? 0]));
+    // Whether the counts include this player: a word is theirs alone at 1 if
+    // so, at 0 if not (a guest's run, or one that never reached the server).
+    const counted = rank !== null || (isSprintProgress(prev) && prev.puzzleIndex === y && prev.submitted && !prev.closed);
+    const alone = counted ? 1 : 0;
+    if (top.length > 0) card.appendChild(podium(top, OR().user?.uuid ?? null));
+    if (rank) card.appendChild(el('h2', 'results-place', `You placed #${rank.rank} of ${rank.total}`));
+    if (meta?.sealed && meta.base !== undefined && meta.final !== undefined) {
+      card.appendChild(el('p', 'results-sum', `${meta.base} + ${meta.bonus ?? 0} rare-word bonus = ${meta.final} pts`));
+    }
+
+    const others = Math.max(0, results.players - alone);
+    const ranked = mine.slice().sort((a, b) => (counts.get(a) ?? 0) - (counts.get(b) ?? 0) || pointsFor(b) - pointsFor(a));
+    // Rarest first; the rest folds away so the card doesn't bury today's Start.
+    const FOLD = 10;
+    const chips = el('div', 'chips');
+    ranked.forEach((w, i) => {
+      const n = counts.get(w) ?? 0;
+      const unique = n <= alone;
+      const chip = el('span', unique ? 'chip star' : 'chip', w);
+      chip.appendChild(el('sup', 'chip-pts', unique ? 'only you' : `${n}/${results.players}`));
+      chip.hidden = i >= FOLD;
+      chips.appendChild(chip);
+    });
+    if (ranked.length > FOLD) {
+      const more = button('chip left more-btn', `+ ${ranked.length - FOLD} more`, () => {
+        chips.querySelectorAll<HTMLElement>('.chip[hidden]').forEach((c) => (c.hidden = false));
+        more.remove();
+      });
+      chips.appendChild(more);
+    }
+    const uniqueCount = ranked.filter((w) => (counts.get(w) ?? 0) <= alone).length;
+    card.append(
+      el(
+        'h3',
+        '',
+        `Your ${mine.length} words${others > 0 ? ` vs ${others} other ${others === 1 ? 'player' : 'players'}` : ''}${uniqueCount ? ` · ${uniqueCount} only you found` : ''}`
+      ),
+      chips
+    );
+
+    const mineSet = new Set(mine);
+    const nobody = words.filter((w) => (counts.get(w) ?? 0) === 0).sort((a, b) => b.length - a.length).slice(0, 6);
+    if (nobody.length > 0) {
+      const list = el('div', 'chips');
+      for (const w of nobody) list.appendChild(el('span', 'chip left', w));
+      card.append(el('h3', '', 'Best words nobody found'), list);
+    }
+    const missed = words
+      .filter((w) => !mineSet.has(w) && (counts.get(w) ?? 0) > 0)
+      .sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0) || b.length - a.length)
+      .slice(0, 6);
+    if (missed.length > 0) {
+      const list = el('div', 'chips');
+      for (const w of missed) {
+        const chip = el('span', 'chip left', w);
+        chip.appendChild(el('sup', 'chip-pts', `${counts.get(w)}/${results.players}`));
+        list.appendChild(chip);
+      }
+      card.append(el('h3', '', 'Most-found words you missed'), list);
+    }
+    card.appendChild(button('secondary-btn small', 'Full results', () => showSprintLeaderboard(y, index)));
+    return card;
+  }
+
+  /** Yesterday's top three, second-first-third, on steps. */
+  function podium(rows: Array<{ uuid: string; username: string; score: number; metadata: Record<string, unknown> | null }>, me: string | null): HTMLElement {
+    const wrap = el('div', 'podium');
+    const order = [1, 0, 2];
+    const medals = ['🥇', '🥈', '🥉'];
+    for (const i of order) {
+      const row = rows[i];
+      if (!row) continue;
+      const step = el('div', `podium-step place-${i + 1}${row.uuid === me ? ' me' : ''}`);
+      step.append(
+        el('span', 'podium-medal', medals[i]!),
+        el('span', 'podium-name', `@${row.username}`),
+        el('span', 'podium-pts', `${rowPoints(row.score, row.metadata)} pts`),
+        el('span', 'podium-block', String(i + 1))
+      );
+      wrap.appendChild(step);
+    }
+    return wrap;
+  }
+
+  // A run that ran out while the game was closed goes in now. (Guests have
+  // nothing to send, so for them it's just the done screen.)
+  if (phaseOf(progress, ctx.now(), runMs()) === 'done' && !progress.submitted && OR().user) {
+    await finish();
+  } else {
+    render();
+    if (phaseOf(progress, ctx.now(), runMs()) === 'done') void loadRank();
+  }
+
+  return {
+    tracer: () => tracer,
+    flush() {
+      void save();
+    },
+    retrySubmit: () => void retrySubmit(),
+    hasResultsCard: () => (resultsCard ?? Promise.resolve(null)).then((card) => card !== null),
+    dispose() {
+      disposed = true;
+      window.clearInterval(clockTimer);
+      window.clearTimeout(readyTimer);
+    },
+  };
+}

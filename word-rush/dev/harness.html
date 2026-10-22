@@ -1,0 +1,223 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Word Rush harness</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%;display:block}</style>
+</head><body>
+<iframe id="g"></iframe>
+<script>
+// Local stand-in for the OddsRabbit host: answers the bridge from memory so the
+// game runs without the platform. Not shipped.
+//   (cd ../apps-sdk && npm run build) && npm run build
+//   python3 -m http.server 8766        (at the repo root)
+//   open http://localhost:8766/dev/harness.html
+// Params:
+//   day=N          play puzzle-N (default 3, a Thursday 4×4; 4 and 5 are 5×5, 6 a Sunday shape).
+//                  The harness moves the server clock (time.now) to that day, which is what the
+//                  game reads, so days before the real epoch work.
+//   yesterday=1    you played yesterday's Sprint: its day has closed and the results card shows
+//   tallying=1     with yesterday=1: the day closed but results aren't written yet
+//   closed=1       the Sprint refuses your score as if the day had closed
+//   sendfail=N     the first N Sprint submissions fail as if offline (the retry on resume / Try again)
+//   ran=1          today's Sprint already ran (time's up, not yet sent): opens on the done screen
+//   ending=1       today's Sprint is running with 20 seconds left
+//   user=0         signed out (account storage refused, as on the real hosts)
+//   dark=1         dark colour scheme
+//   fresh=1        forget saved progress (storage starts empty, help shows)
+//   unavailable=1  content.daily has nothing
+//   chrome=app     fake the app's edge insets (status bar, chrome row, home indicator)
+//   late=N         the clock starts N seconds before midnight UTC (Start's cutoff, the day rolling over)
+const q = new URLSearchParams(location.search);
+const STORE_KEY = 'wr-harness-store';
+const store = q.get('fresh') ? {} : JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(store));
+const frame = document.getElementById('g');
+if (q.get('fresh')) {
+  try { localStorage.removeItem('word-rush:seen-help'); localStorage.removeItem('word-rush:guest-ranked'); } catch {}
+}
+frame.src = `../dist/word-rush/index.html?colorScheme=${q.get('dark') ? 'dark' : 'light'}`;
+
+const EPOCH_MS = Date.UTC(2026, 9, 7);
+const DAY = 86400000;
+const TODAY = Number(q.get('day') ?? 3);
+const startReal = Date.now();
+// The server clock: today's puzzle day at the real time of day (kept clear of
+// midnight so a run doesn't cross into tomorrow).
+const LATE = q.get('late') ? Number(q.get('late')) * 1000 : null;
+function serverNow() {
+  const timeOfDay = LATE !== null ? DAY - LATE : Math.min(startReal % DAY, DAY - 4 * 3600e3);
+  return EPOCH_MS + TODAY * DAY + timeOfDay + (Date.now() - startReal);
+}
+
+let boards = [];
+const ready = fetch('../data/word-rush-boards.json').then((r) => r.json()).then((d) => {
+  boards = d.boards;
+  // A run in storage, as the game saves it (SprintProgress in src/sprint-rules.ts).
+  if (q.get('ran') || q.get('ending')) {
+    const words = boards[TODAY].sprint.words;
+    const found = words.filter((w, i) => i % 4 === 0).slice(0, 24);
+    // sprintMs() in src/sprint-rules.ts: 90 s on a 4×4, 2 min otherwise.
+    const runMs = boards[TODAY].sprint.shape === 'square4' ? 90e3 : 120e3;
+    const startedAt = serverNow() - (q.get('ran') ? runMs + 20e3 : runMs - 20e3);
+    store.sprint = JSON.stringify({ puzzleIndex: TODAY, startedAt, found, submitted: false });
+    store.seen_help = 'true';
+  }
+});
+
+// encodeMask() from src/scoring.ts, for the fake rows.
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function encodeMask(list, found) {
+  const bytes = new Uint8Array(Math.ceil(list.length / 8));
+  list.forEach((w, i) => { if (found.has(w)) bytes[i >> 3] |= 1 << (i & 7); });
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0);
+    const chars = Math.min(4, Math.ceil(((bytes.length - i) * 8) / 6));
+    for (let k = 0; k < chars; k++) out += B64[(n >> (18 - 6 * k)) & 63];
+  }
+  return out;
+}
+const pts = (w) => (w.length <= 4 ? 1 : w.length === 5 ? 2 : w.length === 6 ? 3 : w.length === 7 ? 5 : 11);
+// A stable pseudo-random number in [0,1) per string.
+const rnd = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
+
+const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester', avatar: null, createdAt: null };
+const OTHERS = ['pip_fan', 'mochi.mama', 'bun.bun', 'maple_leaf', 'thumper'].map((username, i) => ({
+  uuid: `2222222${i}-2222-4222-8222-222222222222`, username, avatar: null, skill: [0.55, 0.4, 0.3, 0.2, 0.12][i],
+}));
+
+/** Who found which Sprint word on day n: each player finds words with odds that fall with length. */
+function sprintFinds(n, includeMe) {
+  const words = boards[n]?.sprint.words ?? [];
+  const players = [...OTHERS.map((o) => ({ ...o })), ...(includeMe ? [{ ...ME, skill: 0.35 }] : [])];
+  for (const p of players) p.found = words.filter((w) => rnd(p.username + w + n) < p.skill * (w.length <= 4 ? 1 : 3.5 / w.length));
+  return { words, players };
+}
+
+const scores = {}; // roundKey → { uuid → row }
+function rowsFor(roundKey) {
+  if (scores[roundKey]) return scores[roundKey];
+  const rows = (scores[roundKey] = {});
+  const m = /^(puzzle|casual)-(-?\d+)$/.exec(roundKey);
+  if (!m) return rows;
+  const n = Number(m[2]);
+  if (m[1] === 'casual') {
+    OTHERS.forEach((u, i) => {
+      const c = [1000, 1000, 873, 640, 412][i];
+      rows[u.uuid] = { ...u, score: c * 100 + [12, 4, 7, 0, 2][i], createdAt: new Date().toISOString(), metadata: null };
+    });
+    return rows;
+  }
+  if (n === TODAY) {
+    // Today's Sprint, still running: base points only.
+    for (const p of sprintFinds(n, false).players) {
+      const base = p.found.reduce((s, w) => s + pts(w), 0);
+      rows[p.uuid] = { ...p, score: base, createdAt: new Date().toISOString(), metadata: { base, words: p.found.length } };
+    }
+  } else if (n < TODAY) {
+    // A closed day: what WordSprintSealer writes.
+    const { words, players } = sprintFinds(n, n === TODAY - 1 && q.get('yesterday') === '1');
+    const counts = new Map(words.map((w) => [w, 0]));
+    players.forEach((p) => p.found.forEach((w) => counts.set(w, counts.get(w) + 1)));
+    const finals = players.map((p) => {
+      const base = p.found.reduce((s, w) => s + pts(w), 0);
+      const uniq = p.found.filter((w) => counts.get(w) <= 1);
+      const bonus = uniq.reduce((s, w) => s + pts(w), 0);
+      return { p, base, bonus, final: base + bonus, unique: uniq.length };
+    });
+    const best = Math.max(1, ...finals.map((f) => f.final));
+    for (const f of finals) {
+      const rating = Math.round((1000 * f.final) / best);
+      rows[f.p.uuid] = { uuid: f.p.uuid, username: f.p.username, avatar: null, score: rating, createdAt: new Date().toISOString(),
+        metadata: { base: f.base, words: f.p.found.length, bonus: f.bonus, final: f.final, rating, unique: f.unique, sealed: true, f: encodeMask(words, new Set(f.p.found)) } };
+    }
+    rows.__counts = { players: players.length, counts: words.map((w) => counts.get(w)) };
+  }
+  return rows;
+}
+const list = (roundKey) => Object.entries(rowsFor(roundKey)).filter(([k]) => k !== '__counts').map(([, v]) => v).sort((a, b) => b.score - a.score);
+
+const caps = ['storage.get', 'storage.set', 'storage.delete', 'content.daily', 'actions.share', 'actions.haptic', 'actions.requestSignIn',
+  'scores.submit', 'scores.friends', 'scores.top', 'scores.rank', 'scores.season', 'scores.seasonRank', 'scores.distribution', 'time.now'];
+
+function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
+function init() {
+  send({ type: 'init', user: q.get('user') === '0' ? null : ME, sessionToken: 'x', expiresAt: null,
+    colorScheme: q.get('dark') ? 'dark' : 'light', capabilities: caps });
+}
+frame.addEventListener('load', () => {
+  if (q.get('chrome') === 'app') {
+    const s = frame.contentDocument.documentElement.style;
+    s.setProperty('--oddsrabbit-safe-top', '47px'); s.setProperty('--oddsrabbit-chrome-height', '56px');
+    s.setProperty('--oddsrabbit-chrome-start', '56px'); s.setProperty('--oddsrabbit-safe-bottom', '34px');
+  }
+  // Like the real hosts, `init` goes to the first page load only: a game that
+  // reloads itself never hears it again, so don't (see startDay in main.ts).
+  if (initSent) return;
+  initSent = true;
+  init(); setTimeout(init, 200);
+});
+let initSent = false;
+let sendFails = Number(q.get('sendfail') || 0);
+
+window.addEventListener('message', async (e) => {
+  const r = e.data; if (!r || !r.correlationId) return;
+  const ok = (result) => send({ type: 'response', correlationId: r.correlationId, ok: true, result });
+  const fail = (code) => send({ type: 'response', correlationId: r.correlationId, ok: false, error: { code, message: code } });
+  const p = r.payload || {};
+  switch (r.type) {
+    // A guest has no account storage: the real hosts refuse it (storage/unauthorized).
+    case 'storage.get': await ready; if (q.get('user') === '0') return fail('storage/unauthorized'); return ok(store[p.key] ?? null);
+    case 'storage.set': if (q.get('user') === '0') return fail('storage/unauthorized'); store[p.key] = p.value; persist(); return ok(undefined);
+    case 'storage.delete': delete store[p.key]; persist(); return ok(undefined);
+    case 'time.now': return ok({ serverTime: new Date(serverNow()).toISOString() });
+    case 'content.daily': {
+      await ready;
+      if (q.get('unavailable')) return ok(null);
+      const m = /^(puzzle|results)-(-?\d+)$/.exec(p.roundKey);
+      if (!m) return ok(null);
+      const n = Number(m[2]);
+      // Date-gated on the moving clock, like the server, so late=N rolls into the next day.
+      const today = Math.floor((serverNow() - EPOCH_MS) / DAY);
+      if (n > today || !boards[n]) return ok(null);
+      if (m[1] === 'puzzle') return ok({ roundKey: p.roundKey, content: boards[n] });
+      if (n >= today || (n === TODAY - 1 && q.get('tallying'))) return ok(null);
+      return ok({ roundKey: p.roundKey, content: rowsFor(`puzzle-${n}`).__counts });
+    }
+    case 'scores.submit': {
+      await ready;
+      if (q.get('user') === '0') return fail('scores/unauthorized');
+      console.log('submit', p.roundKey, p.score, JSON.stringify(p.metadata), p.keepBest ? 'keepBest' : '');
+      const rows = rowsFor(p.roundKey);
+      const prev = rows[ME.uuid];
+      if (p.roundKey.startsWith('puzzle-')) {
+        if (sendFails > 0) { sendFails--; return fail('network/offline'); }
+        if (q.get('closed')) return fail('scores/round-closed');
+        if (prev) return fail('scores/already-submitted');
+        rows[ME.uuid] = { ...ME, score: p.score, createdAt: new Date().toISOString(), metadata: { base: p.score, words: 0, f: p.metadata?.f } };
+      } else if (!prev || p.score > prev.score) {
+        rows[ME.uuid] = { ...ME, score: p.score, createdAt: new Date().toISOString(), metadata: null };
+      }
+      return ok({ submittedAt: new Date().toISOString() });
+    }
+    case 'scores.top': return ok(list(p.roundKey).slice(0, p.limit ?? 20));
+    case 'scores.rank': {
+      const l = list(p.roundKey); const i = l.findIndex((x) => x.uuid === ME.uuid);
+      return ok(i < 0 ? null : { rank: i + 1, total: l.length, entry: { ...l[i], isSelf: true } });
+    }
+    case 'scores.friends': return ok(list(p.roundKey).filter((x, i) => i % 2 === 0 || x.uuid === ME.uuid).map((x) => ({ ...x, isSelf: x.uuid === ME.uuid })));
+    case 'scores.distribution': {
+      const hist = new Map();
+      for (const row of list(p.roundKey)) hist.set(row.score, (hist.get(row.score) ?? 0) + 1);
+      return ok([...hist].map(([score, count]) => ({ score, count })));
+    }
+    case 'scores.season': {
+      const entries = OTHERS.map((u, i) => ({ uuid: u.uuid, username: u.username, avatar: null, value: [8400, 6900, 5100, 3300, 1200][i], daysPlayed: [9, 8, 6, 4, 2][i], streak: [5, 3, 0, 1, 0][i] }));
+      return ok({ period: p.period, metric: 'best_n', puzzleDays: 10, qualifyingDays: 7, entries });
+    }
+    case 'scores.seasonRank': return ok({ period: p.period, metric: 'best_n', rank: null, total: 5, entry: null, puzzleDays: 10, qualifyingDays: 7 });
+    case 'actions.share': console.log('share\n' + p.text); return ok(undefined);
+    default: return ok(undefined);
+  }
+});
+</script>
+</body></html>

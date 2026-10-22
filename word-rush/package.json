@@ -1,0 +1,21 @@
+{
+  "name": "word-rush",
+  "private": true,
+  "description": "Word Rush: a daily word-grid hunt for OddsRabbit.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:watch": "node build.mjs --watch",
+    "test": "node test.mjs",
+    "type-check": "tsc --noEmit",
+    "gen-boards": "node tools/run.mjs gen-boards"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,717 @@
+:root {
+  color-scheme: dark;
+  /* One theme for every host colour scheme: a night-blue board taken from the
+     store icon, with green for found words and gold for tracing. */
+  --bg: #0d1626;
+  --surface: #15223a;
+  --fg: #e6edf7;
+  --muted: #94a6bf;
+  --border: #263a5c;
+  --tile: #1d2f4f;
+  --tile-edge: #2d4672;
+  --tile-shadow: #070d18;
+  --accent: #34d399;
+  --accent-text: #06261a;
+  --bonus: #fbbf24;
+  --star: #ff8d00;
+  --bad: #f87171;
+  --trail: rgba(0, 0, 0, 0.45);
+  --trace-on: #2f5f9e;
+  --trace-edge: #60a5fa;
+  --found: #2f9e44;
+  --paw: rgba(230, 237, 247, 0.55);
+  /* The shared leaderboard component reads --lb-*. */
+  --lb-text: var(--fg);
+  --lb-muted: var(--muted);
+  --lb-border: var(--border);
+  --lb-accent: var(--accent);
+  --lb-accent-text: var(--accent-text);
+  --lb-surface: var(--surface);
+  --lb-you-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* What the status bar sits on while a modal's scrim is up: an opaque guess at
+   rgba(0,0,0,0.55) over --bg, for the app's status-bar tone. main.ts sets
+   data-overlay while a modal is open. */
+:root[data-overlay] { --oddsrabbit-edge-top: #060a11; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* No top padding: the header row is flush to the top, in the back button's
+     row. Sides and bottom clear the safe areas. */
+  padding: 0
+           calc(16px + var(--oddsrabbit-safe-right, 0px))
+           calc(24px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(16px + var(--oddsrabbit-safe-left, 0px));
+}
+
+/* Header row (docs/game-header-guidelines.md): sized by the chrome row, title
+   after the back button's lane, actions 12px from the right edge. Negative
+   margins undo body's side padding so the lane is measured from the screen
+   edge. */
+.bar {
+  align-self: stretch;
+  margin: 0
+          calc(-16px - var(--oddsrabbit-safe-right, 0px))
+          0
+          calc(-16px - var(--oddsrabbit-safe-left, 0px));
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 12px) + var(--oddsrabbit-safe-left, 0px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-actions { display: flex; gap: 8px; }
+
+.icon-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font: 700 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 44px tap area around the 32px disc. */
+.icon-btn::after { content: ''; position: absolute; inset: -6px; }
+.icon-btn[hidden] { display: none; }
+
+#root {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.boot, .unavailable { text-align: center; color: var(--muted); margin-top: 32px; }
+.unavailable-title { color: var(--fg); font-weight: 700; font-size: 18px; }
+
+.meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 14px;
+  color: var(--muted);
+}
+.meta-number { color: var(--fg); font-weight: 700; }
+/* The word being traced, or the verdict on the last one. */
+.word-line {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.word-line.typing { color: var(--fg); }
+.word-line.missing { color: var(--muted); text-decoration: line-through; }
+.word-line.good { color: var(--accent); }
+.word-line.bonus { color: var(--bonus); }
+.word-line.star { color: var(--star); }
+.word-line.bad { color: var(--bad); font-size: 16px; letter-spacing: 0; font-weight: 700; }
+.word-line.info { color: var(--muted); font-size: 16px; letter-spacing: 0; font-weight: 600; }
+
+/* Grid */
+.grid {
+  --gap: 8px;
+  position: relative;
+  width: min(100%, 380px);
+  align-self: center;
+  aspect-ratio: var(--cols) / var(--rows);
+  display: grid;
+  grid-template-columns: repeat(var(--cols), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  gap: var(--gap);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  container-type: inline-size;
+}
+
+.tile {
+  position: relative;
+  border-radius: 14%;
+  background: var(--tile);
+  border: 2px solid var(--tile-edge);
+  box-shadow: 0 3px 0 var(--tile-shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: box-shadow 0.08s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.tile.hole { visibility: hidden; }
+.tile-letter {
+  /* Above the trail, which runs between the tile faces and the letters. */
+  position: relative;
+  z-index: 2;
+  font-weight: 800;
+  /* About 45% of a tile, from the grid's width. */
+  font-size: calc(45cqw / var(--cols));
+  line-height: 1;
+}
+.tile.on {
+  /* Plain trace is sand; it turns green only when it spells a word (below). */
+  background: var(--trace-on);
+  border-color: var(--trace-edge);
+  color: var(--fg);
+  /* Pressed by dropping the shadow, not with a transform: a transform would
+     give the tile its own stacking context and put the trail over its letter. */
+  box-shadow: 0 0 0 var(--tile-shadow);
+}
+.tile.dead .tile-letter { opacity: 0.45; }
+.tile-count {
+  position: absolute;
+  z-index: 2;
+  top: 6%;
+  right: 9%;
+  font-size: calc(16cqw / var(--cols));
+  font-weight: 700;
+  color: var(--accent);
+}
+.tile.on .tile-count { color: inherit; }
+
+.tile.flash-good { animation: flash-good 0.6s ease; }
+.tile.flash-bonus { animation: flash-bonus 0.6s ease; }
+.tile.flash-bad { animation: shake 0.35s ease; }
+@keyframes flash-good {
+  0%, 60% { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+}
+@keyframes flash-bonus {
+  0%, 60% { background: var(--bonus); border-color: var(--bonus); color: #fff; }
+}
+@keyframes shake {
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.trail {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.trail polyline {
+  fill: none;
+  stroke: var(--trail);
+  stroke-width: 18;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Hint tools */
+.tools { display: flex; gap: 8px; justify-content: center; }
+.tool-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font: 600 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.tool-btn[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.tool-btn.armed { border-color: var(--bonus); color: var(--bonus); }
+.tool-btn[hidden] { display: none; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.chip.star { background: color-mix(in srgb, var(--star) 22%, transparent); }
+.chip.revealed { background: transparent; border: 1px dashed var(--border); color: var(--muted); font-style: italic; }
+.chip.bonus { background: color-mix(in srgb, var(--bonus) 16%, transparent); }
+.chip.left { background: transparent; color: var(--muted); font-weight: 600; letter-spacing: 0; }
+
+/* Cleared */
+.done {
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+  scroll-margin-top: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+}
+.done[hidden] { display: none; }
+.done-title { margin: 0 0 4px; font-size: 22px; }
+.done-sub { margin: 0 0 12px; color: var(--muted); }
+.stats { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-value { font-size: 24px; font-weight: 800; }
+.stat-label { font-size: 12px; color: var(--muted); }
+.done-actions { display: flex; gap: 8px; justify-content: center; }
+
+.primary-btn, .secondary-btn {
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font: 700 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.primary-btn { background: var(--accent); color: var(--accent-text); border: 0; }
+.secondary-btn { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+.primary-btn:disabled, .secondary-btn:disabled { opacity: 0.45; cursor: default; }
+
+.reset-time { text-align: center; color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+
+/* Toast: under the header row, clear of the status bar. */
+.toast {
+  position: fixed;
+  top: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px) + 8px);
+  left: 50%;
+  transform: translate(-50%, -6px);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--fg);
+  color: var(--bg);
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 50;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Help modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px)))
+           calc(16px + var(--oddsrabbit-safe-right, 0px))
+           calc(16px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(16px + var(--oddsrabbit-safe-left, 0px));
+  z-index: 40;
+}
+.modal {
+  width: 100%;
+  max-width: 400px;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 20px;
+}
+.modal h2 { margin: 0 0 8px; }
+.modal p { margin: 0 0 10px; font-size: 15px; }
+.modal .primary-btn { width: 100%; margin-top: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile, .toast { transition: none; }
+  .tile.flash-good, .tile.flash-bonus, .tile.flash-bad { animation: none; }
+}
+
+/* ---------- Shell: day line and mode tabs ---------- */
+.day-meta { margin: 0; font-size: 14px; color: var(--muted); text-align: center; }
+.day-meta[hidden], .tabs[hidden], .pane[hidden] { display: none; }
+/* A casual board in play drops the day line too, like a Ranked run, so the
+   board and the words found fit on one screen. The tabs stay: casual has no clock. */
+#root:has(> .pane.casual-play:not([hidden])) > .day-meta { display: none; }
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+.tab {
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 700 15px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+.tab[aria-selected='true'] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.pane { display: flex; flex-direction: column; gap: 12px; }
+
+.eyebrow { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.muted { color: var(--muted); }
+.modal h3 { margin: 14px 0 6px; font-size: 16px; }
+.secondary-btn.small, .primary-btn.small { min-height: 36px; padding: 0 16px; font-size: 14px; }
+.link-btn {
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 700 15px/1.2 system-ui, sans-serif;
+  padding: 10px;
+  cursor: pointer;
+}
+.chip sup.chip-pts { margin-left: 3px; font-size: 10px; font-weight: 700; color: var(--muted); vertical-align: super; }
+
+/* ---------- Sprint ---------- */
+.sprint-card, .results-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sprint-card { text-align: center; align-items: center; }
+.sprint-title { margin: 0; font-size: 22px; line-height: 1.2; }
+.sprint-rules { margin: 0; font-size: 14px; }
+.points-table { display: grid; grid-template-columns: repeat(var(--n, 5), minmax(0, 1fr)); gap: 6px; width: 100%; margin: 4px 0; }
+.points-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 2px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.points-len { font-size: 11px; color: var(--muted); font-weight: 600; }
+.points-pts { font-size: 20px; font-weight: 800; }
+.start-btn { width: 100%; min-height: 52px; font-size: 18px; margin-top: 6px; }
+.done-card { border: 2px solid var(--accent); }
+.sprint-points { margin: 0; font-size: 40px; line-height: 1; }
+.sprint-sub { margin: 0; color: var(--muted); }
+.sprint-rank { margin: 4px 0 0; font-weight: 700; font-size: 17px; }
+.done-card .chips { justify-content: center; margin: 6px 0; }
+
+/* Mid-run: the clock, the score and the board. */
+.sprint-hud { display: flex; justify-content: space-between; align-items: baseline; }
+.sprint-clock { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.sprint-clock.low { color: var(--bad); }
+.sprint-score { font-weight: 700; color: var(--muted); }
+.timer-bar { height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.timer-fill { height: 100%; background: var(--accent); border-radius: inherit; transition: width 0.2s linear; }
+.sprint-found { justify-content: center; max-height: 120px; overflow: hidden; }
+
+/* Yesterday's results */
+.results-card { border: 2px solid var(--star); }
+.results-head { display: flex; justify-content: space-between; align-items: center; }
+.results-card h3 { margin: 6px 0 0; font-size: 14px; }
+.results-place { margin: 0; font-size: 24px; }
+.results-sum { margin: 0; font-weight: 700; color: var(--bonus); }
+.results-card .secondary-btn { align-self: flex-start; margin-top: 4px; }
+.icon-btn.small { width: 28px; height: 28px; font-size: 18px; }
+
+/* Casual company */
+.social {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.social:empty { display: none; }
+.social h3 { margin: 0 0 6px; font-size: 14px; }
+.social-line { margin: 0 0 6px; }
+.social-friends { list-style: none; margin: 0; padding: 0; }
+.social-friends li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.social-score { font-weight: 700; }
+.social-friends li.me { color: var(--accent); font-weight: 700; }
+.social-place { color: var(--accent); font-weight: 700; }
+/* The casual board's top players: place, name, score. */
+.social-board li { gap: 10px; }
+.social-board .social-rank { min-width: 2ch; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.social-board .social-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.social-board li.me .social-rank { color: var(--accent); }
+.social-board li.gap { justify-content: center; padding: 0; color: var(--muted); border-top: 0; }
+.social-more { display: block; margin: 8px auto 0; }
+
+.grid.disabled { opacity: 0.6; }
+.chip[hidden] { display: none; }
+.more-btn { border: 1px dashed var(--border); cursor: pointer; font: inherit; font-size: 13px; }
+
+/* ---------- Feel: live tracing, floating points, praise, confetti ---------- */
+
+/* The traced tiles turn green the moment they spell a word that would score,
+   gold for a casual bonus word, and amber when it's already found. */
+.grid[data-trace='new'] .tile.on { background: var(--found); border-color: var(--found); color: #fff; }
+.grid[data-trace='bonus'] .tile.on { background: var(--bonus); border-color: var(--bonus); color: #fff; }
+.grid[data-trace='had'] .tile.on { background: #d9a520; border-color: #d9a520; color: #2b2118; }
+.grid[data-trace='new'] .trail polyline { stroke: rgba(10, 60, 20, 0.55); }
+
+.float-score {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  font-weight: 900;
+  font-size: calc(30cqw / var(--cols));
+  color: var(--accent);
+  text-shadow: 0 2px 0 var(--bg), 0 0 6px var(--bg);
+  pointer-events: none;
+  animation: float-up 0.9s ease-out forwards;
+}
+.float-score.star { color: var(--star); font-size: calc(38cqw / var(--cols)); }
+.float-score.bonus { color: var(--bonus); }
+@keyframes float-up {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.6); }
+  15% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); }
+  100% { opacity: 0; transform: translate(-50%, -190%) scale(1); }
+}
+
+.banner {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 900;
+  font-size: 26px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  animation: banner-pop 1s ease forwards;
+}
+.banner.star { background: var(--star); color: #2b2118; font-size: 30px; }
+.banner.time { background: var(--fg); color: var(--bg); font-size: 44px; padding: 12px 30px; animation-duration: 1.4s; }
+@keyframes banner-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-6deg); }
+  18% { opacity: 1; transform: translate(-50%, -50%) scale(1.12) rotate(2deg); }
+  30% { transform: translate(-50%, -50%) scale(1) rotate(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -70%) scale(0.95); }
+}
+
+.confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 60; }
+
+.sprint-pts { display: inline-block; color: var(--fg); }
+.sprint-pts.bump { animation: bump 0.35s ease; }
+@keyframes bump { 40% { transform: scale(1.25); color: var(--accent); } }
+.chip.new { animation: chip-in 0.4s ease; }
+@keyframes chip-in { 0% { transform: scale(0.3); opacity: 0; } 70% { transform: scale(1.12); } }
+.sprint-clock.low { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.08); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-score, .banner { animation-duration: 0.01s; animation-delay: 0.8s; }
+  .sprint-pts.bump, .chip.new, .sprint-clock.low { animation: none; }
+}
+
+/* Sprint: words left by length */
+.sprint-lengths { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.len-pill {
+  position: relative;
+  overflow: hidden;
+  min-width: 44px;
+  padding: 2px 6px 5px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.len-label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.sprint-lengths::before {
+  content: 'Words found by length';
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.len-count { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.len-meter { position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--k) * 100%); background: var(--accent); transition: width 0.3s ease; }
+.len-pill.done { border-color: var(--accent); }
+.len-pill.done .len-count { color: var(--accent); }
+
+
+/* Bigger progress row and found words: readable at a glance mid-run. The
+   length counters span the board's width, one equal column per length. */
+.sprint-lengths {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  width: min(100%, 380px);
+  align-self: center;
+}
+.sprint-lengths::before { display: none; }
+.len-pill { min-width: 0; padding: 5px 2px 8px; border-radius: 12px; }
+.len-label { font-size: 12px; }
+.len-label::after { content: ' letters'; }
+.len-count { font-size: 19px; }
+.len-meter { height: 4px; }
+@media (max-width: 400px) { .len-label::after { content: ''; } .len-count { font-size: 17px; } }
+.sprint-lengths-caption { margin: 0; text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.sprint-found { max-height: 150px; gap: 8px; }
+.sprint-found .chip { font-size: 16px; padding: 5px 12px; }
+.sprint-found .chip:first-child { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+
+/* Past casual boards */
+.archive { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.archive-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font: 600 15px/1.2 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.archive-row:hover { border-color: var(--accent); }
+.archive-shape { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+.archive-status { font-size: 13px; color: var(--muted); min-width: 72px; text-align: right; }
+.archive-status.going { color: var(--bonus); }
+.archive-status.done { color: var(--accent); font-weight: 800; }
+.meta .secondary-btn.small { margin-left: auto; }
+
+/* Words by length, redesigned: each counter is a small level meter whose
+   whole background fills from the bottom; a finished length goes solid. The
+   label is just the letter count ("letters" is in the caption above). */
+.sprint-lengths { gap: 6px; }
+.len-pill {
+  --fill: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  padding: 6px 2px 7px;
+  gap: 2px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(to top, var(--fill) calc(var(--k, 0) * 100%), var(--surface) calc(var(--k, 0) * 100%));
+  transition: background 0.3s ease;
+}
+.len-pill .len-label { font-size: 12px; font-weight: 800; color: var(--muted); letter-spacing: 0.02em; }
+.len-pill .len-label::after { content: none; }
+.len-pill .len-count { display: flex; align-items: baseline; justify-content: center; gap: 1px; line-height: 1; }
+.len-pill .len-count b { font-size: 20px; font-weight: 900; color: var(--fg); }
+.len-pill .len-count small { font-size: 12px; font-weight: 700; color: var(--muted); }
+.len-pill .len-meter { display: none; }
+.len-pill.done { background: var(--accent); border-color: var(--accent); }
+.len-pill.done .len-label, .len-pill.done .len-count b, .len-pill.done .len-count small { color: var(--accent-text); }
+@media (max-width: 360px) { .len-pill .len-count b { font-size: 17px; } .len-pill .len-count small { font-size: 11px; } }
+.len-pill .len-count b { font-size: 22px; }
+
+/* ---------- OddsRabbit brand touches ---------- */
+:root {
+  --brand-gold: #ff8d00;
+  --brand-blue: #60a5fa;
+}
+
+/* Gold for the big moments, blue for links and the selected tab. */
+.banner.star, .float-score.star { --star: var(--brand-gold); }
+.banner.star { background: var(--brand-gold); color: #fff; text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18); }
+.float-score.star { color: var(--brand-gold); }
+.word-line.star { color: var(--brand-gold); }
+.chip.star { background: color-mix(in srgb, var(--brand-gold) 22%, transparent); }
+.results-card { border-color: var(--brand-gold); }
+.results-sum { color: var(--brand-gold); }
+.link-btn { color: var(--brand-blue); }
+.tab[aria-selected='true'] { color: var(--brand-blue); }
+
+/* ---------- Paw-print trail ---------- */
+.trail .paw { fill: var(--paw); }
+.grid[data-trace='new'] .trail .paw { fill: rgba(20, 90, 35, 0.75); }
+.grid[data-trace='bonus'] .trail .paw { fill: rgba(140, 70, 0, 0.75); }
+.grid[data-trace='had'] .trail .paw { fill: rgba(120, 85, 0, 0.7); }
+
+/* ---------- Share sheet ---------- */
+.share-sheet { display: flex; flex-direction: column; gap: 10px; }
+.share-head { display: flex; justify-content: space-between; align-items: center; }
+.share-head h2 { margin: 0; }
+.share-preview-img { width: 100%; max-width: 280px; align-self: center; border-radius: 14px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.15); }
+.share-text { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--bg); font: 13px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+.share-primary { display: flex; gap: 8px; }
+.share-primary > * { flex: 1; }
+.share-label { margin: 6px 0 0; font-size: 12px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.share-socials { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.social-btn { min-height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: 700 14px/1 system-ui, sans-serif; cursor: pointer; }
+.social-btn:hover { border-color: var(--brand-blue); color: var(--brand-blue); }
+
+/* ---------- Podium ---------- */
+.podium { display: grid; grid-template-columns: repeat(3, 1fr); align-items: end; gap: 6px; margin: 4px 0 2px; }
+.podium-step { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.podium-medal { font-size: 24px; line-height: 1; }
+.podium-name { font-size: 12px; font-weight: 700; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.podium-pts { font-size: 12px; color: var(--muted); font-weight: 700; }
+.podium-block { width: 100%; border-radius: 8px 8px 2px 2px; display: flex; align-items: flex-start; justify-content: center; padding-top: 4px; font-weight: 900; color: #fff; }
+.place-1 .podium-block { height: 56px; background: var(--brand-gold); }
+.place-2 .podium-block { height: 40px; background: #a8b0b8; }
+.place-3 .podium-block { height: 28px; background: #c58a5a; }
+.podium-step.me .podium-name { color: var(--brand-blue); }
+
+@media (prefers-reduced-motion: reduce) {
+}
+
+/* Ranked start card: the points scale. Deliberately unlike the "words left"
+   counters (outlined gold pills, a unit on every value) so the two rows of
+   numbers aren't mistaken for each other. */
+.points-scale { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 4px 0; }
+.points-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--brand-gold) 55%, transparent);
+  background: color-mix(in srgb, var(--brand-gold) 8%, transparent);
+}
+.points-step-len { font-size: 12px; font-weight: 700; color: var(--muted); }
+.points-step-pts { font-size: 15px; font-weight: 900; color: color-mix(in srgb, var(--brand-gold) 75%, var(--fg)); }
+
+/* Casual in play: the hints take the score's place in the Ranked HUD. */
+.casual-play .sprint-hud { align-items: center; gap: 8px; }
+.casual-play .tools { flex-wrap: nowrap; }
+.casual-play .tool-btn { min-height: 34px; padding: 0 12px; font-size: 14px; white-space: nowrap; }
