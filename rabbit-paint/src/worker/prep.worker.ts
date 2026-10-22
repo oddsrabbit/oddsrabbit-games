@@ -5,9 +5,9 @@ import type { PrepFailure, PrepRequest } from './messages';
 import { prepPicture } from './page-prep';
 
 self.onmessage = (e: MessageEvent<PrepRequest>) => {
-  const { grey, w, h, detail } = e.data;
+  const { grey, w, h, gaps } = e.data;
   try {
-    const res = prepPicture(grey, w, h, detail);
+    const res = prepPicture(grey, w, h, gaps);
     (self as unknown as Worker).postMessage(res, [res.ids.buffer, res.ink.buffer, res.thumbIds.buffer, res.thumbInk.buffer]);
   } catch (err) {
     const fail: PrepFailure = { ok: false, message: (err as Error)?.message ?? 'prep failed' };

@@ -7,15 +7,15 @@ export const MIN_SIDE = 1000;
 /** Thumbnails' long side, as tools/prep-page.ts makes them. */
 export const THUMB = 360;
 
-/** 0 = fewer, bigger areas; 1 = normal; 2 = more detail. */
-export type Detail = 0 | 1 | 2;
+/** How big a gap in the lines to close: 0 = keeps fine detail; 1 = normal; 2 = closes bigger gaps. */
+export type Gaps = 0 | 1 | 2;
 
 export interface PrepRequest {
   /** Greyscale, one byte per pixel, already flattened onto white. */
   grey: Uint8Array;
   w: number;
   h: number;
-  detail: Detail;
+  gaps: Gaps;
 }
 
 export interface PrepRegion {

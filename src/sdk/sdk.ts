@@ -5,6 +5,8 @@ import {
   ScoreDistributionEntrySchema,
   DailyContentSchema,
   ContentRevealSchema,
+  ContentSubmitResultSchema,
+  ChatShareResultSchema,
   SeasonBoardEnvelopeSchema,
   SeasonEntrySchema,
   RoundRankSchema,
@@ -67,6 +69,8 @@ import {
   type ScoreDistributionEntry,
   type DailyContent,
   type ContentReveal,
+  type ContentSubmitResult,
+  type ChatShareResult,
 } from '../schemas/messages';
 import { BridgeTransport, type LifecycleHandler } from './transport';
 
@@ -77,6 +81,8 @@ export type {
   ScoreDistributionEntry,
   DailyContent,
   ContentReveal,
+  ContentSubmitResult,
+  ChatShareResult,
   SeasonBoard,
   SeasonEntry,
   SeasonMetric,
@@ -109,6 +115,8 @@ export type {
 
 export {
   CONTENT_ERROR_CODES,
+  CHAT_ERROR_CODES,
+  PICTURE_MAX_BYTES,
   MATCH_ERROR_CODES,
   MATCH_MAX_PENDING_STRANGER_INVITES,
   MATCH_SEARCH_MIN_CHARS,
@@ -117,6 +125,24 @@ export {
   GIFT_ERROR_CODES,
   VISIT_ERROR_CODES,
 } from '../schemas/messages';
+
+export interface ContentSubmitPayload {
+  /** What it is, in the game's words, `[a-z0-9-]{1,32}`, e.g. `'coloring-page'`. */
+  kind: string;
+  /** 1–40 characters after trimming. */
+  title: string;
+  /** `data:image/png` or `data:image/jpeg` base64, at most `PICTURE_MAX_BYTES` decoded. */
+  image: string;
+  /** The player confirmed they made it or may share it. */
+  rights: true;
+}
+
+export interface ChatSharePicturePayload {
+  /** `data:image/png` or `data:image/jpeg` base64, at most `PICTURE_MAX_BYTES` decoded. */
+  image: string;
+  /** Sent with the picture, at most `CHAT_CAPTION_MAX` characters. */
+  caption?: string;
+}
 
 export interface GiftSendPayload {
   /** Who gets it. Must follow the viewer or be followed by them. */
@@ -563,6 +589,30 @@ export interface OddsRabbitGlobal {
      * `capabilities.has('content.reveal')`.
      */
     reveal(payload: { roundKey: string; index: number; guess: Record<string, unknown> }): Promise<ContentReveal>;
+    /**
+     * Send something the player made to the platform's review queue, to be
+     * added for everyone if a person approves it. Nothing is published by
+     * the call itself. Resolves `{ id }`.
+     *
+     * REJECTS on failure: `content/unauthorized` signed out,
+     * `content/invalid-image`, `content/too-many` over the daily cap,
+     * `content/forbidden` without the `bridge:submit` scope
+     * (`CONTENT_ERROR_CODES`). Gate on `capabilities.has('content.submit')`.
+     */
+    submit(payload: ContentSubmitPayload): Promise<ContentSubmitResult>;
+  };
+
+  readonly chat: {
+    /**
+     * Send a picture to one of the player's chats. The host shows its own
+     * chat picker, so the game never learns who it went to. Resolves
+     * `{ sent: false }` when the player closes the picker.
+     *
+     * REJECTS on failure: `chat/unauthorized` signed out,
+     * `chat/invalid-image`, `chat/rate-limited` (`CHAT_ERROR_CODES`). Gate on
+     * `capabilities.has('chat.sharePicture')`.
+     */
+    sharePicture(payload: ChatSharePicturePayload): Promise<ChatShareResult>;
   };
 
   /**
@@ -1191,6 +1241,21 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       this.request<unknown>('content.reveal', payload).then((result) => {
         const parsed = ContentRevealSchema.safeParse(result);
         if (!parsed.success) throw new Error('content.reveal: malformed result');
+        return parsed.data;
+      }),
+    submit: (payload: ContentSubmitPayload): Promise<ContentSubmitResult> =>
+      this.request<unknown>('content.submit', payload).then((result) => {
+        const parsed = ContentSubmitResultSchema.safeParse(result);
+        if (!parsed.success) throw new Error('content.submit: malformed result');
+        return parsed.data;
+      }),
+  };
+
+  readonly chat = {
+    sharePicture: (payload: ChatSharePicturePayload): Promise<ChatShareResult> =>
+      this.request<unknown>('chat.sharePicture', payload).then((result) => {
+        const parsed = ChatShareResultSchema.safeParse(result);
+        if (!parsed.success) throw new Error('chat.sharePicture: malformed result');
         return parsed.data;
       }),
   };

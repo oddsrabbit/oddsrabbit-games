@@ -107,7 +107,7 @@ export function packColoring(fills: ReadonlyArray<Fill | null>): PackedColoring 
     let i = f.indexOf(fill);
     if (i < 0) {
       // More than 64 distinct fills on one page: the extras fall back to the
-      // first one rather than failing the save. A page has ~20–70 regions.
+      // first one rather than failing the save. A page has ~10–150 regions.
       if (f.length >= B64.length) i = 0;
       else { f.push(fill); i = f.length - 1; }
     }

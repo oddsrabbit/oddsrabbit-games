@@ -40,8 +40,8 @@ test('unpack rejects data for another page or tampered data', () => {
   assert.equal(unpackColoring(null, 1), null);
 });
 
-test('a 70-region page with distinct gradients fits the 2 KB score metadata cap', () => {
-  const fills = Array.from({ length: 70 }, (_, i) => gradient(i % 4, `#${(i * 99999).toString(16).padStart(6, '0').slice(-6)}`, '#ffffff'));
+test('a 300-region page with 64 distinct gradients fits the 2 KB score metadata cap', () => {
+  const fills = Array.from({ length: 300 }, (_, i) => gradient(i % 4, `#${(i * 99999).toString(16).padStart(6, '0').slice(-6)}`, '#ffffff'));
   const meta = { v: 1, slug: 'some-long-page-slug-name', ...packColoring(fills), t: 1234 };
   assert.ok(JSON.stringify(meta).length <= 2048, `${JSON.stringify(meta).length} bytes`);
 });

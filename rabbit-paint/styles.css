@@ -197,7 +197,7 @@ h1, h2 { margin: 0; }
 .sheet-actions { display: flex; flex-direction: column; gap: 8px; }
 .share-preview { display: flex; justify-content: center; }
 .share-canvas { max-width: 100%; max-height: 46vh; width: auto; height: auto; border-radius: 8px; box-shadow: 0 8px 24px rgba(42, 34, 48, 0.18); }
-.share-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.share-actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
 .big-action { height: 76px; border-radius: 18px; border: 1.5px solid var(--line); background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-weight: 800; font-size: 14px; }
 .big-action.accent { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 

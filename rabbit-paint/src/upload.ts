@@ -6,7 +6,7 @@
 import { loadImage } from './art';
 import { MINE_MAX, mineSlug, newMineId, putMine, type MinePage } from './mine';
 import { button, el, toast } from './ui';
-import { MAX_SIDE, MIN_SIDE, type Detail, type PrepFailure, type PrepReply, type PrepRequest } from './worker/messages';
+import { MAX_SIDE, MIN_SIDE, type Gaps, type PrepFailure, type PrepReply, type PrepRequest } from './worker/messages';
 
 const PREP_TIMEOUT_MS = 45_000;
 const BUSY_REGIONS = 160;
@@ -62,7 +62,7 @@ async function decode(file: File): Promise<Decoded> {
   }
 }
 
-function prep(d: Decoded, detail: Detail): Promise<PrepReply> {
+function prep(d: Decoded, gaps: Gaps): Promise<PrepReply> {
   // Beside main.js, with its cache-bust query.
   const worker = new Worker(new URL(`./prep-worker.js${new URL(import.meta.url).search}`, import.meta.url));
   return new Promise<PrepReply>((resolve, reject) => {
@@ -73,7 +73,7 @@ function prep(d: Decoded, detail: Detail): Promise<PrepReply> {
       if (e.data.ok) resolve(e.data); else reject(new Error(e.data.message));
     };
     worker.onerror = (e) => { clearTimeout(timer); worker.terminate(); reject(new Error(e.message || 'worker')); };
-    const req: PrepRequest = { grey: d.grey, w: d.w, h: d.h, detail };
+    const req: PrepRequest = { grey: d.grey, w: d.w, h: d.h, gaps };
     worker.postMessage(req);
   });
 }
@@ -153,7 +153,7 @@ export function openUpload(host: HTMLElement, file: File, o: UploadOptions): voi
   note.setAttribute('role', 'status');
   const seg = el('div', 'seg');
   seg.setAttribute('role', 'radiogroup');
-  seg.setAttribute('aria-label', 'Areas');
+  seg.setAttribute('aria-label', 'Gaps in the lines');
   seg.hidden = true;
   const title = el('input', 'text-input');
   title.type = 'text';
@@ -173,10 +173,10 @@ export function openUpload(host: HTMLElement, file: File, o: UploadOptions): voi
 
   let decoded: Decoded | null = null;
   let result: PrepReply | null = null;
-  let detail: Detail = 1;
+  let gaps: Gaps = 1;
   let token = 0;
-  const segBtns = (['Simple', 'Normal', 'Detailed'] as const).map((label, i) => {
-    const b = button('seg-btn', label, () => { if (detail !== i) { detail = i as Detail; void run(); } });
+  const segBtns = (['Fine detail', 'Normal', 'Close gaps'] as const).map((label, i) => {
+    const b = button('seg-btn', label, () => { if (gaps !== i) { gaps = i as Gaps; void run(); } });
     b.setAttribute('role', 'radio');
     seg.append(b);
     return b;
@@ -184,14 +184,14 @@ export function openUpload(host: HTMLElement, file: File, o: UploadOptions): voi
 
   async function run() {
     const my = ++token;
-    segBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === detail)));
+    segBtns.forEach((b, i) => b.setAttribute('aria-checked', String(i === gaps)));
     segBtns.forEach((b) => { b.disabled = true; });
     colorBtn.disabled = true;
     stage.replaceChildren(spinner);
     note.textContent = 'Finding the areas to color';
     try {
       decoded ??= await decode(file);
-      const r = await prep(decoded, detail);
+      const r = await prep(decoded, gaps);
       if (my !== token) return;
       result = r;
       show(r);
@@ -220,8 +220,8 @@ export function openUpload(host: HTMLElement, file: File, o: UploadOptions): voi
     colorBtn.disabled = n < 2;
     if (n < 2) note.textContent = 'We couldn’t find any outlines. Pictures with dark lines on a light background work best.';
     else if (r.inkShare > PHOTO_INK_SHARE) note.textContent = `${n} areas. This looks like a photo; drawings with dark outlines work best.`;
-    else if (n > BUSY_REGIONS) note.textContent = `${n} areas: that’s a lot of small ones. Try Simple for bigger areas.`;
-    else note.textContent = `${n} areas, each its own colour above. Try Simple or Detailed if they look wrong.`;
+    else if (n > BUSY_REGIONS) note.textContent = `${n} areas: lots of small ones, so zoom in to color them. Try Close gaps if colour spills between areas.`;
+    else note.textContent = `${n} areas, each its own colour above. Colour spilling between areas? Try Close gaps. Small areas missing? Try Fine detail.`;
   }
 
   async function save() {

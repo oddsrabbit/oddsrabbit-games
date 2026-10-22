@@ -8,7 +8,7 @@
 // Local stand-in for the OddsRabbit host: answers the bridge from memory so the
 // game runs without the platform. Not shipped.
 //   (cd .. && npm run build) && npm run build:dev
-//   python3 -m http.server 8767        (at the repo root)
+//   python3 -m http.server 8767        (in rabbit-paint/)
 //   open http://localhost:8767/dev/harness.html
 // Params:
 //   day=N        today is day N (default 0); the harness moves the server clock there
@@ -19,6 +19,8 @@
 //   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
 //   submit=0     a host without content.submit: no "Share with everyone" for players' pictures
 //                (with it, the harness fakes the proposed verb; see docs/content-submit.md)
+//   chat=0       a host without chat.sharePicture: no "Send in chat" (with it, the harness
+//                shows a fake chat picker; see ../docs/proposals/chat-share-picture.md)
 const q = new URLSearchParams(location.search);
 const STORE_KEY = 'rp-harness-store';
 if (q.get('fresh')) { localStorage.removeItem(STORE_KEY); for (const k of Object.keys(localStorage)) if (k.startsWith('rabbit-paint:')) localStorage.removeItem(k); }
@@ -75,7 +77,7 @@ const ready = fetch('../dist/rabbit-paint/catalog.json').then((r) => r.json()).t
 });
 
 // likes=0 plays a host from before scores.like (no hearts, earliest first).
-const caps = ['storage.get', 'storage.set', 'storage.delete', 'actions.share', 'actions.haptic', 'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'time.now', ...(q.get('likes') === '0' ? [] : ['scores.like', 'scores.myLikes']), ...(q.get('submit') === '0' ? [] : ['content.submit'])];
+const caps = ['storage.get', 'storage.set', 'storage.delete', 'actions.share', 'actions.haptic', 'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'time.now', ...(q.get('likes') === '0' ? [] : ['scores.like', 'scores.myLikes']), ...(q.get('submit') === '0' ? [] : ['content.submit']), ...(q.get('chat') === '0' ? [] : ['chat.sharePicture'])];
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 let initSent = false;
 function init() { send({ type: 'init', user: q.get('user') === '0' ? null : ME, sessionToken: 'x', expiresAt: null, colorScheme: 'light', capabilities: caps }); }
@@ -84,15 +86,6 @@ frame.addEventListener('load', () => {
     const s = frame.contentDocument.documentElement.style;
     s.setProperty('--oddsrabbit-safe-top', '47px'); s.setProperty('--oddsrabbit-chrome-height', '56px');
     s.setProperty('--oddsrabbit-chrome-start', '56px'); s.setProperty('--oddsrabbit-safe-bottom', '34px');
-  }
-  // The SDK has no content.submit yet: stand one in on its content namespace.
-  if (q.get('submit') !== '0') {
-    frame.contentWindow.OddsRabbit.content.submit = async (p) => {
-      if (q.get('user') === '0') throw Object.assign(new Error('unauthorized'), { code: 'content/unauthorized' });
-      console.log('content.submit', p.kind, p.title, Math.round(p.image.length / 1024) + ' KB', p);
-      await new Promise((r) => setTimeout(r, 600));
-      return { id: `sub-${Date.now().toString(36)}` };
-    };
   }
   if (initSent) return;
   initSent = true;
@@ -146,9 +139,46 @@ window.addEventListener('message', async (e) => {
     case 'scores.myLikes': await ready; if (guest) return fail('scores/unauthorized'); return ok(saved.liked[p.roundKey] ?? []);
     case 'scores.friends': await ready; return ok(rows(p.roundKey).filter((x, i) => i % 3 === 0 || x.uuid === ME.uuid).map((x) => ({ ...x, isSelf: x.uuid === ME.uuid })));
     case 'actions.share': console.log('share', p); return ok(undefined);
+    case 'content.submit':
+      if (guest) return fail('content/unauthorized');
+      console.log('content.submit', p.kind, p.title, Math.round(p.image.length / 1024) + ' KB', p);
+      await new Promise((res) => setTimeout(res, 600));
+      return ok({ id: `sub-${Date.now().toString(36)}` });
+    case 'chat.sharePicture': {
+      if (guest) return fail('chat/unauthorized');
+      console.log('chat.sharePicture', Math.round(p.image.length / 1024) + ' KB', p.caption);
+      const to = await fakeChatPicker(p.image, p.caption);
+      if (to) console.log('sent to', to);
+      return ok({ sent: !!to });
+    }
     case 'actions.requestSignIn': console.log('requestSignIn', p); return ok(undefined);
     default: return ok(undefined);
   }
 });
+
+// The host's chat picker, faked: the picture, the caption, two chats and Cancel.
+function fakeChatPicker(image, caption) {
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;font:15px system-ui';
+    const sheet = document.createElement('div');
+    sheet.style.cssText = 'background:#fff;border-radius:16px 16px 0 0;padding:16px;width:min(420px,100%);display:flex;flex-direction:column;gap:8px';
+    const img = document.createElement('img');
+    img.src = image;
+    img.style.cssText = 'max-height:30vh;object-fit:contain';
+    const cap = document.createElement('div');
+    cap.textContent = caption ?? '';
+    sheet.append(Object.assign(document.createElement('b'), { textContent: 'Send to… (harness)' }), img, cap);
+    for (const name of ['mika', 'sam', null]) {
+      const b = document.createElement('button');
+      b.textContent = name ?? 'Cancel';
+      b.style.cssText = 'padding:10px;border-radius:10px;border:1px solid #ccc;background:#f6f6f6';
+      b.onclick = () => { box.remove(); resolve(name); };
+      sheet.append(b);
+    }
+    box.append(sheet);
+    document.body.append(box);
+  });
+}
 </script>
 </body></html>

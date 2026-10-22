@@ -22,11 +22,11 @@ function box(img: Uint8Array, w: number, x0: number, y0: number, x1: number, y1:
 
 test('options scale with the picture', () => {
   const big = scaledOptions(2100, 2100, 1);
-  assert.deepEqual(big, { closeRadius: 4, minArea: 12000, maxStrokePx: 4000 });
+  assert.deepEqual(big, { closeRadius: 4, minArea: 600, maxStrokePx: 4000 });
   const small = scaledOptions(1050, 700, 1);
-  assert.equal(small.minArea, 3000);
-  assert.ok(scaledOptions(1050, 700, 0).minArea! > small.minArea!);
-  assert.ok(scaledOptions(1050, 700, 2).minArea! < small.minArea!);
+  assert.equal(small.minArea, 150);
+  assert.ok(scaledOptions(1050, 700, 0).closeRadius! < small.closeRadius!);
+  assert.ok(scaledOptions(1050, 700, 2).closeRadius! > small.closeRadius!);
 });
 
 test('pencil lines on shaded paper are ink; the shade is not', () => {

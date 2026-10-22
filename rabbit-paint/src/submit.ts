@@ -3,41 +3,13 @@
 // approved one goes through the same prep and curation as our own pages
 // (README, "Pages"), credited to the player.
 //
-// The bridge verb `content.submit` is proposed, not built (docs/content-submit.md).
-// Until a host lists it, canSubmit() is false and the option doesn't show.
+// The bridge verb is `content.submit` (docs/content-submit.md). Until a host
+// lists it, canSubmit() is false and the option doesn't show.
 
 import { getMine, putMine, type MinePage } from './mine';
-import { button, el, haptic, OR, toast } from './ui';
+import { button, dataUrl, el, haptic, OR, toast } from './ui';
 
-export interface ContentSubmitRequest {
-  kind: 'coloring-page';
-  title: string;
-  /** `data:image/jpeg;base64,…` or PNG, at most 1600 px on the long side. */
-  image: string;
-  /** The player confirmed they drew it or may share it. */
-  rights: true;
-}
-
-interface ContentSubmitApi {
-  submit(p: ContentSubmitRequest): Promise<{ id: string }>;
-}
-
-/** The verb, when this host and SDK have it. Typed here until the SDK ships it. */
-function api(): ContentSubmitApi | null {
-  const content = (OR() as unknown as { content?: Partial<ContentSubmitApi> }).content;
-  return OR().capabilities.has('content.submit') && typeof content?.submit === 'function' ? (content as ContentSubmitApi) : null;
-}
-
-export const canSubmit = (): boolean => api() !== null;
-
-function dataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
-}
+export const canSubmit = (): boolean => OR().capabilities.has('content.submit');
 
 export function openSubmit(host: HTMLElement, page: MinePage, onSent: (p: MinePage) => void): void {
   const wrap = el('div', 'sheet-wrap');
@@ -76,8 +48,7 @@ export function openSubmit(host: HTMLElement, page: MinePage, onSent: (p: MinePa
     );
 
     async function go() {
-      const verb = api();
-      if (!verb) { toast('Sharing pictures isn’t available here yet'); return; }
+      if (!canSubmit()) { toast('Sharing pictures isn’t available here yet'); return; }
       if (!OR().user) {
         if (OR().capabilities.has('actions.requestSignIn')) void OR().actions.requestSignIn('Sign in to share your picture');
         else toast('Sign in to share your picture');
@@ -87,10 +58,10 @@ export function openSubmit(host: HTMLElement, page: MinePage, onSent: (p: MinePa
       send.textContent = 'Sending…';
       try {
         const name = title.value.trim().replace(/\s+/g, ' ').slice(0, 40) || page.title;
-        const res = await verb.submit({ kind: 'coloring-page', title: name, image: await dataUrl(page.files.source), rights: true });
+        const res = await OR().content.submit({ kind: 'coloring-page', title: name, image: await dataUrl(page.files.source), rights: true });
         // Re-read: the page may have changed since the sheet opened.
         const fresh = (await getMine(page.id)) ?? page;
-        fresh.submitted = { at: Date.now(), id: typeof res?.id === 'string' ? res.id : null };
+        fresh.submitted = { at: Date.now(), id: res.id };
         await putMine(fresh);
         haptic('success');
         toast('Sent. Thank you!');

@@ -1,15 +1,18 @@
 // Share and save a picture: Clean, Framed (white border and title), or
 // Before / after. The platform's share verb only carries text, so the image
 // goes through the Web Share API where the browser allows files, and is
-// downloaded otherwise.
+// downloaded otherwise. Send in chat hands the image to the host's chat
+// picker (`chat.sharePicture`), on hosts that have it.
 
 import { composite, type Art } from './art';
 import type { Fill } from './fills';
-import { button, el, icon, OR, toast } from './ui';
+import { button, dataUrl, el, haptic, icon, OR, toast } from './ui';
 
 type Style = 'clean' | 'framed' | 'before-after';
 const STYLES: Array<[Style, string]> = [['clean', 'Clean'], ['framed', 'Framed'], ['before-after', 'Before / after']];
 const SIZE = 1080;
+/** The bridge's picture cap, `PICTURE_MAX_BYTES` in the SDK. */
+const PICTURE_MAX_BYTES = 2 * 1024 * 1024;
 const FONT = 'ui-rounded, "SF Pro Rounded", system-ui, sans-serif';
 
 export function openShare(host: HTMLElement, art: Art, fills: ReadonlyArray<Fill | null>): void {
@@ -29,8 +32,11 @@ export function openShare(host: HTMLElement, art: Art, fills: ReadonlyArray<Fill
     return { id, b };
   });
   const actions = el('div', 'share-actions');
+  if (OR().capabilities.has('chat.sharePicture')) {
+    actions.append(button('big-action accent', `${icon('chat', 22)}<span>Send in chat</span>`, () => void sendInChat()));
+  }
   actions.append(
-    button('big-action accent', `${icon('share', 22)}<span>Share</span>`, () => void share()),
+    button(actions.childElementCount ? 'big-action' : 'big-action accent', `${icon('share', 22)}<span>Share</span>`, () => void share()),
     button('big-action', `${icon('save', 22)}<span>Save</span>`, () => void save()),
   );
   const close = () => { wrap.classList.remove('open'); setTimeout(() => wrap.remove(), 200); };
@@ -52,8 +58,8 @@ export function openShare(host: HTMLElement, art: Art, fills: ReadonlyArray<Fill
     preview.replaceChildren(canvas);
   }
 
-  function blob(): Promise<Blob> {
-    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('no image'))), 'image/png'));
+  function blob(type = 'image/png'): Promise<Blob> {
+    return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('no image'))), type, 0.9));
   }
   const fileName = () => `${art.info.slug}-rabbit-paint.png`;
 
@@ -73,6 +79,28 @@ export function openShare(host: HTMLElement, art: Art, fills: ReadonlyArray<Fill
       return;
     }
     await save();
+  }
+
+  let sending = false;
+  async function sendInChat() {
+    if (sending) return;
+    if (!OR().user) {
+      if (OR().capabilities.has('actions.requestSignIn')) void OR().actions.requestSignIn('Sign in to send your picture');
+      else toast('Sign in to send your picture');
+      return;
+    }
+    sending = true;
+    try {
+      let image = await blob();
+      if (image.size > PICTURE_MAX_BYTES) image = await blob('image/jpeg');
+      const res = await OR().chat.sharePicture({ image: await dataUrl(image), caption: `I colored “${art.info.title}” in Rabbit Paint` });
+      if (res.sent) { haptic('success'); toast('Sent'); }
+    } catch (e) {
+      const code = (e as { code?: string })?.code ?? '';
+      toast(code === 'chat/rate-limited' ? 'You’ve sent a lot just now. Try again in a bit.' : 'Couldn’t send it. Try again in a moment.');
+    } finally {
+      sending = false;
+    }
   }
 
   async function save() {

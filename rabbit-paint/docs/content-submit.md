@@ -1,8 +1,11 @@
 # Player pictures for the shared library: `content.submit`
 
-Status: proposed 2026-10-22. The game side is built and hidden until a host
-lists `content.submit` (`src/submit.ts`); the harness fakes the verb. Nothing
-in apps-sdk, WP, the web host or the app yet.
+Status: built 2026-10-22, not deployed. The SDK has the verb (schema,
+`OR.content.submit`, the `bridge:submit` scope, tests in
+`src/sdk/pictures.test.ts`, the apps-sdk README). The game side is in
+`src/submit.ts`, hidden until a host lists `content.submit`; the harness
+answers the verb. WP has the table, endpoint, review screen and erasure entry;
+the web host (`games.js`) and the app (`AppHost.tsx`) list the verb.
 
 ## What players get
 
@@ -26,12 +29,16 @@ in apps-sdk, WP, the web host or the app yet.
   player gave it, flattened onto white, at most 1600 px on the long side
   (about 150–600 KB as JPEG). Cap the decoded size at 2 MB.
 - `rights`: must be `true`.
+- `kind`: the game's word, `[a-z0-9-]{1,32}`; Rabbit Paint sends `coloring-page`.
 - Signed in only. A few per player per day (say 5).
+- Needs the `bridge:submit` manifest scope, so an admin decides which games
+  can send things to the review queue.
 
 Errors (`CONTENT_ERROR_CODES`, none of them retire the verb):
 `content/unauthorized` (guest), `content/invalid-image` (not JPEG/PNG, too
 big, undecodable), `content/too-many` (over the daily cap; the game says "try
-again tomorrow"). Anything else shows "couldn't send it".
+again tomorrow"), `content/forbidden` (no `bridge:submit` scope). Anything
+else shows "couldn't send it".
 
 ## Server (WP)
 
@@ -60,12 +67,19 @@ The credit shows on its tile as "by &lt;username&gt;" (`credit` flows from
 
 ## Platform changes
 
-Same shape as likes: `messages.ts` schema + `sdk.ts` `content.submit()` +
-README + a test in apps-sdk; the WP migration, service, controller, route,
-admin screen and erasure entry; `games.js` on the web host; `AppHost.tsx`
-`HOST_CAPABILITIES` and the bridge in the app. Deploy order: migration + WP,
-then the SDK dist, then the web host and app. Once the SDK has it, drop the
-local type in `src/submit.ts`.
+All built:
+
+- SDK: `messages.ts` schema, `sdk.ts` `content.submit()`, the `bridge:submit`
+  scope, tests, the apps-sdk README.
+- WP: migration `20261022_001_create_app_submissions.sql`,
+  `AppSubmissionService` / `AppSubmissionPolicy`, `POST
+  /apps/{slug}/content/submissions` (checks `bridge:submit`), the "Player
+  submissions" card on the Apps admin page, the erasure entry. Files go to
+  `private_html/app-submissions/` beside the web root, never a public URL.
+  Rabbit Paint is in `tools/setup-apps-platform.php` with `bridge:submit`.
+- Hosts: `games.js` on the web, `AppHost.tsx` in the app.
+
+Deploy order: migration + WP, then the SDK dist, then the web host and app.
 
 Bridge size: a 600 KB data URL through postMessage and the React Native
 WebView bridge is fine, but test it on a low-end Android device.

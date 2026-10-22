@@ -232,6 +232,39 @@ export const GIFT_ERROR_CODES = {
   rateLimited: 'gifts/rate-limited',
 } as const;
 
+/**
+ * A picture crossing the bridge: a `data:image/png` or `data:image/jpeg` base64
+ * URL, at most `PICTURE_MAX_BYTES` once decoded. Games send what the player
+ * made or gave them, scaled so the long side is at most 1600 px.
+ */
+export const PICTURE_MAX_BYTES = 2 * 1024 * 1024;
+const PICTURE_PREFIX = /^data:image\/(png|jpeg);base64,/;
+const PictureDataUrl = z
+  .string()
+  .max('data:image/jpeg;base64,'.length + Math.ceil(PICTURE_MAX_BYTES / 3) * 4)
+  .refine((url) => PICTURE_PREFIX.test(url) && /^[A-Za-z0-9+/]*={0,2}$/.test(url.replace(PICTURE_PREFIX, '')), {
+    message: 'a data:image/png or data:image/jpeg base64 URL',
+  });
+
+/** What a `content.submit` is, in the game's words, e.g. `coloring-page`. */
+export const CONTENT_KIND_PATTERN = /^[a-z0-9-]{1,32}$/;
+export const CONTENT_TITLE_MAX = 40;
+/** Longest caption `chat.sharePicture` carries. */
+export const CHAT_CAPTION_MAX = 200;
+
+/**
+ * Per-call outcomes of `chat.sharePicture`. None of them retire the verb. A
+ * player closing the picker is not an error: it resolves `{ sent: false }`.
+ */
+export const CHAT_ERROR_CODES = {
+  /** Signed out: there is no chat to send to. */
+  unauthorized: 'chat/unauthorized',
+  /** Not a PNG or JPEG, over `PICTURE_MAX_BYTES`, or undecodable. */
+  invalidImage: 'chat/invalid-image',
+  /** Too many pictures sent in the last little while. */
+  rateLimited: 'chat/rate-limited',
+} as const;
+
 /** Most uuids one `visits.seen` call may name. */
 export const VISITS_SEEN_MAX = 50;
 
@@ -431,6 +464,21 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
       roundKey: RoundKey,
       index: z.number().int().min(0).max(CONTENT_REVEAL_MAX_INDEX),
       guess: z.record(z.unknown()),
+    }),
+  }),
+  // Send something the player made to the platform's review queue, to be
+  // added for everyone if a person approves it (Rabbit Paint: a player's
+  // picture becoming a coloring page). Nothing is published by this call.
+  // Authenticated; needs the `bridge:submit` scope; a few per player per day.
+  z.object({
+    type: z.literal('content.submit'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      kind: z.string().regex(CONTENT_KIND_PATTERN),
+      title: z.string().trim().min(1).max(CONTENT_TITLE_MAX),
+      image: PictureDataUrl,
+      // The player confirmed they made it or may share it.
+      rights: z.literal(true),
     }),
   }),
   // ---- Matches. All authenticated: a guest cannot be in a match. Every read
@@ -739,6 +787,17 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
     payload: z.object({
       title: z.string().max(140).optional(),
       text: z.string().max(2000).optional(),
+    }),
+  }),
+  // Send a picture to one of the player's chats. The host opens its own
+  // chat/friend picker, so the game never sees who it went to; `{ sent: false }`
+  // when the player closes the picker. Authenticated; `bridge:share` scope.
+  z.object({
+    type: z.literal('chat.sharePicture'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      image: PictureDataUrl,
+      caption: z.string().max(CHAT_CAPTION_MAX).optional(),
     }),
   }),
   z.object({
@@ -1060,7 +1119,20 @@ export const ContentRevealSchema = z.object({
 
 export type ContentReveal = z.infer<typeof ContentRevealSchema>;
 
-/** Error codes `content.reveal` rejects with, beyond transport failures. */
+// The answer to `content.submit`: the submission's id, for a later status check.
+export const ContentSubmitResultSchema = z.object({ id: z.string().min(1) });
+
+export type ContentSubmitResult = z.infer<typeof ContentSubmitResultSchema>;
+
+// The answer to `chat.sharePicture`: false when the player closed the picker.
+export const ChatShareResultSchema = z.object({ sent: z.boolean() });
+
+export type ChatShareResult = z.infer<typeof ChatShareResultSchema>;
+
+/**
+ * Error codes `content.reveal` and `content.submit` reject with, beyond
+ * transport failures. None of them retire a verb.
+ */
 export const CONTENT_ERROR_CODES = {
   /** The round isn't published (or isn't open yet). */
   notAvailable: 'content/not-available',
@@ -1068,6 +1140,14 @@ export const CONTENT_ERROR_CODES = {
   invalidGuess: 'content/invalid-guess',
   /** This game's content has nothing to reveal. */
   noReveal: 'content/no-reveal',
+  /** `content.submit` signed out. */
+  unauthorized: 'content/unauthorized',
+  /** `content.submit`: not a PNG or JPEG, over `PICTURE_MAX_BYTES`, or undecodable. */
+  invalidImage: 'content/invalid-image',
+  /** `content.submit`: over the player's daily cap for this app. */
+  tooMany: 'content/too-many',
+  /** `content.submit`: the app's manifest does not declare `bridge:submit`. */
+  forbidden: 'content/forbidden',
 } as const;
 
 // One seat in a match. The `uuid`/`username`/`avatar`/`isSelf` quartet is the

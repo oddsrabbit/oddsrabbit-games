@@ -6,7 +6,7 @@ import { dayRoundKey } from './catalog';
 import { cssFor, filledCount, packColoring, type Fill } from './fills';
 import { openPicker } from './picker';
 import { loadColors, loadProgress, pushRecent, saveColors, saveProgress, type ColorPrefs, type Progress, type Session } from './store';
-import { button, el, formatDuration, haptic, icon, OR, toast } from './ui';
+import { button, confirmSheet, el, formatDuration, haptic, icon, OR, toast } from './ui';
 
 export interface PaintOptions {
   session: Session;
@@ -18,7 +18,8 @@ export interface PaintOptions {
 }
 
 interface View { s: number; tx: number; ty: number }
-interface Step { id: number; prev: Fill | null; next: Fill | null }
+/** One undo step: a tap changes one area, Clear all every filled one. */
+type Step = Array<{ id: number; prev: Fill | null; next: Fill | null }>;
 
 const TAP_MOVE = 10;
 const TAP_MS = 600;
@@ -80,6 +81,8 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     button('round-btn', icon('fit'), () => { fit(); animate(); }, 'Fit to screen'),
     button('round-btn', icon('find'), findEmpty, 'Find an empty area'),
   );
+  const clearBtn = button('round-btn', icon('clear'), () => void clearAll(), 'Clear all');
+  side.append(clearBtn);
 
   const toolbar = el('div', 'toolbar');
   const undoBtn = button('tool-btn', icon('undo', 19), () => step(undo, redo, 'prev'), 'Undo');
@@ -213,7 +216,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     if (prev === current) return;
     const wasDone = filledCount(progress.fills) === total;
     setRegion(id, current);
-    undo.push({ id, prev, next: current });
+    undo.push([{ id, prev, next: current }]);
     redo.length = 0;
     const now = performance.now();
     progress.seconds += Math.min(60, (now - lastTapAt) / 1000);
@@ -236,8 +239,22 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   function step(from: Step[], to: Step[], which: 'prev' | 'next') {
     const s = from.pop();
     if (!s) return;
-    setRegion(s.id, s[which]);
+    for (const c of s) setRegion(c.id, c[which]);
     to.push(s);
+    renderChrome();
+  }
+  async function clearAll() {
+    const filled = filledCount(progress.fills);
+    if (!filled) return;
+    const sure = await confirmSheet('Clear this page?', `All ${filled} colored areas go back to blank. Undo brings them back until you leave the page.`, 'Clear all', 'Keep coloring');
+    if (!sure) return;
+    const s: Step = [];
+    progress.fills.forEach((f, id) => { if (f) s.push({ id, prev: f, next: null }); });
+    for (const c of s) setRegion(c.id, null);
+    undo.push(s);
+    redo.length = 0;
+    haptic('light');
+    toast('Cleared. Undo brings it back.');
     renderChrome();
   }
   function setCurrent(f: Fill) {
@@ -292,6 +309,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     statusSub.textContent = filled === total ? 'Finished · tap to post' : `${filled} of ${total} areas`;
     if (session.day === null && filled === total) statusSub.textContent = 'Finished';
     undoBtn.disabled = !undo.length;
+    clearBtn.disabled = filled === 0;
     redoBtn.disabled = !redo.length;
     strip.replaceChildren();
     const list = [current, ...colors.recent.filter((f) => f !== current)].slice(0, 6);

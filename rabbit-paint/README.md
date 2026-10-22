@@ -7,7 +7,8 @@ decisions so far and a link to the mockups are in [docs/plan.md](docs/plan.md).
   until you finish yours), library pages in progress, a shelf per category.
 - **Painting** (`src/paint.ts`): the picture fills the screen behind floating
   controls. One finger drags, two pinch, a quick tap fills. Undo/redo, fit,
-  find an empty area, and a recent-fills strip. **Done** (right) goes home; the
+  find an empty area, clear all (one confirm; undo brings it back while the
+  page is open), and a recent-fills strip. **Done** (right) goes home; the
   app's back button owns the left.
 - **Fills** (`src/picker.ts`, `src/fills.ts`): solid, gradient (4 directions)
   or pattern (dots, stripes, checks, grid, confetti), a colour square and hue
@@ -22,15 +23,18 @@ decisions so far and a link to the mockups are in [docs/plan.md](docs/plan.md).
 - **Your pictures** (`src/upload.ts`, `src/mine.ts`, `src/worker/`): a player
   adds an image and the game turns it into a page on the device, the same
   steps as `prep-page` run in a Web Worker, with ink found against the local
-  paper colour so a phone photo of a printed page works. Simple / Normal /
-  Detailed change the smallest area. Pages and their progress stay in that
+  paper colour so a phone photo of a printed page works. Fine detail /
+  Normal / Close gaps change how big a gap in the lines is closed. Pages and their progress stay in that
   browser (IndexedDB; `mine-<id>` progress keys are local only), up to 30.
   **Share with everyone** sends one for review (`src/submit.ts`); it shows only
-  on a host with `content.submit`, which is proposed in
-  [docs/content-submit.md](docs/content-submit.md), not built.
+  on a host with `content.submit` (see
+  [docs/content-submit.md](docs/content-submit.md)).
 - **Share / save** (`src/share.ts`): Clean, Framed or Before / after at
   1080 px. Share uses the Web Share API with the image where the browser
-  allows files, else the host's text share; Save downloads the PNG.
+  allows files, else the host's text share; Save downloads the PNG. **Send in
+  chat** hands the picture to the host's chat picker (`chat.sharePicture`, see
+  [../docs/proposals/chat-share-picture.md](../docs/proposals/chat-share-picture.md));
+  it shows only on a host that lists it.
 
 Progress saves to the player's storage (`day-N` for today's page, so a page
 that comes round again starts blank; `page-<slug>` for library pages). A
@@ -55,12 +59,13 @@ npm run build        # → dist/rabbit-paint/, real pages only
 npm run build:dev    # the same plus the sample pages
 ```
 
-Local play: `npm run build:dev`, then `python3 -m http.server 8767` at the
-repo root and open http://localhost:8767/dev/harness.html. The harness fakes
+Local play: `npm run build:dev`, then `python3 -m http.server 8767` in
+`rabbit-paint/` and open http://localhost:8767/dev/harness.html. The harness fakes
 the host: `?fresh=1` forgets everything, `?user=0` plays signed out,
 `?day=N` moves the clock, `?others=N` sets how many others posted today,
 `?likes=0` plays a host without likes, `?submit=0` a host without
-`content.submit` (otherwise the harness fakes it),
+`content.submit` and `?chat=0` one without `chat.sharePicture` (otherwise the
+harness fakes them),
 `?chrome=app` fakes the app's insets. See the top of `dev/harness.html`.
 
 Upload `dist/rabbit-paint/` to `apps.oddsrabbit.com/rabbit-paint/`.
@@ -102,9 +107,10 @@ What prep does (`tools/lib/regions.ts`):
    shading dashes, sparkles. Eyes, buttons and other closed shapes stay.
 3. Ink is thickened by 4 px for region finding only, so gaps up to ~8 px don't
    leak. The drawn lines are not thickened.
-4. Regions under 12,000 px² (about 20 pt square on a phone) join neighbouring
-   small ones (a bead string becomes one region), and leftovers fold into the
-   neighbour they share the most border with.
+4. Specks under 600 px² (pockets where lines meet, the slivers between
+   touching beads) join neighbouring specks, and leftovers fold into the
+   neighbour they share the most border with. Every real shape, however
+   small, stays its own area: players zoom in for those.
 5. The config's `merges` join regions the automatic pass left split: each
    group is a list of `[x, y]` source pixels, one point inside each region.
 

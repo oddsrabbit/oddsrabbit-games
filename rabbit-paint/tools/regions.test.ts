@@ -51,13 +51,23 @@ test('closed shapes survive the stroke filter', () => {
   assert.equal(prepare(img, W, H, opts).regions.length, 3);
 });
 
-test('a string of tiny beads becomes one region', () => {
+test('small shapes walled in by ink stay their own areas', () => {
   const img = canvas();
   rect(img, 20, 20, 180, 180);
   for (let i = 0; i < 6; i++) rect(img, 30 + i * 22, 90, 50 + i * 22, 110);
-  // touching beads: 6 tiny insides + the slivers between them cluster together
+  // touching beads, each under minArea: outside, inside the frame, 6 beads
+  assert.equal(prepare(img, W, H, opts).regions.length, 8);
+});
+
+test('a small piece pinched off through paper rejoins its area', () => {
+  const img = canvas();
+  rect(img, 40, 40, 160, 160);
+  // a corner nook under minArea, open to the box through a 3 px gap the walls close
+  for (let y = 40; y < 60; y++) img[y * W + 60] = 0;
+  for (let x = 40; x < 57; x++) img[60 * W + x] = 0;
   const res = prepare(img, W, H, opts);
-  assert.ok(res.regions.length <= 4, `got ${res.regions.length}`);
+  assert.equal(res.regions.length, 2);
+  assert.equal(res.stats.tinyMerged, 1);
 });
 
 test('merge hints join regions', () => {

@@ -8,9 +8,13 @@
 //                        used only to find regions, never drawn
 // 4. regions             4-connected white areas between the walls; every pixel
 //                        (ink included) is owned by its nearest region
-// 5. merge               neighbouring regions under `minArea` cluster together;
-//                        clusters still under it fold into the neighbour they
-//                        share the most border with; then the curator's hints
+// 5. merge               a piece under `minArea` that the walls pinched off
+//                        (an eye crescent's tip, a corner where lines meet)
+//                        touches its shape through paper, not ink: it folds
+//                        into the neighbour it shares the most open border
+//                        with. A piece walled in by ink is a real shape and
+//                        stays, however small, unless it's noise (under a
+//                        sixth of `minArea`). Then the curator's hints
 
 export interface PrepOptions {
   inkThreshold: number;
@@ -25,7 +29,7 @@ export const DEFAULTS: PrepOptions = {
   inkThreshold: 140,
   maxStrokePx: 4000,
   closeRadius: 4,
-  minArea: 12000,
+  minArea: 600,
   merges: [],
 };
 
@@ -143,19 +147,25 @@ export function dilate(src: Uint8Array, w: number, h: number, r: number) {
   return out;
 }
 
-/** Every pixel without a region takes the nearest one's (breadth-first). */
-function spreadOwners(owner: Int32Array, w: number) {
+/**
+ * Every pixel without a region takes the nearest one's (breadth-first): paper
+ * first, through paper only, so a gap between two lines goes to the area it
+ * opens onto, not to whatever is behind the line; then the ink.
+ */
+function spreadOwners(owner: Int32Array, w: number, ink: Uint8Array) {
   const n = owner.length;
-  let frontier: number[] = [];
-  for (let p = 0; p < n; p++) if (owner[p] >= 0) frontier.push(p);
-  while (frontier.length) {
-    const next: number[] = [];
-    for (const p of frontier) {
-      for (const q of neighbours4(p, w, n)) {
-        if (owner[q] === -1) { owner[q] = owner[p]; next.push(q); }
+  for (const pass of [0, 1]) {
+    let frontier: number[] = [];
+    for (let p = 0; p < n; p++) if (owner[p] >= 0) frontier.push(p);
+    while (frontier.length) {
+      const next: number[] = [];
+      for (const p of frontier) {
+        for (const q of neighbours4(p, w, n)) {
+          if (owner[q] === -1 && (pass || !ink[q])) { owner[q] = owner[p]; next.push(q); }
+        }
       }
+      frontier = next;
     }
-    frontier = next;
   }
 }
 
@@ -171,11 +181,13 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
   const reg = components(walls, 0, w, h, false);
   const R = reg.sizes.length;
   const owner = new Int32Array(reg.lab);
-  spreadOwners(owner, w);
+  spreadOwners(owner, w, ink);
 
   const area = new Array<number>(R).fill(0);
   for (let p = 0; p < n; p++) area[owner[p]]++;
+  // Border length with each neighbour: all of it, and the open part (paper on both sides).
   const adj = Array.from({ length: R }, () => new Map<number, number>());
+  const open = Array.from({ length: R }, () => new Map<number, number>());
   for (let p = 0; p < n; p++) {
     const a = owner[p];
     const right = p % w < w - 1 ? p + 1 : -1;
@@ -186,38 +198,44 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
       if (a === b) continue;
       adj[a].set(b, (adj[a].get(b) ?? 0) + 1);
       adj[b].set(a, (adj[b].get(a) ?? 0) + 1);
+      if (ink[p] || ink[q]) continue;
+      open[a].set(b, (open[a].get(b) ?? 0) + 1);
+      open[b].set(a, (open[b].get(a) ?? 0) + 1);
     }
   }
 
   const parent = Array.from({ length: R }, (_, i) => i);
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  const tiny = (i: number) => area[i] < o.minArea;
-  for (let a = 0; a < R; a++) {
-    if (!tiny(a)) continue;
-    for (const b of adj[a].keys()) if (tiny(b)) parent[find(a)] = find(b);
-  }
-  const clusterArea = new Map<number, number>();
-  for (let i = 0; i < R; i++) clusterArea.set(find(i), (clusterArea.get(find(i)) ?? 0) + area[i]);
-  // A small cluster can fold into another small one, so repeat until stable.
+  const members = Array.from({ length: R }, (_, i) => [i]);
+  const size = [...area];
+  /** The other merged region that `c`'s members share the most `border` with, or -1. */
+  const longest = (c: number, border: Array<Map<number, number>>) => {
+    const sum = new Map<number, number>();
+    for (const j of members[c]) for (const [k, len] of border[j]) {
+      const kc = find(k);
+      if (kc !== c) sum.set(kc, (sum.get(kc) ?? 0) + len);
+    }
+    let best = -1;
+    let bestLen = 0;
+    for (const [k, len] of sum) if (len > bestLen) { best = k; bestLen = len; }
+    return best;
+  };
+  let merged = 0;
+  // Smallest first; a piece can fold into another small piece of the same
+  // shape, and that one then folds on, so repeat until nothing moves.
   for (let changed = true; changed; ) {
     changed = false;
-    for (const [c, size] of [...clusterArea]) {
-      if (size >= o.minArea || find(c) !== c) continue;
-      const border = new Map<number, number>();
-      for (let j = 0; j < R; j++) {
-        if (find(j) !== c) continue;
-        for (const [k, len] of adj[j]) {
-          const kc = find(k);
-          if (kc !== c) border.set(kc, (border.get(kc) ?? 0) + len);
-        }
-      }
-      let best = -1;
-      let bestLen = -1;
-      for (const [k, len] of border) if (len > bestLen) { best = k; bestLen = len; }
-      if (best < 0) continue;
-      parent[c] = best;
-      clusterArea.set(best, clusterArea.get(best)! + size);
-      clusterArea.delete(c);
+    const small = [...size.keys()].filter((c) => find(c) === c && size[c] < o.minArea).sort((a, b) => size[a] - size[b]);
+    for (const c of small) {
+      if (find(c) !== c) continue;
+      let to = longest(c, open);
+      if (to < 0 && size[c] < o.minArea / 6) to = longest(c, adj);
+      if (to < 0) continue;
+      parent[c] = to;
+      size[to] += size[c];
+      members[to].push(...members[c]);
+      members[c] = [];
+      merged++;
       changed = true;
     }
   }
@@ -234,7 +252,7 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
     owner[p] = ids.get(root)!;
   }
   const regions = labelPoints(owner, ids.size, w, h);
-  return { width: w, height: h, ink, owner, regions, stats: { rawRegions, droppedStrokes: dropped, tinyMerged: area.filter((a) => a < o.minArea).length } };
+  return { width: w, height: h, ink, owner, regions, stats: { rawRegions, droppedStrokes: dropped, tinyMerged: merged } };
 }
 
 /** Area, bbox and the deepest interior point of each region (chamfer distance). */

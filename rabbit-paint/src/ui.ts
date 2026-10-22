@@ -47,6 +47,8 @@ export const ICONS = {
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 16l5-5 4 4 3-3 6 6"/><path d="M15.5 8.5h.01"/>',
   more: '<path d="M6 12h.01M12 12h.01M18 12h.01"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  clear: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
 } as const;
 
 export function icon(name: keyof typeof ICONS, size = 18): string {
@@ -112,6 +114,33 @@ export function toast(text: string, ms = 2200): void {
   document.body.append(t);
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, ms);
+}
+
+export function dataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+/** A small yes/no sheet. Resolves true on the action, false on cancel or a tap outside. */
+export function confirmSheet(title: string, text: string, action: string, cancel: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const wrap = el('div', 'sheet-wrap');
+    const sheet = el('div', 'sheet');
+    sheet.setAttribute('role', 'alertdialog');
+    sheet.setAttribute('aria-label', title);
+    const close = (yes: boolean) => { wrap.classList.remove('open'); setTimeout(() => wrap.remove(), 200); resolve(yes); };
+    const actions = el('div', 'sheet-actions');
+    actions.append(button('secondary-btn danger', action, () => close(true)), button('text-btn', cancel, () => close(false)));
+    sheet.append(el('h2', '', title), el('p', 'muted center', text), actions);
+    wrap.append(sheet);
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(false); });
+    document.body.append(wrap);
+    requestAnimationFrame(() => wrap.classList.add('open'));
+  });
 }
 
 export function formatDuration(seconds: number): string {

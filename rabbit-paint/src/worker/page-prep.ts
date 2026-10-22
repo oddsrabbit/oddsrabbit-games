@@ -5,20 +5,20 @@
 // - Ink is found against the local paper colour, not one cutoff: a phone photo
 //   of a printed page is grey in one corner and white in another.
 // - The options scale with the picture. The defaults are tuned for 2100 px
-//   pages; a 1000 px picture needs areas a quarter the size for the same
-//   fingertip at fit size.
+//   pages; a 1000 px picture needs areas a quarter the size, and the player
+//   picks how big a gap in the lines to close.
 
 import { dilate, DEFAULTS, prepare, type PrepOptions } from '../../tools/lib/regions';
-import { THUMB, type Detail, type PrepReply } from './messages';
+import { THUMB, type Gaps, type PrepReply } from './messages';
 
 const REF_SIDE = 2100;
 
-export function scaledOptions(w: number, h: number, detail: Detail): Partial<PrepOptions> {
+export function scaledOptions(w: number, h: number, gaps: Gaps): Partial<PrepOptions> {
   const s = Math.max(w, h) / REF_SIDE;
-  const areaFactor = detail === 0 ? 2 : detail === 2 ? 0.45 : 1;
+  const gapFactor = gaps === 0 ? 0.5 : gaps === 2 ? 2 : 1;
   return {
-    closeRadius: Math.max(2, Math.round(DEFAULTS.closeRadius * s)),
-    minArea: Math.max(200, Math.round(DEFAULTS.minArea * s * s * areaFactor)),
+    closeRadius: Math.max(gaps === 0 ? 1 : 2, Math.round(DEFAULTS.closeRadius * s * gapFactor)),
+    minArea: Math.max(50, Math.round(DEFAULTS.minArea * s * s)),
     maxStrokePx: Math.max(200, Math.round(DEFAULTS.maxStrokePx * s * s)),
   };
 }
@@ -59,9 +59,9 @@ export function inkMask(grey: Uint8Array, w: number, h: number): { grey: Uint8Ar
   return { grey: out, inkShare: ink / (w * h) };
 }
 
-export function prepPicture(grey: Uint8Array, w: number, h: number, detail: Detail): PrepReply {
+export function prepPicture(grey: Uint8Array, w: number, h: number, gaps: Gaps): PrepReply {
   const masked = inkMask(grey, w, h);
-  const res = prepare(masked.grey, w, h, scaledOptions(w, h, detail));
+  const res = prepare(masked.grey, w, h, scaledOptions(w, h, gaps));
   if (res.regions.length > 65534) throw new Error('too many areas');
   const n = w * h;
   const ids = new Uint16Array(n);
