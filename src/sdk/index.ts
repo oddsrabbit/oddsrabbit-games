@@ -2,6 +2,8 @@ import { OddsRabbitSDK, type OddsRabbitGlobal } from './sdk';
 
 export type {
   OddsRabbitGlobal,
+  ScoreLikePayload,
+  ScoreLikeResult,
   MatchCreatePayload,
   MatchJoinPayload,
   MatchListPayload,

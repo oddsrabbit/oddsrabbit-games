@@ -9,6 +9,7 @@ import {
   SeasonEntrySchema,
   RoundRankSchema,
   SeasonRankSchema,
+  ScoreLikeResultSchema,
   MatchViewSchema,
   MatchSummarySchema,
   MatchNudgeResultSchema,
@@ -62,6 +63,7 @@ import {
   type AppLifecycleEvent,
   type FriendScore,
   type TopScoreEntry,
+  type ScoreLikeResult,
   type ScoreDistributionEntry,
   type DailyContent,
   type ContentReveal,
@@ -71,6 +73,7 @@ import { BridgeTransport, type LifecycleHandler } from './transport';
 export type {
   FriendScore,
   TopScoreEntry,
+  ScoreLikeResult,
   ScoreDistributionEntry,
   DailyContent,
   ContentReveal,
@@ -249,8 +252,19 @@ export interface TopScoresPayload {
   roundKey: string;
   /** Max rows to return, clamped server-side to 1..100 (default 20). */
   limit?: number;
-  /** 'top' (default) ranks by score; 'first' ranks by earliest submission. */
-  order?: 'top' | 'first';
+  /**
+   * 'top' (default) ranks by score; 'first' by earliest submission; 'latest'
+   * newest first; 'likes' most liked first (see `scores.like`).
+   */
+  order?: 'top' | 'first' | 'latest' | 'likes';
+}
+
+export interface ScoreLikePayload {
+  roundKey: string;
+  /** The uuid of the player whose row is being liked. */
+  uuid: string;
+  /** true to like, false to take the like back. */
+  liked: boolean;
 }
 
 /**
@@ -447,9 +461,28 @@ export interface OddsRabbitGlobal {
      * (default) ranks by score DESC; `order: 'first'` ranks by earliest
      * submission (a "who did it first" hall-of-fame). Returns an empty array when
      * nobody has played or on a malformed response. Rows carry no `isSelf`; match
-     * `uuid` against `OddsRabbit.user` to highlight the viewer.
+     * `uuid` against `OddsRabbit.user` to highlight the viewer. `order: 'latest'`
+     * is newest first and `order: 'likes'` most liked first; every row carries
+     * its `likes` count. Pass those two only when
+     * `capabilities.has('scores.like')`: an older host drops an order it
+     * doesn't know and quietly ranks by score instead.
      */
     top(payload: TopScoresPayload): Promise<TopScoreEntry[]>;
+    /**
+     * Like or unlike another player's row in a round, e.g. a painting in a
+     * daily gallery. Idempotent both ways. Resolves the state now and the row's
+     * new count. Rejects `scores/own-entry` for your own row,
+     * `scores/not-found` when that player has no row in the round, and
+     * `scores/unauthorized` signed out. Gate the UI on
+     * `capabilities.has('scores.like')`.
+     */
+    like(payload: ScoreLikePayload): Promise<ScoreLikeResult>;
+    /**
+     * The uuids of the rows the viewer has liked in a round, to fill hearts.
+     * Resolves `[]` signed out or on a host without the verb; rejects on any
+     * other failure.
+     */
+    myLikes(payload: { roundKey: string }): Promise<string[]>;
     /**
      * Fetch the season board — every player's daily rows across one calendar
      * month, aggregated into a single ranked number. Public (works signed-out).
@@ -1037,6 +1070,28 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       ),
     top: (payload: TopScoresPayload): Promise<TopScoreEntry[]> =>
       this.requestRows<TopScoreEntry>('scores.top', payload, TopScoreEntrySchema),
+    // A write, so it rejects on failure like submit; the caller rolls back its
+    // optimistic heart.
+    like: (payload: ScoreLikePayload): Promise<ScoreLikeResult> =>
+      this.request<unknown>('scores.like', payload).then((result) => {
+        const parsed = ScoreLikeResultSchema.safeParse(result);
+        if (!parsed.success) throw new Error('scores.like: malformed result');
+        return parsed.data;
+      }),
+    // Signed out and unsupported hosts resolve empty hearts, the same
+    // reasoning as rank's null; any other failure rejects so the caller
+    // decides.
+    myLikes: (payload: { roundKey: string }): Promise<string[]> => {
+      if (!this.user) return Promise.resolve([]);
+      return this.request<unknown>('scores.myLikes', payload)
+        .then((result) =>
+          Array.isArray(result) ? result.filter((u): u is string => typeof u === 'string') : []
+        )
+        .catch((error: unknown) => {
+          if (isUnsupportedError(error)) return [];
+          throw error;
+        });
+    },
     // Returns an envelope rather than a row list, so it can't use requestRows.
     // Same two principles though: an unsupported host degrades instead of
     // rejecting, and one bad row drops itself rather than the whole board.

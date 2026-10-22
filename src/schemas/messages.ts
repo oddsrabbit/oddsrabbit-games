@@ -313,15 +313,40 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
   }),
   // Global top-N leaderboard for a round — all players, not follow-graph
   // restricted. Public read (guests see the board). `order`: 'top' (default, by
-  // score) or 'first' (earliest submitters / hall-of-fame). `limit` clamped
-  // server-side to 1..100.
+  // score), 'first' (earliest submitters / hall-of-fame), 'latest' (newest
+  // first) or 'likes' (most liked first, for galleries; see `scores.like`).
+  // `limit` clamped server-side to 1..100.
   z.object({
     type: z.literal('scores.top'),
     correlationId: CorrelationId,
     payload: z.object({
       roundKey: RoundKey,
       limit: z.number().int().min(1).max(100).optional(),
-      order: z.enum(['top', 'first']).optional(),
+      order: z.enum(['top', 'first', 'latest', 'likes']).optional(),
+    }),
+  }),
+  // Like or unlike another player's row in a round, e.g. a painting in a daily
+  // gallery. Idempotent both ways. Counts come back as `likes` on `scores.top`
+  // and `scores.friends` rows, and `order: 'likes'` sorts by them. Your own
+  // row rejects with `scores/own-entry`; a player with no row in the round
+  // with `scores/not-found`.
+  z.object({
+    type: z.literal('scores.like'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      roundKey: RoundKey,
+      uuid: z.string().uuid(),
+      liked: z.boolean(),
+    }),
+  }),
+  // The uuids of the rows the viewer has liked in a round, to fill a gallery's
+  // hearts. Authenticated and separate from `scores.top` for the same reason
+  // as `scores.rank`: the board stays public and viewer-free.
+  z.object({
+    type: z.literal('scores.myLikes'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      roundKey: RoundKey,
     }),
   }),
   // Monthly season board for the app — every player's daily rows across one
@@ -829,6 +854,9 @@ export const FriendScoreSchema = z.object({
   // this field; `.default(false)` keeps SDK consumers' types simple while
   // still parsing pre-isSelf responses.
   isSelf: z.boolean().default(false),
+  // How many players have liked this row (`scores.like`). 0 from hosts that
+  // predate likes.
+  likes: z.number().int().nonnegative().default(0),
 });
 
 export type FriendScore = z.infer<typeof FriendScoreSchema>;
@@ -839,6 +867,14 @@ export type FriendScore = z.infer<typeof FriendScoreSchema>;
 export const TopScoreEntrySchema = FriendScoreSchema.omit({ isSelf: true });
 
 export type TopScoreEntry = z.infer<typeof TopScoreEntrySchema>;
+
+// The answer to `scores.like`: the state now and the row's new like count.
+export const ScoreLikeResultSchema = z.object({
+  liked: z.boolean(),
+  likes: z.number().int().nonnegative(),
+});
+
+export type ScoreLikeResult = z.infer<typeof ScoreLikeResultSchema>;
 
 // One bucket of a round's community score distribution. `score` is the raw
 // integer the app submitted; the app maps it back to its own buckets (e.g.
