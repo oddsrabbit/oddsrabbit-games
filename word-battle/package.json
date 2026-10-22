@@ -1,0 +1,13 @@
+{
+  "name": "word-battle",
+  "private": true,
+  "description": "Word Battle: an async 2–4 player word game for OddsRabbit.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
