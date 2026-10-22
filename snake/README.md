@@ -37,6 +37,6 @@ Grid is 24×16 cells of 20px each. Wall is 1 cell thick around the perimeter, le
 
 ## License
 
-MIT — see `LICENSE.txt`.
+Proprietary, all rights reserved — see `LICENSE.txt`.
 
 The Press Start 2P font (`fonts/press-start-2p-latin.woff2`) is © 2012 The Press Start 2P Project Authors, licensed under SIL OFL 1.1 — see `fonts/OFL.txt`.

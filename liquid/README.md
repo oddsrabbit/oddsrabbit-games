@@ -42,4 +42,4 @@ A future scoring loop (e.g., "trace the shape") could opt into `bridge:share` fo
 
 - `script.js` — MIT, copyright (c) 2017 Pavel Dobryakov. See `LICENSE.txt`.
 - `dat.gui.min.js` — Apache License 2.0, copyright (c) 2011 Data Arts Team, Google Creative Lab.
-- Port modifications for the OddsRabbit Games surface — MIT under the apps-sdk repo's top-level license.
+- Port modifications for the OddsRabbit Games surface — MIT, same as upstream.

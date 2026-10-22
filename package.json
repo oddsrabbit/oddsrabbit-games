@@ -2,6 +2,7 @@
   "name": "@oddsrabbit/apps-sdk",
   "version": "0.1.0-alpha.0",
   "description": "OddsRabbit Apps SDK — bridge contract for apps hosted on OddsRabbit (mobile + web).",
+  "private": true,
   "license": "MIT",
   "homepage": "https://github.com/oddsrabbit/apps-sdk",
   "repository": {
@@ -67,8 +68,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

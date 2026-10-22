@@ -126,7 +126,7 @@ Drag-heavy game — both rules from the parent README are required. Both are wir
 
 ## License
 
-MIT — see `LICENSE.txt`.
+Proprietary, all rights reserved — see `LICENSE.txt`.
 
 The Press Start 2P font (`../snake/fonts/press-start-2p-latin.woff2`, reused via the parent build) is © 2012 The Press Start 2P Project Authors, licensed under SIL OFL 1.1.
 

@@ -27,6 +27,9 @@ const PUBLIC_PATHS = [
   'src/ui',
   'src/host',
   'docs/game-header-guidelines.md',
+  // The one game kept public, as a worked example of the SDK in a real game.
+  // Every other game stays private.
+  '2048',
   'LICENSE',
   '.gitattributes',
   'tsconfig.json',
