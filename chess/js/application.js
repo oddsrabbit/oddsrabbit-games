@@ -3,7 +3,7 @@
 // Three screens, the same as Word Battle's (whose match plumbing this shares
 // line for line where the two games agree): the match list, the new-game
 // setup, and one match. Every piece of game state on screen comes from the
-// server's per-viewer MatchView (`OR.matches.get` / the `watch` poll); this
+// server's per-viewer MatchView (`Matches.get` / the `watch` poll); this
 // file holds only the piece the player has picked up (`selected`) and the
 // move they have made on the board but not yet sent (`pending`). A move goes
 // to the server as `{ type: "move", from, to, promo?, offerDraw? }` and the
@@ -11,6 +11,10 @@
 //
 // The rules are ChessRules.php on the server; js/rules.js is a copy for
 // legal-move dots, check and notation, and the server's word is final.
+//
+// Games against the computer (js/computer.js) are kept on the device and come
+// back as the same MatchView, through `Matches`, which routes each verb by
+// uuid. They work signed out and on hosts without the match verbs.
 //
 // The whole multiplayer surface is gated on `capabilities.has('matches.get')`
 // after `whenReady()`: the mobile host ships these verbs behind App Store
@@ -26,6 +30,7 @@
   var Rules = window.ChessRules;
   var Pieces = window.ChessPieces;
   var Board = window.ChessBoard;
+  var Computer = window.ChessComputer;
   if (!OR) {
     showFatal("This game needs to run inside the OddsRabbit app or website.");
     return;
@@ -33,6 +38,10 @@
 
   // The rules-class id the server selects on (MatchService::rulesFor), stored
   // in `game` on every match row.
+  // OR.matches with computer games mixed in (js/computer.js). Its `list`
+  // asks the host only while `state.online`.
+  var Matches = Computer.wrap(OR.matches || {}, function () { return state.online; });
+
   var GAME = "chess";
   var GAME_NAME = "Chess";
   var SLUG = (function () {
@@ -59,6 +68,7 @@
       list: $(".screen-list"),
       choose: $(".screen-choose"),
       "new": $(".screen-new"),
+      cpu: $(".screen-cpu"),
       match: $(".screen-match")
     },
     listBody: $(".match-list"),
@@ -73,6 +83,15 @@
     joinOpenButtons: $$(".join-open-button"),
     quickButtons: $$(".quick-button"),
     chooseFriends: $(".choose-friends"),
+    cpuOpenButtons: $$(".cpu-open-button"),
+    cpuLevels: $(".cpu-levels"),
+    cpuAvatar: $(".cpu-avatar"),
+    cpuName: $(".cpu-name"),
+    cpuRating: $(".cpu-rating"),
+    cpuLine: $(".cpu-line"),
+    cpuReroll: $(".cpu-reroll"),
+    cpuColors: $$(".cpu-color"),
+    cpuStart: $(".cpu-start"),
     chooseJoin: $(".choose-join"),
     findingPanel: $(".finding-panel"),
     findYou: $(".find-you"),
@@ -134,8 +153,7 @@
     moveBar: $(".move-bar"),
     undoButton: $(".undo-button"),
     sendButton: $(".send-button"),
-    offerDrawBox: $(".offer-draw-box"),
-    offerDrawLabel: $(".offer-draw"),
+    offerChip: $(".offer-chip"),
     waitBar: $(".wait-bar"),
     waitText: $(".wait-text"),
     reviewBar: $(".review-bar"),
@@ -185,6 +203,8 @@
     pending: null,
     // The result card was put away to look at the final position.
     reviewing: false,
+    // A draw offer picked from the ⋯ menu, to go with the next move sent.
+    offerDraw: false,
     nudged: {},
     stopWatch: null,
     invitable: [],
@@ -212,7 +232,11 @@
     listTimer: null,
     announcedPly: null,
     // The open match's conversation (see the chat section); null elsewhere.
-    chat: null
+    chat: null,
+    // Signed in on a host with the match verbs: games with people are on.
+    online: false,
+    // The computer screen's choices; `bot` is the opponent rolled for `level`.
+    cpu: { level: "casual", color: "random", bot: null }
   };
 
   var board = null;
@@ -273,6 +297,7 @@
   }
 
   function waitingOn(view) {
+    if (view.local) return null;
     if (view.status !== "active" || view.isMyTurn || isOut(view) || !meIn(view)) return null;
     return view.players.filter(function (p) { return p.seat === view.turnSeat; })[0] || null;
   }
@@ -369,7 +394,12 @@
   }
 
   function nameOf(player) {
-    return player.isSelf ? "You" : "@" + player.username;
+    return player.isSelf ? "You" : handle(player);
+  }
+
+  // "@clover" for a person; a computer opponent's made-up name goes bare.
+  function handle(player) {
+    return player.bot ? player.username : "@" + player.username;
   }
 
 
@@ -543,7 +573,7 @@
     '<ul>',
     '<li><strong>Checkmate</strong> wins: the king is attacked and nothing can save it.</li>',
     '<li><strong>Draws</strong>: stalemate (no legal move, but not in check), the same position three times, fifty moves each with no capture or pawn move, or too few pieces left for anyone to mate. These end the game on their own.</li>',
-    '<li>You can <strong>offer a draw</strong> with a move. It stands until your opponent replies: they accept, or decline by moving.</li>',
+    '<li>You can <strong>offer a draw</strong> from the ⋯ menu on your turn. It goes with your next move and stands until your opponent replies: they accept, or decline by moving.</li>',
     '<li><strong>Resign</strong> is in the ⋯ menu.</li>',
     '</ul>',
     '</details>',
@@ -553,6 +583,7 @@
     '<details><summary>Who you can play</summary>',
     '<p>In <strong>Play a friend</strong> you can challenge people you follow, or who follow you. To play anyone else, use a <strong>seat for a link</strong>: whoever opens the link you send (or types its six-character code) takes the seat.</p>',
     '<p><strong>Find an opponent</strong> pairs you with the next player who is also looking for a game.</p>',
+    '<p><strong>Play the computer</strong> to practise: pick a level and you get an opponent with a rating to match. These games stay on this device, work without an account, and don’t count toward your record.</p>',
     '</details>',
     '<details class="keys"><summary>Keyboard</summary>',
     '<div class="keys"><ul>',
@@ -581,7 +612,7 @@
 
   function loadList(quiet) {
     if (!quiet) els.listStatus.textContent = "Loading…";
-    return OR.matches.list({ status: "all", limit: 100 }).then(function (rows) {
+    return Matches.list({ status: "all", limit: 100 }).then(function (rows) {
       els.listStatus.textContent = "";
       state.rows = rows;
       renderList(rows);
@@ -663,7 +694,7 @@
 
   function opponentNames(m) {
     var opponents = opponentsOf(m);
-    if (opponents.length) return opponents.map(function (p) { return "@" + p.username; }).join(", ");
+    if (opponents.length) return opponents.map(function (p) { return p.bot ? p.username + " (" + p.bot.rating + ")" : "@" + p.username; }).join(", ");
     return m.matchmaking ? "Quick match" : "Open table";
   }
 
@@ -805,7 +836,7 @@
 
   function acceptChallenge(m, button) {
     if (button) button.disabled = true;
-    OR.matches.join({ matchUuid: m.matchUuid }).then(function (view) {
+    Matches.join({ matchUuid: m.matchUuid }).then(function (view) {
       haptic("success");
       if (view.status === "active") toast("Game on — " + (view.isMyTurn ? "you play White!" : "they play White."));
       enterMatch(view);
@@ -823,7 +854,7 @@
       text: (host ? "@" + host.username : "They") + " won’t get a notification; the game just closes. To stop challenges from people you don’t follow, turn on “Only People I Follow Can Challenge Me” in your OddsRabbit settings.",
       confirmLabel: "Decline"
     }, function () {
-      OR.matches.resign({ matchUuid: m.matchUuid }).then(function () {
+      Matches.resign({ matchUuid: m.matchUuid }).then(function () {
         if (state.screen === "match") showScreen("list");
         loadList();
       }).catch(function (err) { toast(errorText(err, "Couldn't decline."), true); });
@@ -856,7 +887,7 @@
     var won = 0, lost = 0, drawn = 0;
     rows.forEach(function (m) {
       var me = meIn(m);
-      if (!me || m.status !== "finished") return;
+      if (!me || m.status !== "finished" || m.local) return;
       if (m.winnerSeat === null) drawn++;
       else if (m.winnerSeat === me.seat) won++;
       else lost++;
@@ -938,7 +969,7 @@
     var key = m.matchUuid + "@" + m.version;
     if (have || state.spotLoading === key) return;
     state.spotLoading = key;
-    OR.matches.get({ matchUuid: m.matchUuid }).then(function (view) {
+    Matches.get({ matchUuid: m.matchUuid }).then(function (view) {
       state.spot = { uuid: view.matchUuid, version: view.version, view: view };
     }).catch(function () {
       state.spot = { uuid: m.matchUuid, version: m.version, view: null, failed: true };
@@ -979,11 +1010,100 @@
 
   // -------------------------------------------------------------- new game
 
-  // New game: the chooser when there are two kinds of game, else straight to
-  // setting a table with friends.
+  // New game: the chooser. The computer is always on it; Find an opponent
+  // when the host can quick-match.
   function openChooser() {
-    if (state.canQuick) showScreen("choose");
-    else openNewGame();
+    els.chooseJoin.hidden = !state.online;
+    showScreen("choose");
+  }
+
+  // Play a friend needs an account; a guest who picks it is asked to sign in.
+  function chooseFriends() {
+    if (state.online) { openNewGame(); return; }
+    if (!OR.user && OR.capabilities.has("actions.requestSignIn")) {
+      OR.actions.requestSignIn("Sign in to play against friends.");
+      return;
+    }
+    toast("Playing against friends isn’t available on this version of the app yet.", true);
+  }
+
+  // ------------------------------------------------------------ computer
+
+  var CPU_PREFS = "chess.cpu.prefs";
+
+  function openComputer() {
+    Computer.warm();
+    try {
+      var saved = JSON.parse(localStorage.getItem(CPU_PREFS) || "null");
+      if (saved && Computer.LEVELS.some(function (l) { return l.id === saved.level; })) state.cpu.level = saved.level;
+      if (saved && /^(w|b|random)$/.test(saved.color)) state.cpu.color = saved.color;
+    } catch (_) {}
+    if (!state.cpu.bot || state.cpu.bot.level !== state.cpu.level) state.cpu.bot = Computer.roll(state.cpu.level);
+    renderComputer();
+    showScreen("cpu");
+  }
+
+  function saveCpuPrefs() {
+    try { localStorage.setItem(CPU_PREFS, JSON.stringify({ level: state.cpu.level, color: state.cpu.color })); } catch (_) {}
+  }
+
+  function renderComputer() {
+    var c = state.cpu;
+    clear(els.cpuLevels);
+    Computer.LEVELS.forEach(function (level) {
+      var on = level.id === c.level;
+      var b = el("button", "cpu-level" + (on ? " is-on" : ""));
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(on));
+      var head = el("span", "cpu-level-head");
+      head.appendChild(el("strong", "", level.name));
+      head.appendChild(el("span", "cpu-level-range", level.min + "–" + level.max));
+      b.appendChild(head);
+      b.appendChild(el("span", "cpu-level-blurb", level.blurb));
+      b.addEventListener("click", function () {
+        if (c.level === level.id) return;
+        c.level = level.id;
+        c.bot = Computer.roll(level.id);
+        saveCpuPrefs();
+        haptic("light");
+        renderComputer();
+      });
+      els.cpuLevels.appendChild(b);
+    });
+    clear(els.cpuAvatar);
+    els.cpuAvatar.appendChild(avatar(c.bot.name, null));
+    els.cpuName.textContent = c.bot.name;
+    els.cpuRating.textContent = "Rated " + c.bot.rating + " · " + Computer.levelById(c.bot.level).name;
+    els.cpuLine.textContent = c.bot.line;
+    els.cpuColors.forEach(function (b) {
+      var on = b.getAttribute("data-color") === c.color;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-checked", String(on));
+    });
+    els.cpuStart.textContent = "Play " + c.bot.name.split(" ")[0];
+  }
+
+  function rerollComputer() {
+    state.cpu.bot = Computer.roll(state.cpu.level, state.cpu.bot && state.cpu.bot.name);
+    haptic("light");
+    renderComputer();
+  }
+
+  function startComputer() {
+    if (state.creating) return;
+    state.creating = true;
+    Computer.create(state.cpu.bot, state.cpu.color).then(function (view) {
+      state.creating = false;
+      // A fresh face for next time.
+      state.cpu.bot = Computer.roll(state.cpu.level, state.cpu.bot.name);
+      haptic("success");
+      enterMatch(view);
+      if (!view.isMyTurn) toast("You play Black. " + opponentsOf(view)[0].username + " moves first.");
+    }).catch(function (err) {
+      state.creating = false;
+      toast(errorText(err, "Couldn't start the game."), true);
+    });
   }
 
   function openNewGame() {
@@ -1030,7 +1150,7 @@
     var people = [];
 
     function page(offset, budget) {
-      return OR.matches.invitable({ limit: INVITABLE_PAGE, offset: offset }).then(function (rows) {
+      return Matches.invitable({ limit: INVITABLE_PAGE, offset: offset }).then(function (rows) {
         var fresh = 0;
         rows.forEach(function (person) {
           if (!person || seen[person.uuid]) return;
@@ -1099,7 +1219,7 @@
     state.searchTimer = setTimeout(function () {
       state.searchTimer = null;
       var run = ++state.searchRun;
-      OR.matches.searchPlayers({ query: query, limit: 20 }).then(function (rows) {
+      Matches.searchPlayers({ query: query, limit: 20 }).then(function (rows) {
         if (run !== state.searchRun) return;
         state.searchResults = rows;
         state.searchFor = query;
@@ -1324,7 +1444,7 @@
     state.creating = true;
     els.createButton.disabled = true;
     els.createStatus.textContent = "Setting up the board…";
-    OR.matches.create({
+    Matches.create({
       game: GAME,
       maxPlayers: 2,
       invitees: Object.keys(state.invitees),
@@ -1356,7 +1476,7 @@
     if (state.creating) return;
     state.creating = true;
     els.quickButtons.forEach(function (b) { b.disabled = true; });
-    OR.matches.quick({ game: GAME }).then(function (view) {
+    Matches.quick({ game: GAME }).then(function (view) {
       haptic("success");
       enterMatch(view);
     }).catch(function (err) {
@@ -1371,7 +1491,7 @@
     code = parseJoinCode(code);
     if (!/^[A-Z0-9]{6}$/.test(code)) { toast("Codes are six letters or digits.", true); return; }
     els.listStatus.textContent = "Joining " + code + "…";
-    OR.matches.join({ joinCode: code }).then(function (view) {
+    Matches.join({ joinCode: code }).then(function (view) {
       els.listStatus.textContent = "";
       haptic("success");
       enterMatch(view);
@@ -1384,7 +1504,7 @@
   // ---------------------------------------------------------------- match
 
   function openMatch(uuid) {
-    return OR.matches.get({ matchUuid: uuid }).then(enterMatch).catch(function (err) {
+    return Matches.get({ matchUuid: uuid }).then(enterMatch).catch(function (err) {
       toast(errorText(err, "Couldn't open that game."), true);
     });
   }
@@ -1394,7 +1514,7 @@
     state.selected = null;
     state.pending = null;
     state.reviewing = false;
-    els.offerDrawBox.checked = false;
+    state.offerDraw = false;
     state.announcedPly = view.lastMove ? view.lastMove.ply : null;
     applyView(view);
     showScreen("match");
@@ -1404,11 +1524,15 @@
 
   function startWatching(uuid) {
     stopWatching();
-    state.stopWatch = OR.matches.watch(uuid, function (view) {
+    state.stopWatch = Matches.watch(uuid, function (view) {
       // A poll sent before the player's own move can land after its reply.
       if (!isCurrent(view) || view.version === state.match.version) return;
       var wasMyTurn = state.match && state.match.isMyTurn;
       var wasFinding = state.match && state.match.status === "lobby" && state.match.matchmaking;
+      // The computer answers a draw offer by moving: say so, as a person
+      // declining would be seen to.
+      var declined = view.local && view.status === "active" && state.match.view && state.match.view.drawOffer === 0
+        && view.view && view.view.drawOffer === null;
       var fresh = view.lastMove && view.lastMove.ply !== state.announcedPly;
       applyView(view, fresh ? slideOf(view) : null);
       if (wasFinding && view.status === "active") {
@@ -1417,6 +1541,10 @@
         toast("Matched with " + (them ? "@" + them.username : "a new player") + " — " + (view.isMyTurn ? "you play White!" : "they play White."));
       }
       announceMove(view);
+      if (declined) {
+        var bot = opponentsOf(view)[0];
+        toast((bot ? bot.username : "The computer") + " declined your draw offer.");
+      }
       if (!wasMyTurn && view.isMyTurn) haptic("light");
     }, { onError: function () {} });
   }
@@ -1669,7 +1797,7 @@
     if (!p) return;
     var move = { type: "move", from: Rules.squareName(p.move.from), to: Rules.squareName(p.move.to) };
     if (p.move.promo) move.promo = p.move.promo;
-    var offering = els.offerDrawBox.checked && !els.offerDrawLabel.hidden;
+    var offering = state.offerDraw && canOfferDraw(state.match);
     if (offering) move.offerDraw = true;
     sendMove(move, offering ? "Move sent, with a draw offer." : null);
   }
@@ -1686,13 +1814,14 @@
 
     els.moveBar.hidden = !p;
     els.moveHint.hidden = !live || !!p;
-    els.moveHint.textContent = state.selected !== null
+    var offering = state.offerDraw && canOfferDraw(m);
+    els.moveHint.textContent = (state.selected !== null
       ? "Tap a dot to move there, or another piece."
-      : "Tap a piece to see where it can go.";
+      : "Tap a piece to see where it can go.")
+      + (offering ? " Your draw offer goes with it." : "");
     if (p) {
-      var opp = m && m.view && m.view.drawOffer;
-      // An offer of theirs is standing: answer it with Accept, not a counter.
-      els.offerDrawLabel.hidden = typeof opp === "number" && opp !== (meIn(m) || {}).seat;
+      els.offerChip.hidden = !offering;
+      els.offerChip.disabled = state.sending;
       els.sendButton.textContent = state.sending ? "Sending…" : "Send " + p.san;
       els.sendButton.disabled = state.sending;
       els.undoButton.disabled = state.sending;
@@ -1703,8 +1832,13 @@
     if (waiting) {
       var onTurn = m.players.filter(function (pl) { return pl.seat === m.turnSeat; })[0];
       var offered = m.view && m.view.drawOffer === (meIn(m) || {}).seat;
-      els.waitText.textContent = (onTurn ? "@" + onTurn.username + "’s move" : "Their move")
-        + (offered ? " — your draw offer is with them." : " — we’ll let you know when they play.");
+      if (m.local) {
+        els.waitText.textContent = (onTurn ? onTurn.username : "The computer") + " is thinking…"
+          + (offered ? " Your draw offer is with them." : "");
+      } else {
+        els.waitText.textContent = (onTurn ? "@" + onTurn.username + "’s move" : "Their move")
+          + (offered ? " — your draw offer is with them." : " — we’ll let you know when they play.");
+      }
     }
 
     els.reviewBar.hidden = !(over && state.reviewing);
@@ -1718,6 +1852,7 @@
     if (p.status === "invited") return "invited";
     var color = colorOfSeat(view, p.seat);
     var sub = color ? colorName(color) : "";
+    if (p.bot) sub = (sub ? sub + " · " : "") + p.bot.rating;
     var v = view.view || {};
     if (color && v.board && view.status !== "lobby") {
       var bal = Rules.captured(v.board).balance * (color === "w" ? 1 : -1);
@@ -1766,7 +1901,7 @@
     } else if (view.status === "active") {
       mine = !!view.isMyTurn;
       var onTurn = view.players.filter(function (p) { return p.seat === view.turnSeat; })[0];
-      main = mine ? "Your move" : (onTurn ? "@" + onTurn.username + "’s move" : "");
+      main = mine ? "Your move" : (onTurn ? handle(onTurn) + "’s move" : "");
     } else if (view.status === "finished") {
       main = "Final";
     } else if (view.status === "abandoned") {
@@ -1812,7 +1947,7 @@
     var other = waitingOn(m);
     if (!other) return;
     var uuid = m.matchUuid;
-    OR.matches.nudge({ matchUuid: uuid }).then(function () {
+    Matches.nudge({ matchUuid: uuid }).then(function () {
       state.nudged[uuid] = Date.now();
       haptic("light");
       toast("Nudged @" + other.username + ".");
@@ -1838,7 +1973,7 @@
       confirmLabel: "Claim the win"
     }, function () {
       var uuid = m.matchUuid;
-      OR.matches.claim({ matchUuid: uuid }).then(function (view) {
+      Matches.claim({ matchUuid: uuid }).then(function (view) {
         if (isCurrent(view)) applyView(view);
       }).catch(function (err) { toast(errorText(err, "Couldn't end the game."), true); });
     });
@@ -1852,7 +1987,7 @@
     els.drawOffer.hidden = !offer;
     if (!offer) return;
     var from = view.players.filter(function (p) { return p.seat === v.drawOffer; })[0];
-    els.drawOfferText.textContent = (from ? "@" + from.username : "Your opponent") + " offers a draw. Accept it, or make a move to decline.";
+    els.drawOfferText.textContent = (from ? handle(from) : "Your opponent") + " offers a draw. Accept it, or make a move to decline.";
   }
 
   function acceptDraw() {
@@ -2132,7 +2267,7 @@
       return (loser.isSelf ? "You" : "@" + loser.username) + " stopped moving, so the game was claimed.";
     }
     var resigned = view.players.filter(function (p) { return p.status === "resigned"; })[0];
-    if (resigned) return (resigned.isSelf ? "You" : "@" + resigned.username) + " resigned.";
+    if (resigned) return nameOf(resigned) + " resigned.";
     return "";
   }
 
@@ -2152,7 +2287,7 @@
     if (justEnded) state.reviewing = false;
     els.over.hidden = !done || state.reviewing;
     if (!done) return;
-    els.rematchButton.hidden = !(view.status === "finished" && meIn(view) && OR.capabilities.has("matches.create"));
+    els.rematchButton.hidden = !(view.status === "finished" && meIn(view) && (view.local || OR.capabilities.has("matches.create")));
     var moves = movesOf(view);
     els.movesButton.hidden = !moves.some(function (mv) { return mv.type === "move"; });
     els.boardButton.hidden = view.status !== "finished";
@@ -2177,7 +2312,7 @@
       if (justEnded) haptic("success");
       celebrate(view.matchUuid);
     } else {
-      els.overTitle.textContent = "@" + winner.username + " won";
+      els.overTitle.textContent = handle(winner) + " won";
     }
     els.overText.textContent = endReason(view);
 
@@ -2242,6 +2377,13 @@
   function rematch() {
     var m = state.match;
     if (!m || state.creating) return;
+    if (m.local) {
+      Computer.rematch(m.matchUuid).then(function (view) {
+        haptic("success");
+        enterMatch(view);
+      }).catch(function (err) { toast(errorText(err, "Couldn't set up the rematch."), true); });
+      return;
+    }
     var others = opponentsOf(m);
     state.creating = true;
     els.rematchButton.disabled = true;
@@ -2256,7 +2398,7 @@
       res.people.forEach(function (p) { ok[p.uuid] = true; });
       var invitees = others.filter(function (p) { return ok[p.uuid]; });
       var strangers = others.filter(function (p) { return !ok[p.uuid]; });
-      return OR.matches.create({
+      return Matches.create({
         game: m.game,
         maxPlayers: m.players.length,
         invitees: invitees.map(function (p) { return p.uuid; }),
@@ -2377,7 +2519,7 @@
   // does a challenge this player has not accepted: the server keeps an
   // invited seat out of the table's chat until they say yes.
   function chatAvailable(view) {
-    return !!view && canChat() && !isChallenge(view)
+    return !!view && !view.local && canChat() && !isChallenge(view)
       && view.players.some(function (p) { return !p.isSelf && p.status !== "invited"; });
   }
 
@@ -2437,7 +2579,7 @@
     if (document.hidden || c.inFlight) { scheduleChat(); return; }
     c.inFlight = true;
     var uuid = c.uuid;
-    OR.matches.chat({ matchUuid: uuid, limit: CHAT_PAGE, markSeen: c.open }).then(function (page) {
+    Matches.chat({ matchUuid: uuid, limit: CHAT_PAGE, markSeen: c.open }).then(function (page) {
       if (state.chat !== c) return;
       var fresh = mergeChat(c, page.messages);
       if (!c.loaded) c.hasMore = page.hasMore;
@@ -2650,7 +2792,7 @@
     if (!c || c.loadingOlder || !c.hasMore || !c.messages.length) return;
     c.loadingOlder = true;
     renderChatLog(false);
-    OR.matches.chat({ matchUuid: c.uuid, before: c.messages[0].messageUuid, limit: CHAT_PAGE }).then(function (page) {
+    Matches.chat({ matchUuid: c.uuid, before: c.messages[0].messageUuid, limit: CHAT_PAGE }).then(function (page) {
       if (state.chat !== c) return;
       mergeChat(c, page.messages);
       c.hasMore = page.hasMore;
@@ -2696,7 +2838,7 @@
   // The nonce rides every attempt, so a retry after a reply that got lost is
   // stored once and its echo retires the bubble either way.
   function deliverChat(c, entry) {
-    OR.matches.chatSend({ matchUuid: c.uuid, text: entry.text, nonce: entry.nonce }).then(function (msg) {
+    Matches.chatSend({ matchUuid: c.uuid, text: entry.text, nonce: entry.nonce }).then(function (msg) {
       if (state.chat !== c) return;
       if (!msg.nonce) msg.nonce = entry.nonce;
       c.outbox = c.outbox.filter(function (o) { return o !== entry; });
@@ -2776,9 +2918,9 @@
     renderControls();
     var uuid = state.match.matchUuid;
     var mine = function () { return state.screen === "match" && state.match && state.match.matchUuid === uuid; };
-    OR.matches.move({ matchUuid: uuid, version: state.match.version, move: move }).then(function (view) {
+    Matches.move({ matchUuid: uuid, version: state.match.version, move: move }).then(function (view) {
       state.sending = false;
-      els.offerDrawBox.checked = false;
+      state.offerDraw = false;
       if (!isCurrent(view)) return;
       clearPending();
       state.announcedPly = view.lastMove ? view.lastMove.ply : state.announcedPly;
@@ -2792,7 +2934,7 @@
       if (code === "match/version-conflict" || code === "match/not-your-turn") {
         toast("The game moved on — refreshing.", true);
         clearPending();
-        OR.matches.get({ matchUuid: uuid }).then(function (view) {
+        Matches.get({ matchUuid: uuid }).then(function (view) {
           if (isCurrent(view)) applyView(view);
         }).catch(function () {});
         renderBoard(null);
@@ -2825,7 +2967,7 @@
       confirmLabel: lobby ? (m.matchmaking ? "Stop looking" : mine ? "Close table" : "Leave") : "Resign",
       danger: true
     }, function () {
-      OR.matches.resign({ matchUuid: m.matchUuid }).then(function (view) {
+      Matches.resign({ matchUuid: m.matchUuid }).then(function (view) {
         if (isCurrent(view) || (state.match && state.match.matchUuid === view.matchUuid)) {
           if (view.status === "finished") { applyView(view); return; }
           showScreen("list");
@@ -2874,6 +3016,21 @@
     selected();
   }
 
+  // A draw can be offered with a move of yours, unless the other player's
+  // offer is standing: that one is answered with Accept, not a counter.
+  function canOfferDraw(m) {
+    if (!m || m.status !== "active" || !m.isMyTurn || isOut(m) || !m.view) return false;
+    var opp = m.view.drawOffer;
+    return !(typeof opp === "number" && opp !== (meIn(m) || {}).seat);
+  }
+
+  function toggleDrawOffer() {
+    state.offerDraw = !state.offerDraw;
+    toast(state.offerDraw ? "Your draw offer will go with your move." : "Draw offer taken back.");
+    haptic("light");
+    renderControls();
+  }
+
   function openMatchMenu() {
     var m = state.match;
     openDialog({
@@ -2891,6 +3048,7 @@
         item("How to play", false, showHowTo);
         if (movesOf(m).some(function (mv) { return mv.type === "move"; })) item("Moves", false, showMoves);
         if (m && m.joinCode && m.status === "lobby") item("Share invite", false, shareCode);
+        if (canOfferDraw(m) && !state.sending) item(state.offerDraw ? "Don’t offer a draw" : "Offer a draw", false, toggleDrawOffer);
         if (m && (m.status === "lobby" || (m.status === "active" && !isOut(m)))) {
           item(m.status === "lobby" ? (m.matchmaking ? "Stop looking" : "Leave table") : "Resign", true, resign);
         }
@@ -3016,13 +3174,23 @@
     els.backButtons.forEach(function (b) {
       // The friend setup steps back to the chooser it came from; every other
       // screen goes back to the list.
-      var fromSetup = !!b.closest(".screen-new");
+      var fromSetup = !!b.closest(".screen-new, .screen-cpu");
       b.addEventListener("click", function () {
-        if (fromSetup && state.canQuick) showScreen("choose");
+        if (fromSetup) showScreen("choose");
         else backToList();
       });
     });
-    els.chooseFriends.addEventListener("click", openNewGame);
+    els.chooseFriends.addEventListener("click", chooseFriends);
+    els.cpuOpenButtons.forEach(function (b) { b.addEventListener("click", openComputer); });
+    els.cpuReroll.addEventListener("click", rerollComputer);
+    els.cpuStart.addEventListener("click", startComputer);
+    els.cpuColors.forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.cpu.color = b.getAttribute("data-color");
+        saveCpuPrefs();
+        renderComputer();
+      });
+    });
     els.chooseJoin.addEventListener("click", openJoinDialog);
     els.findingBack.addEventListener("click", backToList);
     els.findingStop.addEventListener("click", resign);
@@ -3035,6 +3203,7 @@
       if (state.match) declineChallenge(state.match);
     });
     els.menuButton.addEventListener("click", openMatchMenu);
+    els.offerChip.addEventListener("click", toggleDrawOffer);
     wireChat();
     els.nudgeButton.addEventListener("click", nudge);
     els.claimButton.addEventListener("click", claim);
@@ -3124,6 +3293,18 @@
     els.screens.list.classList.toggle("is-bare", mode === "none");
   }
 
+  // No games with people here (signed out, or a host without the match
+  // verbs): the computer is the one way in, so it is the only button left.
+  function offlineOnly() {
+    els.newGameButtons.forEach(function (b) { if (b.closest(".hero")) b.hidden = true; });
+    els.joinOpenButtons.forEach(function (b) { b.hidden = true; });
+    els.quickButtons.forEach(function (b) { b.hidden = true; });
+    state.canQuick = false;
+    els.cpuOpenButtons.forEach(function (b) {
+      if (b.closest(".hero")) b.classList.add("primary");
+    });
+  }
+
   function showHeroOnly(noteText) {
     setListMode("landing");
     if (noteText) {
@@ -3141,10 +3322,16 @@
     wire();
     showScreen("list");
 
+    // Computer games come from the game's own storage, so they load first and
+    // work whatever else the host can do.
+    Computer.init({ storage: OR.capabilities.has("storage.get") ? OR.storage : null, user: OR.user });
+    Computer.onChange(function () { if (state.screen === "list") loadList(true); });
+    state.online = OR.capabilities.has("matches.get") && !!OR.user;
+
     if (!OR.capabilities.has("matches.get")) {
       els.unsupported.hidden = false;
-      setListMode("none");
-      OR.ready();
+      offlineOnly();
+      loadList().then(function () { OR.ready(); });
       return;
     }
     // The host declaring the verb is not enough on its own: a stale cached SDK
@@ -3162,12 +3349,13 @@
         stashJoin(String(initial.joinCode).toUpperCase());
       }
       var invite = peekJoin();
-      els.heroActions.hidden = true;
-      showHeroOnly(invite
-        ? "You’ve been invited to a table (code " + invite + "). Sign in to take your seat."
-        : null);
+      offlineOnly();
       els.signInActions.hidden = !OR.capabilities.has("actions.requestSignIn");
-      OR.ready();
+      loadList().then(function () {
+        // The note goes on the hero, which only shows with no computer games.
+        if (invite) showHeroOnly("You’ve been invited to a table (code " + invite + "). Sign in to take your seat.");
+        OR.ready();
+      });
       return;
     }
 

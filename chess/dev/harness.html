@@ -32,9 +32,11 @@
 //   idle=days       every turn counts as having started this many days ago,
 //                   to show Nudge (1+) and Claim the win (14+)
 //   chat=0          host without matches.chat / matches.chatSend
+//   fresh=1         forget saved computer games (kept in localStorage)
 const q = new URLSearchParams(location.search);
 const R = window.ChessRules;
 const DELAY = Number(q.get('delay') || 50);
+if (q.get('fresh') === '1') Object.keys(localStorage).filter((k) => k.startsWith('chess-harness:')).forEach((k) => localStorage.removeItem(k));
 const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester' };
 const PEOPLE = [
   { uuid: '22222222-2222-4222-8222-222222222222', username: 'pip_fan', avatar: null, relation: 'mutual' },
@@ -240,6 +242,11 @@ function start(m) {
 function handle(type, p) {
   const m = p.matchUuid && matches[p.matchUuid];
   switch (type) {
+    // Game storage (computer games live here), kept in this page's localStorage
+    // so they survive a reload. `?fresh=1` starts empty.
+    case 'storage.get': return localStorage.getItem('chess-harness:' + p.key);
+    case 'storage.set': localStorage.setItem('chess-harness:' + p.key, p.value); return null;
+    case 'storage.delete': localStorage.removeItem('chess-harness:' + p.key); return null;
     case 'matches.list': return Object.values(matches).map((x) => { const v = view(x); delete v.view; delete v.joinCode; return v; });
     case 'matches.quick': {
       const mine = Object.values(matches).find((x) => x.matchmaking && x.status === 'lobby');

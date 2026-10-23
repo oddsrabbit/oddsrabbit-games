@@ -35,6 +35,9 @@ export interface Art {
   /** Region id + 1 per pixel; 0 = none. */
   ids: Uint16Array;
   lineart: HTMLImageElement;
+  /** The lines as smooth vectors, for the paint screen (full size only): the
+   *  PNG's own URL when a page has none. */
+  linesUrl: string;
 }
 
 const infoCache = new Map<string, Promise<PageInfo>>();
@@ -52,14 +55,15 @@ async function minePage(slug: string): Promise<MinePage> {
   return page;
 }
 
-/** Where a page's regions and line art images are: the server, or this device. */
-async function imageUrls(slug: string, size: 'full' | 'thumb'): Promise<[string, string]> {
+/** Where a page's regions, line art and vector lines are: the server, or this device. */
+async function imageUrls(slug: string, size: 'full' | 'thumb'): Promise<[string, string, string | null]> {
   const prefix = size === 'thumb' ? 'thumb-' : '';
-  if (!isMineSlug(slug)) return [pageUrl(slug, `${prefix}regions.png`), pageUrl(slug, `${prefix}lineart.png`)];
+  if (!isMineSlug(slug)) return [pageUrl(slug, `${prefix}regions.png`), pageUrl(slug, `${prefix}lineart.png`), size === 'full' ? pageUrl(slug, 'lineart.svg') : null];
   const { files } = await minePage(slug);
-  const urls = (size === 'thumb' ? [files.thumbRegions, files.thumbLineart] : [files.regions, files.lineart]).map((b) => URL.createObjectURL(b));
-  blobUrls.set(slug, [...(blobUrls.get(slug) ?? []), ...urls]);
-  return urls as [string, string];
+  const blobs = size === 'thumb' ? [files.thumbRegions, files.thumbLineart] : [files.regions, files.lineart, files.lineartSvg];
+  const urls = blobs.map((b) => (b ? URL.createObjectURL(b) : null));
+  blobUrls.set(slug, [...(blobUrls.get(slug) ?? []), ...urls.filter((u): u is string => !!u)]);
+  return [urls[0]!, urls[1]!, urls[2] ?? null];
 }
 
 /** Drops a page from the caches, after the player deletes their picture. */
@@ -99,7 +103,7 @@ export function loadArt(slug: string, size: 'full' | 'thumb'): Promise<Art> {
   let p = artCache.get(key);
   if (!p) {
     p = (async () => {
-      const [regionsUrl, lineartUrl] = await imageUrls(slug, size);
+      const [regionsUrl, lineartUrl, svgUrl] = await imageUrls(slug, size);
       const [info, regions, lineart] = await Promise.all([loadInfo(slug), loadImage(regionsUrl), loadImage(lineartUrl)]);
       const w = regions.naturalWidth;
       const h = regions.naturalHeight;
@@ -111,7 +115,7 @@ export function loadArt(slug: string, size: 'full' | 'thumb'): Promise<Art> {
       const px = ctx.getImageData(0, 0, w, h).data;
       const ids = new Uint16Array(w * h);
       for (let i = 0; i < ids.length; i++) ids[i] = px[i * 4]! + px[i * 4 + 1]! * 256;
-      return { info, w, h, scale: w / info.width, ids, lineart };
+      return { info, w, h, scale: w / info.width, ids, lineart, linesUrl: svgUrl ?? lineart.src };
     })();
     artCache.set(key, p);
     p.catch(() => artCache.delete(key));

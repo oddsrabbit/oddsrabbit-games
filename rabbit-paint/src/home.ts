@@ -5,6 +5,7 @@ import { composite, forgetArt, loadArt, pageUrl } from './art';
 import { msUntilNextDay, type Catalog, type PageEntry } from './catalog';
 import { filledCount } from './fills';
 import { deleteMine, listMine, mineKey, type MinePage } from './mine';
+import { mountSplashes } from './splashes';
 import { forgetProgress, loadProgress, loadWip, type Session } from './store';
 import { canSubmit, openSubmit } from './submit';
 import { button, el, icon, serverNow, toast } from './ui';
@@ -20,11 +21,16 @@ export interface HomeOptions {
 
 export async function mountHome(root: HTMLElement, o: HomeOptions): Promise<() => void> {
   const screen = el('div', 'home');
+  // No title (the player opened the game by name): the bar only keeps the
+  // status bar and the back button's row clear once the page scrolls. It is
+  // clear at the top so the splashes behind it show.
   const header = el('header', 'bar');
-  header.append(el('h1', '', 'Rabbit Paint'));
   const main = el('main', 'home-body');
   screen.append(header, main);
   root.replaceChildren(screen);
+  const stopSplashes = mountSplashes(screen, o.day);
+  const onScroll = () => screen.classList.toggle('scrolled', window.scrollY > 4);
+  window.addEventListener('scroll', onScroll, { passive: true });
 
   const bySlug = new Map(o.catalog.pages.map((p) => [p.slug, p]));
   const today = o.todaySlug ? bySlug.get(o.todaySlug) : undefined;
@@ -60,7 +66,7 @@ export async function mountHome(root: HTMLElement, o: HomeOptions): Promise<() =
     main.append(row.section);
   }
 
-  return () => {};
+  return () => { stopSplashes(); window.removeEventListener('scroll', onScroll); };
 }
 
 async function todayCard(o: HomeOptions, page: PageEntry): Promise<HTMLElement> {

@@ -465,6 +465,37 @@ button { font: inherit; color: inherit; }
 
 .choose-join { align-self: center; margin-top: 4px; }
 
+/* ---- Play the computer: a level, the opponent rolled for it, a colour. */
+.cpu-body { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.cpu-levels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.cpu-level {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px; text-align: left; min-width: 0;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--card); color: inherit; cursor: pointer;
+}
+.cpu-level.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cpu-level-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.cpu-level-head strong { font-family: var(--display); font-size: 17px; font-weight: 800; }
+.cpu-level-range { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cpu-level-blurb { font-size: 13px; line-height: 1.3; color: var(--muted); }
+.cpu-card {
+  display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px;
+  border: 1px solid var(--line); background: var(--card);
+}
+.cpu-avatar { flex: 0 0 auto; display: flex; transform: scale(1.35); margin: 0 6px; }
+.cpu-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cpu-name { font-family: var(--display); font-size: 19px; font-weight: 800; }
+.cpu-rating { font-size: 14px; font-weight: 600; color: var(--turn); font-variant-numeric: tabular-nums; }
+.cpu-line { font-size: 13px; color: var(--muted); line-height: 1.3; }
+.cpu-reroll { flex: 0 0 auto; }
+.cpu-colors { display: flex; gap: 8px; }
+.cpu-color {
+  flex: 1 1 0; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--card);
+  color: inherit; font-weight: 600; cursor: pointer;
+}
+.cpu-color.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cpu-note { margin: 6px 0 0; }
+.cpu-start { padding: 14px; font-size: 17px; }
+
 /* ---- Finding an opponent (a quick-match table still waiting) */
 .screen-match.is-finding .turn-strip,
 .screen-match.is-finding .last-move,
@@ -524,7 +555,7 @@ button { font: inherit; color: inherit; }
   border: 1px solid var(--line); background: var(--card); font-weight: 600;
 }
 .lobby-hint { margin: 0; max-width: 32ch; }
-.hero-actions .quick-button {
+.hero-actions .quick-button, .hero-actions .cpu-open-button:not(.primary) {
   border-radius: 12px; border: 1px solid var(--line); background: var(--card); cursor: pointer;
 }
 
@@ -857,19 +888,11 @@ button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
 .move-bar { display: flex; align-items: center; gap: 8px; }
 .move-bar .undo-button { flex: 0 0 auto; padding: 13px 14px; font-size: 15px; }
 .move-bar .send-button { flex: 1 1 auto; min-width: 0; padding: 14px; font-size: 17px; white-space: nowrap; }
-.offer-draw {
-  display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
-  font-size: 13px; color: var(--muted); white-space: nowrap; cursor: pointer;
+.offer-chip {
+  flex: 0 0 auto; padding: 8px 10px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  white-space: nowrap; color: var(--ink); background: var(--warn-bg); border: 1px solid var(--warn-line);
 }
-.offer-draw input {
-  appearance: none; -webkit-appearance: none; margin: 0; flex: 0 0 auto;
-  width: 20px; height: 20px; border-radius: 6px; background: var(--card);
-  border: 1.5px solid color-mix(in srgb, var(--muted) 55%, var(--line));
-  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-}
-.offer-draw input:checked { background: var(--primary-bg); border-color: var(--primary-bg); }
-.offer-draw input:checked::after { content: "✓"; color: var(--accent-ink); font-size: 12px; font-weight: 800; }
-.offer-draw:has(input:checked) { color: var(--ink); }
+.offer-chip span { margin-left: 2px; color: var(--muted); }
 .wait-bar, .review-bar {
   display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px;
   border: 1px solid var(--line); background: var(--card); font-size: 14px; color: var(--muted);

@@ -18,7 +18,7 @@ const SAMPLES = process.env.SAMPLES === '1';
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
 const SDK_DIST = process.env.SDK_DIST || '../dist';
 const OUT = 'dist/rabbit-paint';
-const PAGE_FILES = ['page.json', 'lineart.png', 'regions.png', 'thumb-lineart.png', 'thumb-regions.png'];
+const PAGE_FILES = ['page.json', 'lineart.png', 'lineart.svg', 'regions.png', 'thumb-lineart.png', 'thumb-regions.png'];
 
 await rm('dist', { recursive: true, force: true });
 await mkdir(OUT, { recursive: true });

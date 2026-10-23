@@ -10,12 +10,21 @@ export const THUMB = 360;
 /** How big a gap in the lines to close: 0 = keeps fine detail; 1 = normal; 2 = closes bigger gaps. */
 export type Gaps = 0 | 1 | 2;
 
+/**
+ * How the picture becomes lines. `lines`: its dark lines are the ink, for
+ * line art and photos of printed pages. `outline`: a line goes round each
+ * area of colour, for colour pictures, logos and photos.
+ */
+export type PrepStyle = 'lines' | 'outline';
+
 export interface PrepRequest {
-  /** Greyscale, one byte per pixel, already flattened onto white. */
-  grey: Uint8Array;
+  /** RGB, three bytes per pixel, already flattened onto white. */
+  rgb: Uint8Array;
   w: number;
   h: number;
   gaps: Gaps;
+  /** null: the worker picks one from the picture. */
+  style: PrepStyle | null;
 }
 
 export interface PrepRegion {
@@ -34,6 +43,8 @@ export interface PrepReply {
   ids: Uint16Array;
   /** 1 = ink kept for display. */
   ink: Uint8Array;
+  /** The same ink as a smooth SVG, crisp at any zoom. */
+  lineSvg: string;
   thumbW: number;
   thumbH: number;
   thumbIds: Uint16Array;
@@ -41,6 +52,8 @@ export interface PrepReply {
   thumbInk: Uint8Array;
   /** Share of the picture that's ink before loose strokes are dropped. */
   inkShare: number;
+  /** The style used: the one asked for, or the one picked. */
+  style: PrepStyle;
 }
 
 export interface PrepFailure {

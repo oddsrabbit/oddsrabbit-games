@@ -7,6 +7,7 @@
 //   - dist/leaderboard-v1.js   IIFE bundle for CDN script tag (installs window.OddsRabbitUI)
 //   - dist/leaderboard-v1.esm.js + .css   Shared leaderboard UI for bundler consumers
 //   - dist/host/           Sandbox host page (index.html, host.js, host.css)
+//   - dist/playground/     Local-development playground around the host (index.html, playground.js, .css)
 //   - dist/**/*.d.ts       TypeScript declarations (via tsc) + thin wrappers for stable entry paths
 
 import * as esbuild from 'esbuild';
@@ -136,6 +137,7 @@ const GAME_SOLITAIRE_JS = [
 
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/host', { recursive: true });
+await mkdir('dist/playground', { recursive: true });
 await mkdir('dist/rabbit-words', { recursive: true });
 await mkdir('dist/rabbit-globe', { recursive: true });
 await mkdir('dist/2048/js', { recursive: true });
@@ -226,6 +228,15 @@ const buildTargets = [
     format: 'iife',
     minify: true,
   },
+  // Playground: plays oddsrabbit.com around the host for local development.
+  // Public source, so it keeps its source map like the host.
+  {
+    ...browserOpts,
+    entryPoints: ['src/playground/playground.ts'],
+    outfile: 'dist/playground/playground.js',
+    format: 'iife',
+    minify: true,
+  },
   // RabbitWords — reference game
   {
     ...browserOpts,
@@ -270,6 +281,8 @@ async function copyHostAssets() {
   await Promise.all([
     copyHtmlWithBuildId('src/host/host.html', 'dist/host/index.html'),
     copyFile('src/host/host.css', 'dist/host/host.css'),
+    copyHtmlWithBuildId('src/playground/playground.html', 'dist/playground/index.html'),
+    copyFile('src/playground/playground.css', 'dist/playground/playground.css'),
     copyHtmlWithBuildId('rabbit-words/index.html', 'dist/rabbit-words/index.html'),
     copyFile('rabbit-words/styles.css', 'dist/rabbit-words/styles.css'),
     // RabbitGlobe — geo-guess game. Ships Leaflet's stylesheet alongside ours.

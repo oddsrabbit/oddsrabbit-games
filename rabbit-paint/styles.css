@@ -1,7 +1,8 @@
 :root {
   --ground: #fbf7f1;
   --surface: #ffffff;
-  --canvas-bg: #efe9e0;
+  --canvas-bg: #ece5da;
+  --canvas-dot: #d6cbba;
   --ink: #2a2230;
   --muted: #6b6270;
   --line: #e6dccd;
@@ -84,6 +85,13 @@ h1, h2 { margin: 0; }
 .bar-titles h1 { font-size: 19px; }
 
 /* --- home ------------------------------------------------------------------- */
+.home { min-height: 100vh; position: relative; }
+/* Paint splashes (src/splashes.ts), behind everything on home. */
+.splashes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.splashes svg { display: block; }
+.home-body { position: relative; }
+.home .bar { background: transparent; transition: background 0.2s; }
+.home.scrolled .bar { background: var(--ground); }
 .home-body { padding: 6px 16px calc(var(--safe-bottom) + 24px); display: flex; flex-direction: column; gap: 22px; max-width: 720px; margin: 0 auto; }
 .today { background: var(--surface); border-radius: 24px; padding: 14px; box-shadow: 0 1px 0 var(--line), 0 10px 26px rgba(42, 34, 48, 0.08); display: flex; flex-direction: column; gap: 12px; }
 .today-top { display: flex; gap: 14px; }
@@ -115,10 +123,17 @@ h1, h2 { margin: 0; }
 .tile-progress-fill { height: 5px; border-radius: 3px; background: var(--accent); }
 
 /* --- painting ------------------------------------------------------------------- */
-.paint { position: fixed; inset: 0; background: var(--canvas-bg); overflow: hidden; }
+.paint {
+  position: fixed; inset: 0; overflow: hidden;
+  /* A dotted craft mat under the page; it stays put while the page pans. */
+  background-color: var(--canvas-bg);
+  background-image: radial-gradient(var(--canvas-dot) 1.4px, transparent 1.8px);
+  background-size: 20px 20px;
+}
 .stage { position: absolute; inset: 0; touch-action: none; overflow: hidden; }
 .stage.dropper { cursor: crosshair; }
-.board { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; background: #fff; box-shadow: 0 10px 40px rgba(42, 34, 48, 0.12); }
+.board { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: #fff; box-shadow: 0 1px 2px rgba(42, 34, 48, 0.1), 0 14px 36px rgba(42, 34, 48, 0.14); }
+.board.moving { will-change: transform; }
 .board.animate { transition: transform 0.3s ease; }
 .board .fills, .board .lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .pulse { position: absolute; border-radius: 50%; border: 4px solid var(--accent); pointer-events: none; box-sizing: border-box; opacity: 0; }
@@ -261,6 +276,7 @@ h1, h2 { margin: 0; }
 .upload-stage { display: flex; justify-content: center; align-items: center; min-height: 200px; }
 .upload-preview { max-width: 100%; max-height: 42vh; width: auto; height: auto; border-radius: 10px; box-shadow: 0 8px 24px rgba(42, 34, 48, 0.14); }
 .upload .seg { margin-top: -4px; }
+.upload-areas { align-self: center; margin-top: -4px; }
 .spinner { width: 40px; height: 40px; border-radius: 50%; border: 4px solid var(--chip); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }

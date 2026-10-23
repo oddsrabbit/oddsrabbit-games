@@ -14,7 +14,12 @@ import { createHash } from 'node:crypto';
 
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
 const SDK_DIST = process.env.SDK_DIST || '../dist';
-const JS = ['rules.js', 'pieces.js', 'board.js', 'application.js'];
+const JS = ['rules.js', 'pieces.js', 'board.js', 'engine.js', 'computer.js', 'application.js'];
+// The computer opponent: Stockfish.js (GPLv3), unmodified, from the pinned
+// `stockfish` devDependency. Run `npm install` in chess/ first. It runs as a
+// separate worker and ships with its licence; see README.md.
+const ENGINE_SRC = 'node_modules/stockfish';
+const ENGINE = ['bin/stockfish-18-lite-single.js', 'bin/stockfish-18-lite-single.wasm', 'Copying.txt'];
 
 async function hash(files) {
   const bufs = await Promise.all(files.map((f) => readFile(`${SDK_DIST}/${f}`))).catch(() => null);
@@ -35,6 +40,7 @@ const UI_VERSION = await hash(['leaderboard-v1.js', 'leaderboard-v1.css']);
 await rm('dist', { recursive: true, force: true });
 await mkdir('dist/chess/js', { recursive: true });
 await mkdir('dist/chess/fonts', { recursive: true });
+await mkdir('dist/chess/engine', { recursive: true });
 
 const html = await readFile('index.html', 'utf8');
 await Promise.all([
@@ -52,6 +58,7 @@ await Promise.all([
   copyFile('fonts/bricolage-grotesque-800-latin.woff2', 'dist/chess/fonts/bricolage-grotesque-800-latin.woff2'),
   copyFile('fonts/OFL.txt', 'dist/chess/fonts/OFL.txt'),
   ...JS.map((name) => copyFile(`js/${name}`, `dist/chess/js/${name}`)),
+  ...ENGINE.map((file) => copyFile(`${ENGINE_SRC}/${file}`, `dist/chess/engine/${file.split('/').pop()}`)),
 ]);
 
 // Local copies so the game runs from dist/ with `../sdk-v1.js` resolving.

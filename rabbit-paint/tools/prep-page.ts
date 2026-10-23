@@ -6,6 +6,7 @@
 // Reads  source.(png|jpg)  the line art, any background (transparent → white)
 //        page.config.json  title, category, merge hints, option overrides
 // Writes lineart.png       kept ink, black on transparent: drawn over the fills
+//        lineart.svg       the same ink traced into smooth outlines: what the paint screen shows
 //        regions.png       region id per pixel as RGB (id + 1, little-endian): what a tap fills
 //        page.json         size, regions (area, bbox, label point), stats
 //        preview.png       every region a distinct pastel: for the curator to check merges
@@ -15,6 +16,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { dilate, prepare, type PrepOptions } from './lib/regions';
+import { inkSvg } from './lib/trace';
 
 interface PageConfig {
   title: string;
@@ -55,6 +57,7 @@ async function prepOne(slug: string) {
     preview.set(c, p * 3);
   }
   await sharp(lineart, { raw: { width: w, height: h, channels: 4 } }).png().toFile(join(dir, 'lineart.png'));
+  writeFileSync(join(dir, 'lineart.svg'), inkSvg(res.ink, w, h));
   await sharp(regions, { raw: { width: w, height: h, channels: 3 } }).png().toFile(join(dir, 'regions.png'));
   await sharp(preview, { raw: { width: w, height: h, channels: 3 } }).png().toFile(join(dir, 'preview.png'));
   // Small copies for home cards and gallery thumbnails, the same shape as the

@@ -12,8 +12,9 @@ export interface MinePage {
   title: string;
   createdAt: number;
   info: PageInfo;
-  /** The same files a catalog page has, as PNGs, plus the picture as given. */
-  files: { regions: Blob; lineart: Blob; thumbRegions: Blob; thumbLineart: Blob; source: Blob };
+  /** The same files a catalog page has, plus the picture as given. Pages
+   *  saved before the lines were traced have no lineartSvg. */
+  files: { regions: Blob; lineart: Blob; lineartSvg?: Blob; thumbRegions: Blob; thumbLineart: Blob; source: Blob };
   /** Set once sent for review to the shared library. */
   submitted?: { at: number; id: string | null };
 }

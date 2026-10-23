@@ -55,7 +55,8 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   const painter = new Painter(art);
   painter.canvas.className = 'fills';
   const lines = el('img', 'lines');
-  lines.src = art.lineart.src;
+  lines.src = art.linesUrl;
+  lines.onerror = () => { lines.onerror = null; lines.src = art.lineart.src; };
   lines.alt = art.info.title;
   lines.draggable = false;
   const pulse = el('div', 'pulse');
@@ -121,9 +122,15 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     view.tx = Math.min(sw * 0.6, Math.max(sw * 0.4 - bw, view.tx));
     view.ty = Math.min(sh * 0.6, Math.max(sh * 0.4 - bh, view.ty));
   }
+  // The board is its own layer only while it moves: a still one is redrawn at
+  // the new zoom, so the vector lines stay sharp instead of a stretched bitmap.
+  let settle = 0;
   function apply() {
     clamp();
     board.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`;
+    board.classList.add('moving');
+    clearTimeout(settle);
+    settle = window.setTimeout(() => board.classList.remove('moving'), 250);
   }
   function animate() {
     board.classList.add('animate');
