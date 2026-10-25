@@ -413,6 +413,14 @@ button.tchip::after { inset: -7px -3px; }
 @keyframes tray-up { from { opacity: 0; transform: translateY(8px); } }
 .food-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .food-act { height: 84px; gap: 3px; font-size: 13px; }
+/* food can be dragged out of the tray to her (main.ts holdOutFood) */
+.food-tray .food-act { touch-action: none; }
+.food-tray { transition: opacity .15s; }
+.food-tray.lifted { opacity: 0; pointer-events: none; }
+.food-ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; margin: 0; }
+.food-ghost img { display: block; transform: translate(-50%, -60%); filter: drop-shadow(0 3px 0 rgba(59, 41, 34, .35)); }
+/* Clean while the sponge is out: it reads Done */
+.act.on { background: #dff1f8; transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
 .food-act .nm { line-height: 1.1; }
 .food-act .cost { display: flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
 .food-hint { margin: 0; font-size: 12px; text-align: center; color: var(--ink-2); }

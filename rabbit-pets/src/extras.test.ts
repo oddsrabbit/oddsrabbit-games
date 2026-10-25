@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import {
   buyOutfit, buyToy, giveOutfit, buyUpgrade, CROPS, cropYield, harvest, ownsToy, pickFind, plant, plotCount, plotOffer, plots, soilMaxed, soilPrice,
-  startVacation, endVacation, wardrobe, wear, COLLECTIBLES,
+  startVacation, endVacation, wardrobe, wear, COLLECTIBLES, pullWeed, thirsty, water, weedy,
 } from './extras';
 import { act, advance, newPet, type PetState } from './sim';
-import { DAY_MS, HOUR_MS } from './tuning';
+import { DAY_MS, HOUR_MS, TENDING } from './tuning';
 import { activeEvents, daysLeft, limitedAvailable, seasonOf, weatherOf } from './world';
 
 const UTC = 'UTC';
@@ -201,4 +201,63 @@ test('soil stops at level 5, and on the way richer soil grows more strawberries 
   assert.ok(planted.ok);
   const picked = harvest(planted.state, 0, NOON + 9 * HOUR_MS);
   assert.ok(picked.ok && (picked.state.pantry?.berries ?? 0) === 5);
+});
+
+test('watering a growing bed by hand, once a planting, takes some of its growing time off', () => {
+  const planted = plant(pet(), 0, 'berry', NOON);
+  assert.ok(planted.ok);
+  const s = planted.state;
+  assert.equal(thirsty(plots(s)[0]!, NOON), true);
+  const w = water(s, 0, NOON + HOUR_MS);
+  assert.ok(w.ok);
+  assert.equal(w.savedMs, Math.round(CROPS.berry.growMs * TENDING.water));
+  assert.equal(plots(w.state)[0]!.readyAtMs, NOON + CROPS.berry.growMs - w.savedMs);
+  assert.equal(thirsty(plots(w.state)[0]!, NOON + HOUR_MS), false);
+  assert.deepEqual(water(w.state, 0, NOON + HOUR_MS), { ok: false, reason: 'watered' });
+  // nearly ready, it can't go past now
+  const late = water(s, 0, NOON + CROPS.berry.growMs - 60_000);
+  assert.ok(late.ok && late.savedMs === 60_000);
+  assert.deepEqual(water(pet(), 0, NOON), { ok: false, reason: 'empty' });
+});
+
+test('weeds come up in about half of plantings, part way through, and pulling one pays a little and feeds her', () => {
+  let weeds = 0;
+  for (let i = 0; i < 200; i++) {
+    const planted = plant(pet(`weedy-${i}`), 0, 'sprout', NOON);
+    assert.ok(planted.ok);
+    const s = planted.state;
+    // never at the start
+    assert.equal(weedy(s, 0, NOON), false);
+    const mid = NOON + CROPS.sprout.growMs * 0.6;
+    if (!weedy(s, 0, mid)) { assert.deepEqual(pullWeed(s, 0, mid), { ok: false, reason: 'none' }); continue; }
+    weeds++;
+    s.needs.hunger = 50;
+    const r = pullWeed(s, 0, mid);
+    assert.ok(r.ok);
+    assert.equal(r.clover, TENDING.weedClover);
+    assert.equal(r.state.clover, s.clover + TENDING.weedClover);
+    assert.equal(r.state.needs.hunger, 50 + TENDING.weedFood);
+    assert.equal(weedy(r.state, 0, mid), false);
+    // not munched while she's away
+    const away = pullWeed(s, 0, mid, false);
+    assert.ok(away.ok && away.state.needs.hunger === 50);
+  }
+  assert.ok(weeds > 200 * TENDING.weedChance * 0.7 && weeds < 200 * TENDING.weedChance * 1.3, `${weeds} weedy plantings`);
+});
+
+test('picking, she sometimes digs up a find for the shelf, the same for the same planting', () => {
+  let dug = 0;
+  for (let i = 0; i < 300; i++) {
+    const planted = plant(pet(`digger-${i}`), 0, 'berry', NOON);
+    assert.ok(planted.ok);
+    const h1 = harvest(planted.state, 0, NOON + CROPS.berry.growMs);
+    const h2 = harvest(planted.state, 0, NOON + CROPS.berry.growMs + HOUR_MS);
+    assert.ok(h1.ok && h2.ok);
+    assert.equal(h1.dug?.id, h2.dug?.id);
+    if (!h1.dug) { assert.equal(h1.clover, 0); continue; }
+    dug++;
+    assert.equal(h1.state.collection?.[h1.dug.id], 1);
+    assert.ok(h1.clover > 0);
+  }
+  assert.ok(dug > 300 * TENDING.digChance * 0.5 && dug < 300 * TENDING.digChance * 1.6, `${dug} finds dug up`);
 });

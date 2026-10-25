@@ -9,7 +9,6 @@
     "test": "node test.mjs",
     "type-check": "tsc --noEmit && tsc --noEmit -p tools && tsc --noEmit -p src/worker",
     "prep-page": "node tools/run.mjs prep-page",
-    "sample-pages": "node tools/run.mjs sample-pages",
     "build:dev": "SAMPLES=1 node build.mjs"
   },
   "devDependencies": {

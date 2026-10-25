@@ -62,3 +62,35 @@ test('nothing takes her anywhere while she wants something, or while decorating'
   assert.equal(after(model(b, { night: true, mood: 'peckish' }), 20_000), null);
   assert.equal(after(model(b, { night: true, decorating: true }), 20_000), null);
 });
+
+test('how she looks follows her needs: dirt builds up in stages, and low needs show', async () => {
+  const { lookOf, DIRT } = await import('./render');
+  const n = (clean: number, rest = 80) => ({ hunger: rest, happy: rest, energy: rest, clean });
+  assert.equal(lookOf(n(DIRT.from)).spots, 0);
+  const counts = [55, 40, 25, 10, 0].map((c) => lookOf(n(c)).spots);
+  for (let i = 1; i < counts.length; i++) assert.ok(counts[i]! > counts[i - 1]!, `dirtier at ${counts}`);
+  assert.equal(lookOf(n(50)).straw, false);
+  assert.equal(lookOf(n(DIRT.straw - 1)).straw, true);
+  assert.equal(lookOf(n(DIRT.flies - 1)).flies, true);
+  const low = lookOf({ hunger: 10, happy: 10, energy: 10, clean: 90 });
+  assert.deepEqual([low.hungry, low.lonely, low.tired, low.thriving], [true, true, true, false]);
+  assert.equal(lookOf(n(90)).thriving, true);
+  // no needs (the shop's fitting room): spotless
+  assert.equal(lookOf(undefined).spots, 0);
+});
+
+test('washing her: the sponge wipes off the smudges it goes over, and only on her', async () => {
+  const sc = new Scene(fakeCanvas() as unknown as HTMLCanvasElement);
+  const m = model(burrow(), { needs: { hunger: 80, happy: 80, energy: 80, clean: 5 }, seed: 'pet:day' });
+  sc.draw(m, 0);
+  const before = sc.dirtLeft(m);
+  assert.ok(before > 10);
+  const b = sc.rabbitBox();
+  assert.equal(sc.scrub(b.x - 20, b.y, 10), false);
+  assert.equal(sc.dirtLeft(m), before);
+  for (let y = b.y - 2; y <= b.y + b.h + 2; y += 2) for (let x = b.x - 2; x <= b.x + b.w + 2; x += 2) assert.ok(sc.scrub(x, y, 20));
+  assert.equal(sc.dirtLeft(m), 0);
+  // once she's clean, a later grubby spell starts afresh
+  sc.draw({ ...m, needs: { ...m.needs!, clean: 100 } }, 40);
+  assert.equal(sc.dirtLeft(m), before);
+});

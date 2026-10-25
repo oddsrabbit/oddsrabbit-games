@@ -31,17 +31,18 @@
   var Pieces = window.ChessPieces;
   var Board = window.ChessBoard;
   var Computer = window.ChessComputer;
+  var Engine = window.ChessEngine;
   if (!OR) {
     showFatal("This game needs to run inside the OddsRabbit app or website.");
     return;
   }
 
-  // The rules-class id the server selects on (MatchService::rulesFor), stored
-  // in `game` on every match row.
   // OR.matches with computer games mixed in (js/computer.js). Its `list`
   // asks the host only while `state.online`.
   var Matches = Computer.wrap(OR.matches || {}, function () { return state.online; });
 
+  // The rules-class id the server selects on (MatchService::rulesFor), stored
+  // in `game` on every match row.
   var GAME = "chess";
   var GAME_NAME = "Chess";
   var SLUG = (function () {
@@ -92,6 +93,7 @@
     cpuReroll: $(".cpu-reroll"),
     cpuColors: $$(".cpu-color"),
     cpuStart: $(".cpu-start"),
+    cpuProgress: $(".cpu-progress"),
     chooseJoin: $(".choose-join"),
     findingPanel: $(".finding-panel"),
     findYou: $(".find-you"),
@@ -122,6 +124,9 @@
     menuButton: $(".menu-button"),
     turnMain: $(".turn-main"),
     chipCheck: $(".chip-check"),
+    stepNav: $(".step-nav"),
+    stepPrev: $(".step-prev"),
+    stepNext: $(".step-next"),
     stall: $(".stall"),
     stallText: $(".stall-text"),
     nudgeButton: $(".nudge-button"),
@@ -150,17 +155,29 @@
     capturesMe: $(".captures.is-me"),
     boardStatus: $(".board-status"),
     moveHint: $(".move-hint"),
+    moveHintText: $(".move-hint-text"),
+    assist: $(".assist"),
+    takebackButton: $(".takeback-button"),
+    hintButton: $(".hint-button"),
     moveBar: $(".move-bar"),
     undoButton: $(".undo-button"),
     sendButton: $(".send-button"),
     offerChip: $(".offer-chip"),
     waitBar: $(".wait-bar"),
     waitText: $(".wait-text"),
+    waitTakeback: $(".wait-takeback"),
     reviewBar: $(".review-bar"),
     reviewText: $(".review-text"),
+    reviewPrev: $(".review-prev"),
+    browseBar: $(".browse-bar"),
+    browsePrev: $(".browse-prev"),
+    browseNext: $(".browse-next"),
+    browseText: $(".browse-text"),
+    browseLive: $(".browse-live"),
     resultButton: $(".result-button"),
     over: $(".game-over"),
     rematchButton: $(".rematch-button"),
+    analyseButton: $(".analyse-button"),
     boardButton: $(".board-button"),
     movesButton: $(".moves-button"),
     overTitle: $(".game-over-title"),
@@ -203,6 +220,16 @@
     pending: null,
     // The result card was put away to look at the final position.
     reviewing: false,
+    // An earlier position on the board: the index of the played move it
+    // follows (-1 for the start), or null for the game as it stands.
+    browse: null,
+    // The engine's suggested square to move to (computer games), shown as a
+    // ring, with the piece picked up; and whether one is being worked out.
+    hint: null,
+    hintSan: "",
+    hinting: false,
+    // The board turned round, for this visit to the match.
+    flipped: false,
     // A draw offer picked from the ⋯ menu, to go with the next move sent.
     offerDraw: false,
     nudged: {},
@@ -259,6 +286,70 @@
 
   function haptic(kind) {
     try { OR.actions.haptic(kind); } catch (_) {}
+  }
+
+  // Board coordinates and sound, on this device.
+  var PREFS_KEY = "chess.prefs";
+  var prefs = (function () {
+    var p = { coords: true, sound: true };
+    try {
+      var saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
+      if (saved && typeof saved.coords === "boolean") p.coords = saved.coords;
+      if (saved && typeof saved.sound === "boolean") p.sound = saved.sound;
+    } catch (_) {}
+    return p;
+  })();
+
+  function savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (_) {}
+  }
+
+  // Sounds, made on the spot with Web Audio rather than shipped as files: a
+  // wooden tap for a move, a double one for a capture, a ping for check, and
+  // a few notes at the end. The context starts on a touch (browsers won't
+  // play before one), and nothing plays with sound off.
+  var audio = null;
+  var SOUNDS = {
+    move: [[190, 0, 0.07, "triangle", 0.35]],
+    capture: [[230, 0, 0.06, "triangle", 0.35], [150, 0.07, 0.09, "triangle", 0.35]],
+    check: [[880, 0, 0.16, "sine", 0.14]],
+    win: [[523, 0, 0.18, "sine", 0.16], [659, 0.12, 0.18, "sine", 0.16], [784, 0.24, 0.34, "sine", 0.16]],
+    lose: [[392, 0, 0.22, "sine", 0.14], [311, 0.18, 0.38, "sine", 0.14]],
+    draw: [[440, 0, 0.2, "sine", 0.13], [440, 0.22, 0.26, "sine", 0.11]]
+  };
+
+  function audioContext() {
+    if (!prefs.sound) return null;
+    if (!audio) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { audio = new AC(); } catch (_) { return null; }
+    }
+    if (audio.state === "suspended") { try { audio.resume(); } catch (_) {} }
+    return audio;
+  }
+
+  function sound(kind) {
+    var ctx = audioContext();
+    if (!ctx || !SOUNDS[kind]) return;
+    var t = ctx.currentTime + 0.01;
+    SOUNDS[kind].forEach(function (n) {
+      var osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = n[3];
+      osc.frequency.setValueAtTime(n[0], t + n[1]);
+      gain.gain.setValueAtTime(0.0001, t + n[1]);
+      gain.gain.exponentialRampToValueAtTime(n[4], t + n[1] + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + n[1] + n[2]);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(t + n[1]);
+      osc.stop(t + n[1] + n[2] + 0.02);
+    });
+  }
+
+  // The sound for a move: check rings over a capture, a capture over a move.
+  function moveSound(capture, check) {
+    sound(check ? "check" : capture ? "capture" : "move");
   }
 
   // Hosts differ in how much of a rejection survives the bridge: some pass the
@@ -549,7 +640,8 @@
     '<h3>Your move</h3>',
     '<ul>',
     '<li>Tap a piece, then tap where it goes. The dots show every legal square; a ring marks a capture. You can drag the piece instead.</li>',
-    '<li>Nothing is sent until you press <strong>Send</strong>, so a slip of the finger costs nothing: <strong>Take back</strong> puts the piece back.</li>',
+    '<li>Nothing is sent until you press <strong>Send</strong>, so a slip of the finger costs nothing: <strong>Take back</strong>, or tapping the piece you moved, puts it back.</li>',
+    '<li>‹ and › at the top step back through the game, and every move in the <strong>Moves</strong> list shows its position.</li>',
     '<li>A pawn reaching the far side asks what it should become.</li>',
     '</ul>',
     '<details><summary>The pieces</summary>',
@@ -583,12 +675,13 @@
     '<details><summary>Who you can play</summary>',
     '<p>In <strong>Play a friend</strong> you can challenge people you follow, or who follow you. To play anyone else, use a <strong>seat for a link</strong>: whoever opens the link you send (or types its six-character code) takes the seat.</p>',
     '<p><strong>Find an opponent</strong> pairs you with the next player who is also looking for a game.</p>',
-    '<p><strong>Play the computer</strong> to practise: pick a level and you get an opponent with a rating to match. These games stay on this device, work without an account, and don’t count toward your record.</p>',
+    '<p><strong>Play the computer</strong> to practise: pick a level and you get an opponent with a rating to match. You can take back a move or ask for a hint, and when the game is over the engine can review it. These games stay on this device, work without an account, and don’t count toward your record.</p>',
     '</details>',
     '<details class="keys"><summary>Keyboard</summary>',
     '<div class="keys"><ul>',
     '<li>Tab onto the board, move between squares with the arrow keys, and press <strong>Enter</strong> to pick up a piece or put it down.</li>',
     '<li><strong>Esc</strong> drops the piece, or takes back a move you have not sent.</li>',
+    '<li>Off the board, <strong>←</strong> and <strong>→</strong> step through the moves played.</li>',
     '</ul></div>',
     '</details>',
     '</div>'
@@ -1041,6 +1134,8 @@
     if (!state.cpu.bot || state.cpu.bot.level !== state.cpu.level) state.cpu.bot = Computer.roll(state.cpu.level);
     renderComputer();
     showScreen("cpu");
+    // The record comes with the saved games, which may still be loading.
+    Computer.loaded().then(function () { if (state.screen === "cpu") renderComputer(); });
   }
 
   function saveCpuPrefs() {
@@ -1049,6 +1144,17 @@
 
   function renderComputer() {
     var c = state.cpu;
+    var record = Computer.record();
+    var played = 0, beaten = 0;
+    Computer.LEVELS.forEach(function (level) {
+      var r = record[level.id];
+      played += r.w + r.l + r.d;
+      if (r.w) beaten++;
+    });
+    els.cpuProgress.hidden = !played;
+    els.cpuProgress.textContent = beaten === Computer.LEVELS.length
+      ? "You’ve beaten every level. Take a bow."
+      : "You’ve beaten " + beaten + " of " + Computer.LEVELS.length + " levels" + (beaten ? ". Next up: " + Computer.LEVELS.filter(function (l) { return !record[l.id].w; })[0].name + "." : ".");
     clear(els.cpuLevels);
     Computer.LEVELS.forEach(function (level) {
       var on = level.id === c.level;
@@ -1061,6 +1167,15 @@
       head.appendChild(el("span", "cpu-level-range", level.min + "–" + level.max));
       b.appendChild(head);
       b.appendChild(el("span", "cpu-level-blurb", level.blurb));
+      // Your games against this level, ticked once you have won one.
+      var r = record[level.id];
+      if (r.w + r.l + r.d) {
+        var line = (r.w ? "✓ " : "") + "You " + r.w + "–" + r.l + (r.d ? "–" + r.d : "");
+        var rec = el("span", "cpu-level-record" + (r.w ? " is-beaten" : ""), line);
+        rec.setAttribute("aria-label", "Your record: " + r.w + (r.w === 1 ? " win, " : " wins, ") + r.l + (r.l === 1 ? " loss" : " losses")
+          + (r.d ? ", " + r.d + (r.d === 1 ? " draw" : " draws") : "") + (r.w ? ". Beaten." : "."));
+        b.appendChild(rec);
+      }
       b.addEventListener("click", function () {
         if (c.level === level.id) return;
         c.level = level.id;
@@ -1515,6 +1630,9 @@
     state.pending = null;
     state.reviewing = false;
     state.offerDraw = false;
+    state.browse = null;
+    state.hint = null;
+    state.flipped = false;
     state.announcedPly = view.lastMove ? view.lastMove.ply : null;
     applyView(view);
     showScreen("match");
@@ -1541,6 +1659,14 @@
         toast("Matched with " + (them ? "@" + them.username : "a new player") + " — " + (view.isMyTurn ? "you play White!" : "they play White."));
       }
       announceMove(view);
+      // Their move, heard: the end of the game has its own sound.
+      var lm = view.lastMove;
+      if (fresh && lm && lm.move && lm.move.type === "move" && view.status === "active") {
+        var mover = view.players.filter(function (p) { return p.seat === lm.seat; })[0];
+        var played = playedOf(view);
+        var row = played[played.length - 1];
+        if (mover && !mover.isSelf && row) moveSound(!!row.capture, !!(view.view && view.view.check));
+      }
       if (declined) {
         var bot = opponentsOf(view)[0];
         toast((bot ? bot.username : "The computer") + " declined your draw offer.");
@@ -1582,10 +1708,11 @@
   }
 
   // The live position this player can move in, or null when it is not theirs
-  // to move (their turn, the game on, not mid-send).
+  // to move (their turn, the game on, not mid-send, not looking back).
   function livePos() {
     var m = state.match;
     if (!m || m.status !== "active" || !m.isMyTurn || isOut(m) || state.sending || !m.view || !m.view.board) return null;
+    if (state.browse !== null) return null;
     return posOf(m);
   }
 
@@ -1599,8 +1726,11 @@
   // The slide for the last move: the piece, and the rook too for a castle.
   function slideOf(view) {
     var sq = lastSquares(view);
-    if (!sq) return null;
-    var san = view.view.last.san || "";
+    return sq ? withRook(sq, view.view.last.san) : null;
+  }
+
+  function withRook(sq, san) {
+    san = san || "";
     if (/^O-O/.test(san)) {
       var rank = Math.floor(sq.from / 8) * 8;
       sq.rook = san.indexOf("O-O-O") === 0 ? { from: rank, to: rank + 3 } : { from: rank + 7, to: rank + 5 };
@@ -1621,9 +1751,14 @@
     if (!same || view.version !== state.match.version) {
       if (state.pending && (!same || view.version !== state.match.version)) state.pending = null;
       if (!same || !view.isMyTurn) state.selected = null;
+      state.hint = null;
     }
-    if (!same) state.reviewing = false;
+    if (!same) { state.reviewing = false; state.browse = null; }
     state.match = view;
+    // Still looking back: stay on that position while it is in the game
+    // (a takeback can remove it).
+    if (state.browse !== null && state.browse >= playedOf(view).length - 1) state.browse = null;
+    if (state.browse !== null) slide = null;
 
     els.screens.match.classList.toggle("is-lobby", view.status === "lobby");
     els.screens.match.classList.toggle("is-over", view.status === "finished" || view.status === "abandoned");
@@ -1658,7 +1793,18 @@
         reserve: 2 * (24 + 6)
       });
     }
-    board.setOrientation(myColor(m) || "w");
+    board.setOrientation(bottomColor(m));
+    board.setCoords(prefs.coords);
+    if (state.browse !== null) {
+      var row = playedOf(m)[state.browse];
+      var then = row ? row.pos : Rules.start();
+      renderCaptures(m, then.board);
+      board.setPosition(then.board, {
+        last: row ? { from: row.from, to: row.to } : null,
+        check: Rules.inCheck(then.board, then.turn) ? kingSquare(then.board, then.turn) : null
+      }, slide);
+      return;
+    }
     renderCaptures(m, state.pending ? state.pending.pos.board : posOf(m).board);
     if (state.pending) {
       var p = state.pending;
@@ -1683,14 +1829,22 @@
       last: lastSquares(m),
       check: checked ? kingSquare(pos.board, pos.turn) : null,
       selected: live ? state.selected : null,
-      targets: targets
+      targets: targets,
+      hint: live ? state.hint : null
     }, slide);
   }
 
-  // The pieces each side has taken, smallest first like a captures tray, and
-  // the material lead on the side that has it.
-  function renderCaptures(view, boardString) {
+  // The side at the bottom of the board: the player's, unless they turned it.
+  function bottomColor(view) {
     var mine = myColor(view) || "w";
+    return state.flipped ? (mine === "w" ? "b" : "w") : mine;
+  }
+
+  // The pieces each side has taken, smallest first like a captures tray, and
+  // the material lead on the side that has it. The bottom row is the bottom
+  // side's.
+  function renderCaptures(view, boardString) {
+    var mine = bottomColor(view);
     var theirs = mine === "w" ? "b" : "w";
     var c = Rules.captured(boardString);
     var lead = c.balance * (mine === "w" ? 1 : -1);
@@ -1721,9 +1875,17 @@
   }
 
   function onSquareTap(sq) {
-    if (state.pending) { clearPending(); haptic("light"); renderBoard(null); renderControls(); return; }
+    if (state.pending) {
+      // Tapping the piece just moved picks it back up; anywhere else could
+      // be a slip, so it only says how to change the move.
+      var pm = state.pending.move;
+      if (sq === pm.to || sq === pm.from) { haptic("light"); undoPending(); }
+      else toast("Send your move, or take it back to change it.");
+      return;
+    }
     var pos = livePos();
     if (!pos) return;
+    state.hint = null;
     if (state.selected !== null && state.selected !== sq) {
       var moves = Rules.legalMoves(pos).filter(function (mv) { return mv.from === state.selected && mv.to === sq; });
       if (moves.length) { makeMove(pos, moves, true); return; }
@@ -1760,7 +1922,9 @@
       var legal = Rules.legalMoves(pos);
       state.pending = { move: mv, san: Rules.san(pos, mv, legal), pos: Rules.play(pos, mv) };
       state.selected = null;
+      state.hint = null;
       haptic("light");
+      moveSound(pos.board[mv.to] !== "." || mv.flag === "ep", Rules.inCheck(state.pending.pos.board, state.pending.pos.turn));
       var rook = mv.flag === "castleK" ? { from: mv.from + 3, to: mv.from + 1 }
         : mv.flag === "castleQ" ? { from: mv.from - 4, to: mv.from - 1 } : null;
       renderBoard(slide || rook ? { from: slide ? mv.from : mv.to, to: mv.to, rook: rook } : null);
@@ -1812,13 +1976,24 @@
     var waiting = !!m && m.status === "active" && !m.isMyTurn && !!meIn(m) && !isOut(m);
     var over = !!m && (m.status === "finished" || m.status === "abandoned");
 
+    var browsing = state.browse !== null;
     els.moveBar.hidden = !p;
-    els.moveHint.hidden = !live || !!p;
+    els.moveHint.hidden = browsing || !live || !!p;
     var offering = state.offerDraw && canOfferDraw(m);
-    els.moveHint.textContent = (state.selected !== null
+    els.moveHintText.textContent = (state.hint !== null && state.selected !== null
+      ? "Hint: " + state.hintSan + ". Tap the ring to play it."
+      : state.selected !== null
       ? "Tap a dot to move there, or another piece."
       : "Tap a piece to see where it can go.")
       + (offering ? " Your draw offer goes with it." : "");
+    // Against the computer: take back and hint.
+    var local = !!m && !!m.local;
+    els.assist.hidden = !local || !live || !!p;
+    if (!els.assist.hidden) {
+      els.takebackButton.disabled = !canTakeBack(m) || state.sending;
+      els.hintButton.disabled = state.hinting || state.sending;
+      els.hintButton.textContent = state.hinting ? "Thinking…" : "Hint";
+    }
     if (p) {
       els.offerChip.hidden = !offering;
       els.offerChip.disabled = state.sending;
@@ -1828,7 +2003,8 @@
     }
 
     els.screens.match.classList.toggle("is-waiting", waiting);
-    els.waitBar.hidden = !waiting;
+    els.waitBar.hidden = !waiting || browsing;
+    els.waitTakeback.hidden = !(waiting && local && canTakeBack(m));
     if (waiting) {
       var onTurn = m.players.filter(function (pl) { return pl.seat === m.turnSeat; })[0];
       var offered = m.view && m.view.drawOffer === (meIn(m) || {}).seat;
@@ -1841,8 +2017,9 @@
       }
     }
 
-    els.reviewBar.hidden = !(over && state.reviewing);
+    els.reviewBar.hidden = browsing || !(over && state.reviewing);
     if (over && state.reviewing) els.reviewText.textContent = resultLine(m);
+    renderBrowse();
   }
 
   // ------------------------------------------------------------ players
@@ -2290,6 +2467,9 @@
     els.rematchButton.hidden = !(view.status === "finished" && meIn(view) && (view.local || OR.capabilities.has("matches.create")));
     var moves = movesOf(view);
     els.movesButton.hidden = !moves.some(function (mv) { return mv.type === "move"; });
+    var review = reviewOf(view);
+    els.analyseButton.hidden = !canReview(view);
+    els.analyseButton.textContent = review ? "Engine review" : "Review with the engine";
     els.boardButton.hidden = view.status !== "finished";
     var me = meIn(view);
     clear(els.overScores);
@@ -2304,15 +2484,21 @@
     var played = moves.filter(function (mv) { return mv.type === "move"; });
     var full = Math.ceil(played.length / 2);
     var winner = view.winnerSeat === null ? null : view.players.filter(function (p) { return p.seat === view.winnerSeat; })[0];
-    els.overKicker.textContent = "Final" + (full ? " · " + full + (full === 1 ? " move" : " moves") : "");
+    var helped = [];
+    if (view.takebacks) helped.push(view.takebacks + (view.takebacks === 1 ? " takeback" : " takebacks"));
+    if (view.hints) helped.push(view.hints + (view.hints === 1 ? " hint" : " hints"));
+    els.overKicker.textContent = "Final" + (full ? " · " + full + (full === 1 ? " move" : " moves") : "")
+      + (helped.length ? " · " + helped.join(", ") : "");
     if (!winner) {
       els.overTitle.textContent = "It’s a draw";
+      if (justEnded) sound("draw");
     } else if (me && winner.seat === me.seat) {
       els.overTitle.textContent = "You won!";
-      if (justEnded) haptic("success");
+      if (justEnded) { haptic("success"); sound("win"); }
       celebrate(view.matchUuid);
     } else {
       els.overTitle.textContent = handle(winner) + " won";
+      if (justEnded && me) sound("lose");
     }
     els.overText.textContent = endReason(view);
 
@@ -2332,8 +2518,15 @@
       els.overScores.appendChild(row);
     });
 
-    // The viewer's own game in three numbers.
-    if (me && played.length) {
+    // The viewer's own game in three numbers: the engine's, once it has
+    // looked, else what the move log says.
+    var side = me && colorOfSeat(view, me.seat);
+    if (review && side && review.sides[side].accuracy !== null) {
+      var mineReview = review.sides[side];
+      els.overHighlights.appendChild(highlight("Accuracy", mineReview.accuracy + "%"));
+      els.overHighlights.appendChild(highlight("Mistakes", String(mineReview.mistake + mineReview.inaccuracy)));
+      els.overHighlights.appendChild(highlight("Blunders", String(mineReview.blunder)));
+    } else if (me && played.length) {
       var mine = played.filter(function (mv) { return mv.seat === me.seat; });
       var captures = mine.filter(function (mv) { return mv.capture; }).length;
       var checks = mine.filter(function (mv) { return /[+#]$/.test(mv.san || ""); }).length;
@@ -2428,10 +2621,16 @@
   // The move log, from `view.history` (oldest first, as `lastMove` has each
   // entry), replayed from the start to get each move's notation. A host that
   // predates `history` sends none, and the Moves entries stay hidden.
+  // One render asks for the log several times over; each version of a
+  // game is replayed once.
+  var replayed = { key: null, moves: [] };
+
   function movesOf(view) {
     var v = view && view.view;
     if (!v || !Array.isArray(v.history) || !v.history.length) return [];
-    return Rules.replay(v.history);
+    var key = view.matchUuid + "@" + view.version + "#" + v.history.length;
+    if (replayed.key !== key) replayed = { key: key, moves: Rules.replay(v.history) };
+    return replayed.moves;
   }
 
   // The other players' moves since the viewer's own last one (all of them,
@@ -2445,11 +2644,58 @@
     return moves.filter(function (mv) { return mv.ply > lastMine && mv.seat !== me.seat; });
   }
 
+  // The moves actually played (no draw acceptances or claims), oldest first.
+  function playedOf(view) {
+    return movesOf(view).filter(function (mv) { return mv.type === "move"; });
+  }
+
+  // "12. Nf3" or "12… Nf3", for played move `i`.
+  function moveLabel(i, mv) {
+    return (Math.floor(i / 2) + 1) + (mv.color === "w" ? ". " : "… ") + mv.san;
+  }
+
   // A scoresheet: one line per full move, White's and Black's side by side.
+  // Each move is a button that shows its position on the board. `notes`,
+  // from the engine review, marks the mistakes.
+  function scoreSheet(m, notes) {
+    var list = el("ol", "score-sheet");
+    var played = playedOf(m);
+    var line = null, index = -1;
+    movesOf(m).forEach(function (mv) {
+      if (mv.type !== "move") {
+        var player = m.players.filter(function (p) { return p.seat === mv.seat; })[0];
+        var note = el("li", "sheet-note");
+        writeMoveSentence(note, mv, player ? nameOf(player) : "Someone");
+        list.appendChild(note);
+        line = null;
+        return;
+      }
+      var i = ++index;
+      if (mv.color === "w" || !line) {
+        line = el("li", "sheet-line");
+        line.appendChild(el("span", "sheet-num", Math.floor(i / 2) + 1 + "."));
+        if (mv.color === "b") line.appendChild(el("span", "sheet-san", "…"));
+        list.appendChild(line);
+      }
+      var cell = el("button", "sheet-san" + (i === played.length - 1 ? " is-last" : ""), mv.san);
+      cell.type = "button";
+      var mark = notes && notes[i];
+      if (mark && mark.mark) cell.appendChild(el("span", "mark is-" + mark.kind, mark.mark));
+      if (mv.offerDraw) cell.appendChild(el("span", "sheet-offer", " (=)"));
+      cell.setAttribute("aria-label", moveLabel(i, mv) + (mark && mark.kind ? ", " + mark.kind : "")
+        + (mv.offerDraw ? ", with a draw offer" : "") + ". Show this position.");
+      cell.addEventListener("click", function () { closeDialog(null); browseTo(i); });
+      line.appendChild(cell);
+      if (mv.color === "b") line = null;
+    });
+    return list;
+  }
+
   function showMoves() {
     var m = state.match;
     var moves = movesOf(m);
     if (!moves.length) return;
+    var review = reviewOf(m);
     openDialog({
       title: "Moves",
       prose: true,
@@ -2461,33 +2707,367 @@
         head.appendChild(el("span", "", "White: " + (white ? nameOf(white) : "?")));
         head.appendChild(el("span", "", "Black: " + (black ? nameOf(black) : "?")));
         body.appendChild(head);
-        var list = el("ol", "score-sheet");
-        var line = null;
-        moves.forEach(function (mv, i) {
-          if (mv.type !== "move") {
-            var player = m.players.filter(function (p) { return p.seat === mv.seat; })[0];
-            var note = el("li", "sheet-note");
-            writeMoveSentence(note, mv, player ? nameOf(player) : "Someone");
-            list.appendChild(note);
-            line = null;
-            return;
-          }
-          if (mv.color === "w" || !line) {
-            line = el("li", "sheet-line");
-            line.appendChild(el("span", "sheet-num", Math.floor(i / 2) + 1 + "."));
-            if (mv.color === "b") line.appendChild(el("span", "sheet-san", "…"));
-            list.appendChild(line);
-          }
-          var cell = el("span", "sheet-san" + (i === moves.length - 1 ? " is-last" : ""), mv.san);
-          if (mv.offerDraw) cell.appendChild(el("span", "sheet-offer", " (=)"));
-          line.appendChild(cell);
-          if (mv.color === "b") line = null;
-        });
-        body.appendChild(list);
-        if (moves.some(function (mv) { return mv.offerDraw; })) body.appendChild(el("p", "muted small", "(=) a draw was offered with that move."));
+        body.appendChild(scoreSheet(m, review && review.notes));
+        body.appendChild(el("p", "muted small", "Tap a move to see the board as it was."
+          + (moves.some(function (mv) { return mv.offerDraw; }) ? " (=) a draw was offered with that move." : "")));
         setTimeout(function () { els.dialogCard.scrollTop = els.dialogCard.scrollHeight; }, 0);
         return {};
       }
+    });
+  }
+
+  // ------------------------------------------------------------ looking back
+
+  function canBrowse() {
+    var m = state.match;
+    return !!m && (m.status === "active" || m.status === "finished") && !state.pending && !state.sending
+      && playedOf(m).length > 0;
+  }
+
+  // Show the position after played move `index` (-1: the start). Reaching the
+  // last move is the game as it stands again.
+  function browseTo(index) {
+    var m = state.match;
+    if (!canBrowse()) return;
+    var played = playedOf(m);
+    var from = state.browse === null ? played.length - 1 : state.browse;
+    index = Math.max(-1, Math.min(played.length - 1, index));
+    state.selected = null;
+    state.hint = null;
+    state.browse = index >= played.length - 1 ? null : index;
+    // A finished game: the result card steps aside for the board.
+    if (m.status === "finished" && !state.reviewing) {
+      state.reviewing = true;
+      els.over.hidden = true;
+    }
+    // One step forward slides the piece in; a jump just shows the position.
+    var slide = null;
+    if (index === from + 1 && index >= 0) slide = withRook({ from: played[index].from, to: played[index].to }, played[index].san);
+    if (slide && index > from) moveSound(!!played[index].capture, /[+#]$/.test(played[index].san));
+    renderBoard(slide);
+    renderControls();
+  }
+
+  function stepBack() {
+    var m = state.match;
+    if (!m) return;
+    var at = state.browse === null ? playedOf(m).length - 1 : state.browse;
+    browseTo(at - 1);
+  }
+
+  function stepForward() {
+    if (state.browse !== null) browseTo(state.browse + 1);
+  }
+
+  function leaveBrowse() {
+    if (state.browse === null) return;
+    state.browse = null;
+    renderBoard(null);
+    renderControls();
+  }
+
+  function renderBrowse() {
+    var m = state.match;
+    var browsing = state.browse !== null;
+    var played = m ? playedOf(m) : [];
+    els.browseBar.hidden = !browsing;
+    els.stepNav.hidden = !played.length || (!!m && m.status !== "active");
+    els.stepPrev.disabled = !canBrowse() || (browsing && state.browse < 0);
+    els.stepNext.disabled = !browsing;
+    els.reviewPrev.hidden = !played.length;
+    if (!browsing) return;
+    var row = played[state.browse];
+    els.browseText.textContent = row
+      ? moveLabel(state.browse, row) + " · " + (state.browse + 1) + " of " + played.length
+      : "Starting position";
+    els.browsePrev.disabled = state.browse < 0;
+    els.browseLive.textContent = m.status === "finished" ? "Final position" : "Back to game";
+  }
+
+  // ------------------------------------------------------------ engine review
+
+  // Finished games the engine has looked over, for this session, by match:
+  // { version, summary } (see `summarise`).
+  var reviews = {};
+  var REVIEW_DEPTH = 11;
+
+  function canReview(view) {
+    return !!view && view.status === "finished" && playedOf(view).length >= 2;
+  }
+
+  function reviewOf(view) {
+    var r = view && reviews[view.matchUuid];
+    return r && r.version === view.version ? r.summary : null;
+  }
+
+  // The chance of winning, in %, for `color` at White-relative `cp`: the
+  // curve Lichess fits to its games, so a pawn counts for more in a level
+  // game than with a rook to spare.
+  function winChance(cpWhite, color) {
+    var cp = Math.max(-1000, Math.min(1000, color === "w" ? cpWhite : -cpWhite));
+    return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+  }
+
+  // The engine's word on every position in the game, White-relative, and
+  // its best move in each. One position at a time, so it can be stopped.
+  function runReview(view, onProgress, stopped) {
+    var played = playedOf(view);
+    var positions = [Rules.start()].concat(played.map(function (mv) { return mv.pos; }));
+    var evals = [], best = [];
+    function step(i) {
+      if (stopped()) return Promise.reject(new Error("stopped"));
+      if (i >= positions.length) return Promise.resolve({ evals: evals, best: best });
+      onProgress(i, positions.length);
+      var pos = positions[i];
+      if (!Rules.legalMoves(pos).length) {
+        evals[i] = Rules.inCheck(pos.board, pos.turn) ? (pos.turn === "w" ? -Engine.MATE : Engine.MATE) : 0;
+        best[i] = null;
+        return step(i + 1);
+      }
+      return Engine.evaluate(pos, REVIEW_DEPTH).then(function (r) {
+        if (!r) throw new Error("The engine isn’t available on this device.");
+        evals[i] = pos.turn === "w" ? r.cp : -r.cp;
+        best[i] = r.move;
+        return step(i + 1);
+      });
+    }
+    return step(0);
+  }
+
+  // How much each move gave away, as a fall in the mover's chance of winning,
+  // marked the way annotators do (?! ? ??), with the better move where one
+  // was missed; and each side's accuracy, Lichess's formula over those falls.
+  var MARKS = [[30, "blunder", "??"], [20, "mistake", "?"], [10, "inaccuracy", "?!"]];
+
+  function summarise(view, review) {
+    var played = playedOf(view);
+    var sides = {};
+    ["w", "b"].forEach(function (c) { sides[c] = { scores: [], inaccuracy: 0, mistake: 0, blunder: 0, accuracy: null }; });
+    var notes = played.map(function (mv, i) {
+      var drop = Math.max(0, winChance(review.evals[i], mv.color) - winChance(review.evals[i + 1], mv.color));
+      sides[mv.color].scores.push(Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * drop) - 3.1669)));
+      var note = { kind: null, mark: "", best: null };
+      for (var k = 0; k < MARKS.length; k++) {
+        if (drop >= MARKS[k][0]) { note.kind = MARKS[k][1]; note.mark = MARKS[k][2]; break; }
+      }
+      if (!note.kind) return note;
+      sides[mv.color][note.kind]++;
+      var bestMove = review.best[i];
+      if (bestMove && bestMove.slice(0, 4) !== Rules.squareName(mv.from) + Rules.squareName(mv.to)) {
+        var before = i ? played[i - 1].pos : Rules.start();
+        var found = Rules.find(before, bestMove.slice(0, 2), bestMove.slice(2, 4), bestMove.charAt(4) || null);
+        if (found) note.best = Rules.san(before, found);
+      }
+      return note;
+    });
+    ["w", "b"].forEach(function (c) {
+      var list = sides[c].scores;
+      if (list.length) sides[c].accuracy = Math.round(list.reduce(function (a, b) { return a + b; }, 0) / list.length);
+    });
+    return { notes: notes, sides: sides };
+  }
+
+  function countsText(side) {
+    function n(count, one, many) { return count + " " + (count === 1 ? one : many); }
+    return [n(side.inaccuracy, "inaccuracy", "inaccuracies"), n(side.mistake, "mistake", "mistakes"),
+      n(side.blunder, "blunder", "blunders")].join(" · ");
+  }
+
+  function drawReview(body, m, summary) {
+    var played = playedOf(m);
+    var sides = el("ul", "review-sides");
+    ["w", "b"].forEach(function (c) {
+      var p = m.players.filter(function (pl) { return colorOfSeat(m, pl.seat) === c; })[0];
+      var side = summary.sides[c];
+      var row = el("li", "review-side");
+      row.appendChild(el("span", "review-name", colorName(c) + " · " + (p ? nameOf(p) : "?")));
+      row.appendChild(el("span", "review-acc", side.accuracy === null ? "–" : side.accuracy + "%"));
+      row.appendChild(el("span", "review-counts", countsText(side)));
+      row.setAttribute("aria-label", colorName(c) + ", " + (p ? nameOf(p) : "unknown") + ": accuracy "
+        + (side.accuracy === null ? "unknown" : side.accuracy + "%") + ", " + countsText(side) + ".");
+      sides.appendChild(row);
+    });
+    body.appendChild(sides);
+
+    // The turning points: every mistake and blunder, with what was better.
+    var moments = [];
+    summary.notes.forEach(function (note, i) { if (note.kind === "mistake" || note.kind === "blunder") moments.push(i); });
+    if (moments.length) {
+      body.appendChild(el("h3", "review-head", "Turning points"));
+      var list = el("ul", "review-moments");
+      moments.slice(0, 10).forEach(function (i) {
+        var note = summary.notes[i];
+        var item = el("li");
+        var button = el("button", "review-moment");
+        button.type = "button";
+        button.appendChild(document.createTextNode(moveLabel(i, played[i])));
+        button.appendChild(el("span", "mark is-" + note.kind, note.mark));
+        if (note.best) button.appendChild(el("span", "muted", " — better was " + note.best));
+        button.addEventListener("click", function () { closeDialog(null); browseTo(i); });
+        item.appendChild(button);
+        list.appendChild(item);
+      });
+      body.appendChild(list);
+    }
+
+    body.appendChild(el("h3", "review-head", "Every move"));
+    body.appendChild(scoreSheet(m, summary.notes));
+    body.appendChild(el("p", "muted small", "Stockfish at depth " + REVIEW_DEPTH + ". ?! is an inaccuracy, ? a mistake, ?? a blunder: how much a move lowered its side’s chances. Tap a move to see it on the board."));
+  }
+
+  function showReview() {
+    var m = state.match;
+    if (!canReview(m)) return;
+    var uuid = m.matchUuid;
+    var stopped = false;
+    openDialog({
+      title: "Engine review",
+      prose: true,
+      cancelLabel: "Close",
+      build: function (body) {
+        var have = reviewOf(m);
+        if (have) { drawReview(body, m, have); return {}; }
+        var progress = el("div", "review-progress");
+        var text = el("p", "muted", "Starting the engine…");
+        var meter = el("div", "review-meter");
+        var fill = el("span");
+        meter.appendChild(fill);
+        progress.appendChild(text);
+        progress.appendChild(meter);
+        body.appendChild(progress);
+        runReview(m, function (i, n) {
+          text.textContent = "Looking at move " + Math.max(1, i) + " of " + (n - 1) + "…";
+          fill.style.width = Math.round(100 * i / n) + "%";
+        }, function () { return stopped; }).then(function (review) {
+          var summary = summarise(m, review);
+          reviews[uuid] = { version: m.version, summary: summary };
+          if (state.match && state.match.matchUuid === uuid) renderOver(state.match, false);
+          if (stopped) return;
+          clear(body);
+          drawReview(body, m, summary);
+          els.dialogCard.scrollTop = 0;
+        }).catch(function (err) {
+          if (stopped) return;
+          text.textContent = errorText(err, "The review couldn’t finish.");
+        });
+        return {};
+      },
+      onClose: function () { stopped = true; }
+    });
+  }
+
+  // ------------------------------------------------------------ PGN
+
+  // The game in Portable Game Notation, for any other chess program.
+  function pgnOf(m) {
+    var played = playedOf(m);
+    function seatOf(color) { return m.players.filter(function (p) { return colorOfSeat(m, p.seat) === color; })[0]; }
+    function name(p) {
+      if (!p) return "?";
+      return p.isSelf ? (OR.user ? OR.user.username : "You") : p.username;
+    }
+    var white = seatOf("w"), black = seatOf("b");
+    var result = m.status !== "finished" ? "*"
+      : m.winnerSeat === null ? "1/2-1/2"
+      : colorOfSeat(m, m.winnerSeat) === "w" ? "1-0" : "0-1";
+    var d = new Date(m.updatedAt);
+    var date = isNaN(d.getTime()) ? "????.??.??"
+      : d.getFullYear() + "." + String(d.getMonth() + 1).padStart(2, "0") + "." + String(d.getDate()).padStart(2, "0");
+    var tags = [
+      ["Event", m.local ? "Game against the computer" : "Correspondence game"],
+      ["Site", "OddsRabbit"],
+      ["Date", date],
+      ["White", name(white)],
+      ["Black", name(black)],
+      ["Result", result]
+    ];
+    if (white && white.bot) tags.push(["WhiteElo", white.bot.rating]);
+    if (black && black.bot) tags.push(["BlackElo", black.bot.rating]);
+    var head = tags.map(function (t) { return "[" + t[0] + " \"" + String(t[1]).replace(/["\\]/g, "") + "\"]"; }).join("\n");
+    var tokens = [];
+    played.forEach(function (mv, i) {
+      if (mv.color === "w") tokens.push(Math.floor(i / 2) + 1 + ".");
+      tokens.push(mv.san);
+    });
+    tokens.push(result);
+    // Lines of at most 80 characters, as the standard asks.
+    var lines = [], line = "";
+    tokens.forEach(function (t) {
+      if (line && line.length + 1 + t.length > 80) { lines.push(line); line = t; }
+      else line = line ? line + " " + t : t;
+    });
+    if (line) lines.push(line);
+    return head + "\n\n" + lines.join("\n") + "\n";
+  }
+
+  // To the clipboard where the host allows it; the share sheet otherwise.
+  function copyPgn() {
+    var m = state.match;
+    if (!m || !playedOf(m).length) return;
+    var text = pgnOf(m);
+    function share() {
+      OR.actions.share({ title: GAME_NAME, text: text }).catch(function () {
+        toast("Couldn’t copy the game here.", true);
+      });
+    }
+    try {
+      var done = navigator.clipboard && navigator.clipboard.writeText(text);
+      if (done && done.then) {
+        done.then(function () { toast("Game copied as PGN."); haptic("light"); }, share);
+        return;
+      }
+    } catch (_) {}
+    share();
+  }
+
+  // ------------------------------------------------------------ computer help
+
+  // Whether there is a move of the player's to take back.
+  function canTakeBack(m) {
+    var me = m && meIn(m);
+    return !!m && !!m.local && m.status === "active" && !!me
+      && playedOf(m).some(function (mv) { return mv.seat === me.seat; });
+  }
+
+  function takeBack() {
+    var m = state.match;
+    if (!canTakeBack(m) || state.sending) return;
+    clearPending();
+    state.browse = null;
+    state.hint = null;
+    Computer.takeback(m.matchUuid).then(function (view) {
+      haptic("light");
+      if (!state.match || state.match.matchUuid !== view.matchUuid) return;
+      state.announcedPly = view.lastMove ? view.lastMove.ply : null;
+      applyView(view);
+      els.boardStatus.textContent = "Move taken back. Your move.";
+    }).catch(function (err) { toast(errorText(err, "Couldn’t take that back."), true); });
+  }
+
+  function askHint() {
+    var m = state.match;
+    var pos = livePos();
+    if (!m || !m.local || !pos || state.hinting || state.pending) return;
+    state.hinting = true;
+    renderControls();
+    var uuid = m.matchUuid, version = m.version;
+    Computer.hint(uuid).then(function (h) {
+      state.hinting = false;
+      var now = state.match;
+      if (!now || now.matchUuid !== uuid || now.version !== version || state.pending || state.browse !== null) { renderControls(); return; }
+      var mv = h && Rules.find(pos, h.from, h.to, h.promo);
+      if (!mv) { toast("No hint right now — the engine isn’t available.", true); renderControls(); return; }
+      state.selected = mv.from;
+      state.hint = mv.to;
+      state.hintSan = Rules.san(pos, mv);
+      els.boardStatus.textContent = "Hint: " + state.hintSan;
+      haptic("light");
+      renderBoard(null);
+      renderControls();
+    }).catch(function (err) {
+      state.hinting = false;
+      renderControls();
+      toast(errorText(err, "Couldn’t get a hint."), true);
     });
   }
 
@@ -3045,10 +3625,29 @@
           button.addEventListener("click", function () { close(null); run(); });
           body.appendChild(button);
         }
+        var played = m ? playedOf(m) : [];
+        var onBoard = !!m && (m.status === "active" || m.status === "finished");
         item("How to play", false, showHowTo);
-        if (movesOf(m).some(function (mv) { return mv.type === "move"; })) item("Moves", false, showMoves);
+        if (played.length) item("Moves", false, showMoves);
+        if (canReview(m)) item(reviewOf(m) ? "Engine review" : "Review with the engine", false, showReview);
+        if (played.length) item("Copy game (PGN)", false, copyPgn);
         if (m && m.joinCode && m.status === "lobby") item("Share invite", false, shareCode);
+        if (canTakeBack(m) && !state.sending) item("Take back a move", false, takeBack);
         if (canOfferDraw(m) && !state.sending) item(state.offerDraw ? "Don’t offer a draw" : "Offer a draw", false, toggleDrawOffer);
+        if (onBoard) {
+          item("Flip the board", false, function () { state.flipped = !state.flipped; renderBoard(null); });
+          item(prefs.coords ? "Hide coordinates" : "Show coordinates", false, function () {
+            prefs.coords = !prefs.coords;
+            savePrefs();
+            renderBoard(null);
+          });
+        }
+        item(prefs.sound ? "Turn sound off" : "Turn sound on", false, function () {
+          prefs.sound = !prefs.sound;
+          savePrefs();
+          if (prefs.sound) sound("move");
+          toast(prefs.sound ? "Sound on." : "Sound off.");
+        });
         if (m && (m.status === "lobby" || (m.status === "active" && !isOut(m)))) {
           item(m.status === "lobby" ? (m.matchmaking ? "Stop looking" : "Leave table") : "Resign", true, resign);
         }
@@ -3160,8 +3759,19 @@
 
   function onKeyDown(e) {
     if (dialogState || state.screen !== "match" || (state.chat && state.chat.open)) return;
+    // ← and → step through the moves, except on the board (where the arrows
+    // move between squares) and in a text field.
+    if ((e.key === "ArrowLeft" || e.key === "ArrowRight")
+      && !(e.target && e.target.closest && e.target.closest(".chess-board, input, textarea"))) {
+      if (!canBrowse()) return;
+      e.preventDefault();
+      if (e.key === "ArrowLeft") stepBack();
+      else stepForward();
+      return;
+    }
     if (e.key === "Escape") {
-      if (state.pending) { e.preventDefault(); undoPending(); }
+      if (state.browse !== null) { e.preventDefault(); leaveBrowse(); }
+      else if (state.pending) { e.preventDefault(); undoPending(); }
       else if (state.selected !== null) { e.preventDefault(); state.selected = null; renderBoard(null); renderControls(); }
     }
   }
@@ -3242,6 +3852,18 @@
     els.overBack.addEventListener("click", backToList);
     els.rematchButton.addEventListener("click", rematch);
     els.movesButton.addEventListener("click", showMoves);
+    els.analyseButton.addEventListener("click", showReview);
+    els.stepPrev.addEventListener("click", stepBack);
+    els.stepNext.addEventListener("click", stepForward);
+    els.browsePrev.addEventListener("click", stepBack);
+    els.browseNext.addEventListener("click", stepForward);
+    els.browseLive.addEventListener("click", leaveBrowse);
+    els.reviewPrev.addEventListener("click", stepBack);
+    els.takebackButton.addEventListener("click", takeBack);
+    els.waitTakeback.addEventListener("click", takeBack);
+    els.hintButton.addEventListener("click", askHint);
+    // Sound can only start after a touch; the first one wakes it.
+    document.addEventListener("pointerdown", function () { if (prefs.sound && !audio) audioContext(); }, { passive: true });
     els.boardButton.addEventListener("click", function () {
       state.reviewing = true;
       els.over.hidden = true;
@@ -3249,6 +3871,8 @@
     });
     els.resultButton.addEventListener("click", function () {
       state.reviewing = false;
+      state.browse = null;
+      renderBoard(null);
       if (state.match) renderOver(state.match, false);
       renderControls();
     });

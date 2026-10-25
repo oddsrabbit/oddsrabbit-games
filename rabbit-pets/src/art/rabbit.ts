@@ -9,7 +9,7 @@
 // drawn about 1.35x the original kit's size so she reads at 4x on a phone.
 
 import type { Coat, Ears } from '../sim';
-import { blank, hex, type PixelGrid, type RGBA } from './pixels';
+import { blank, hex, same, type PixelGrid, type RGBA } from './pixels';
 
 export const RABBIT_W = 40;
 export const RABBIT_H = 40;
@@ -48,8 +48,12 @@ const EYE_H = 4;
  * The eating reaction's faces (render.ts, drawRabbit): 'nibble' and 'chew'
  * alternate while she eats (eyes shut; mouth shut, then the nose twitches up),
  * then 'savour' (loves it), 'lick' (happy) or 'polite' (just okay).
+ * How she's feeling shows too (render.ts): 'drowsy' (half-shut eyes) and
+ * 'yawn' when she's tired, 'sad' (worried brows) when she wants attention;
+ * and petting: 'melt' (stroked behind the ears) and 'sneeze' (a nose boop).
  */
-export type Face = 'content' | 'happy' | 'eating' | 'grumpy' | 'asleep' | 'nibble' | 'chew' | 'savour' | 'lick' | 'polite';
+export type Face = 'content' | 'happy' | 'eating' | 'grumpy' | 'asleep' | 'nibble' | 'chew' | 'savour' | 'lick' | 'polite'
+  | 'drowsy' | 'yawn' | 'sad' | 'sneeze' | 'melt';
 /** 0 = rest, 1 = breathe (body squashes a pixel), 2 = blink. */
 export type Frame = 0 | 1 | 2;
 
@@ -94,8 +98,12 @@ export const TUNE = {
   item: {} as Record<string, [number, number]>,
 };
 
-/** Her, on a RABBIT_W×RABBIT_H grid standing on RABBIT_GROUND. `k`: her size (K; K_GARDEN in the garden). */
-export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dress, k = K): PixelGrid {
+/**
+ * Her, on a RABBIT_W×RABBIT_H grid standing on RABBIT_GROUND. `k`: her size
+ * (K; K_GARDEN in the garden). `droop`: how far her upright ears hang, 0 to 2
+ * (tired or lonely, or melting under a stroke); lop ears already hang.
+ */
+export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dress, k = K, droop = 0): PixelGrid {
   const SHAPE = shapeAt(k);
   const W = RABBIT_W, H = RABBIT_H, GROUND = RABBIT_GROUND;
   const c = PALETTES[coat];
@@ -120,7 +128,7 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   const headCy = asleep ? bodyCy - bh * 0.35 + bob : bodyCy - bh * 0.85 - hh * 0.55 + bob + TUNE.headY;
 
   const L = earShape.len, ew = earShape.w;
-  const splay = asleep ? 1.25 : face === 'grumpy' ? 0.55 : 0.3;
+  const splay = asleep ? 1.25 : Math.max(face === 'grumpy' ? 0.55 : 0.3, 0.3 + droop * 0.45);
   const ears: [number, number, number, number][] = [];
   for (const side of [-1, 1]) {
     let ax = cx + side * hw * 0.42, ay = headCy - hh * 0.55, bx: number, by: number;
@@ -209,13 +217,22 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   const exs = eyeCols;
   const blink = frame === 2;
   exs.forEach((ex, i) => {
-    if (asleep || blink) {
+    if (asleep || blink || face === 'yawn') {
       for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey + 1, pal.eye);
-    } else if (face === 'happy' || face === 'nibble' || face === 'chew' || face === 'savour') {
+    } else if (face === 'sneeze') {
+      // squeezed shut: > <
+      const o = i === 0 ? 0 : 2;
+      put(ex + o, ey, pal.eye); put(ex + 1, ey + 1, pal.eye); put(ex + o, ey + 2, pal.eye);
+    } else if (face === 'happy' || face === 'nibble' || face === 'chew' || face === 'savour' || face === 'melt') {
       put(ex - 1, ey + 1, pal.eye); put(ex, ey, pal.eye); put(ex + 1, ey, pal.eye); put(ex + 2, ey + 1, pal.eye);
     } else if (face === 'grumpy') {
       for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey, pal.line);
       for (let d = 0; d < EYE_W; d++) put(ex + d, ey + 1, pal.eye);
+    } else if (face === 'drowsy') {
+      // heavy lids over the top half
+      for (let d = -1; d <= EYE_W - 1; d++) put(ex + d, ey, pal.line);
+      for (let dy = 1; dy < EYE_H - 1; dy++) for (let dx = 0; dx < EYE_W; dx++) put(ex + dx, ey + dy, pal.eye);
+      put(ex, ey + 1, pal.glint);
     } else {
       if (pal.ring) {
         for (let dy = -2; dy < EYE_H; dy++) { put(ex - 1, ey + dy, pal.ring); put(ex + EYE_W, ey + dy, pal.ring); }
@@ -225,18 +242,23 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
       put(ex, ey - 1, pal.glint);
       put(ex + 1, ey, pal.glint);
       put(ex + EYE_W - 1, ey + EYE_H - 3, pal.glint);
+      if (face === 'sad') {
+        // worried brows, raised in the middle
+        const outer = i === 0 ? ex - 1 : ex + EYE_W, inner = i === 0 ? ex + EYE_W - 1 : ex;
+        put(outer, ey - 2, pal.line); put(Math.round((outer + inner) / 2), ey - 3, pal.line); put(inner, ey - 3, pal.line);
+      }
     }
     const cheek = ex + (i === 0 ? -1 : EYE_W);
     if (face !== 'grumpy' && face !== 'asleep') {
       put(cheek, ey + 2, pal.blush);
-      if (face === 'happy' || face === 'savour') put(cheek, ey + 3, pal.blush);
+      if (face === 'happy' || face === 'savour' || face === 'melt') put(cheek, ey + 3, pal.blush);
     }
   });
   const nx = Math.floor(cx - 0.5), ny = ey + 2;
   // a nibble twitches her nose up a pixel
-  const noseY = face === 'chew' ? ny - 1 : ny;
+  const noseY = face === 'chew' || face === 'sneeze' ? ny - 1 : ny;
   put(nx, noseY, pal.nose); put(nx + 1, noseY, pal.nose);
-  if (face === 'nibble' || face === 'polite') {
+  if (face === 'nibble' || face === 'polite' || face === 'sad' || face === 'drowsy') {
     put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line);
   } else if (face === 'savour' || face === 'lick') {
     // a lick: the tongue out at one corner
@@ -245,6 +267,15 @@ export function drawRabbit(coat: Coat, face: Face, frame: Frame = 0, dress?: Dre
   } else if (face === 'eating') {
     put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line);
     put(nx, ny + 2, pal.pinkd); put(nx + 1, ny + 2, pal.pinkd);
+  } else if (face === 'yawn') {
+    // a big round yawn
+    put(nx - 1, ny + 1, pal.line); put(nx + 2, ny + 1, pal.line);
+    put(nx - 1, ny + 2, pal.line); put(nx + 2, ny + 2, pal.line);
+    put(nx, ny + 1, pal.pinkd); put(nx + 1, ny + 1, pal.pinkd);
+    put(nx, ny + 2, pal.pink); put(nx + 1, ny + 2, pal.pink);
+    put(nx, ny + 3, pal.line); put(nx + 1, ny + 3, pal.line);
+  } else if (face === 'sneeze') {
+    put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line);
   } else if (face === 'grumpy') {
     put(nx - 1, ny + 2, pal.line); put(nx, ny + 1, pal.line); put(nx + 1, ny + 1, pal.line); put(nx + 2, ny + 2, pal.line);
   } else if (!asleep) {
@@ -333,6 +364,20 @@ function drawOutfit(g: PixelGrid, id: string | null | undefined, a: Anchor): voi
   else if (art.at === 'ear') stamp(g, art.rows, a.cx + a.hw * 0.5 + dx, a.top + 2 + dy);
   else if (!a.asleep) stamp(g, art.rows, a.cx + dx, a.chin + n - 2 + dy);
 }
+
+/**
+ * Which pixels of a drawing of her are fur (her coat's base, shade and light),
+ * so dirt can sit on her coat and nowhere else: not her eyes, nose, outline,
+ * the pink of her ears or anything she's wearing.
+ */
+export function furMask(coat: Coat, g: PixelGrid): boolean[][] {
+  const c = PALETTES[coat];
+  const fur = [hex(c.base), hex(c.shade), hex(c.light)];
+  return g.px.map((row) => row.map((p) => fur.some((f) => same(f, p))));
+}
+
+/** Whether her coat is dark, for dirt that shows on it (dust, rather than mud). */
+export const DARK_COATS: readonly Coat[] = ['cocoa', 'midnight'];
 
 /** One of her front paws (4×4), for holding food up to her mouth. */
 export function drawPaw(coat: Coat): PixelGrid {

@@ -128,6 +128,7 @@
       </header>
       <div class="screen-scroll cpu-body">
         <h2 class="group-title">Level</h2>
+        <p class="cpu-progress muted small" hidden></p>
         <div class="cpu-levels" role="radiogroup" aria-label="Level"></div>
 
         <h2 class="group-title">Your opponent</h2>
@@ -147,7 +148,7 @@
           <button type="button" class="cpu-color" role="radio" data-color="random">Random</button>
           <button type="button" class="cpu-color" role="radio" data-color="b">Black</button>
         </div>
-        <p class="cpu-note muted small">Ratings are a guide to how the computer plays, not official ratings. Games against the computer don’t count toward your record.</p>
+        <p class="cpu-note muted small">Ratings are a guide to how the computer plays, not official ratings. Games against the computer are kept on this device and don’t count toward your record with people. You can take back moves and ask for a hint.</p>
       </div>
       <button type="button" class="cpu-start primary">Play</button>
     </section>
@@ -197,6 +198,11 @@
       <div class="turn-strip">
         <span class="turn-main"></span>
         <span class="chip chip-check" hidden>Check</span>
+        <!-- Step back through the game; the browse bar below takes over. -->
+        <span class="step-nav">
+          <button type="button" class="step-prev icon-button" aria-label="Previous move">‹</button>
+          <button type="button" class="step-next icon-button" aria-label="Next move">›</button>
+        </span>
       </div>
       <!-- Waiting on someone who has gone quiet: nudge them after a day, end
            the game (and take the win) after 14. -->
@@ -274,6 +280,7 @@
             <div class="over-highlights"></div>
             <div class="game-over-actions">
               <button type="button" class="rematch-button primary" hidden>Rematch</button>
+              <button type="button" class="analyse-button" hidden>Review with the engine</button>
               <button type="button" class="board-button">See the board</button>
               <button type="button" class="moves-button" hidden>Moves</button>
               <button type="button" class="game-over-back">Back to games</button>
@@ -286,7 +293,14 @@
       <!-- Your turn: what to do, then the move you made, to send or take back.
            Nothing goes to the server until Send. A draw offer (from the ⋯
            menu) rides along with the move and shows as a chip until sent. -->
-      <p class="move-hint"></p>
+      <div class="move-hint">
+        <span class="move-hint-text"></span>
+        <!-- Against the computer: take a move back, or ask what it would play. -->
+        <span class="assist" hidden>
+          <button type="button" class="takeback-button chip">↶ Take back</button>
+          <button type="button" class="hint-button chip">Hint</button>
+        </span>
+      </div>
       <div class="move-bar" hidden>
         <button type="button" class="undo-button subtle">Take back</button>
         <button type="button" class="offer-chip" hidden aria-label="Draw offer goes with this move. Tap to cancel it.">½ Draw offer <span aria-hidden="true">✕</span></button>
@@ -295,11 +309,20 @@
       <!-- Their turn: what is going on, rather than greyed-out controls. -->
       <div class="wait-bar" hidden>
         <span class="wait-text"></span>
+        <button type="button" class="wait-takeback subtle" hidden>Take back</button>
       </div>
       <!-- A finished game, looked at again: the result card is one tap away. -->
       <div class="review-bar" hidden>
+        <button type="button" class="review-prev icon-button" aria-label="Step back through the moves">‹</button>
         <span class="review-text"></span>
         <button type="button" class="result-button subtle">Result</button>
+      </div>
+      <!-- Looking back at an earlier position: step through, or return. -->
+      <div class="browse-bar" hidden>
+        <button type="button" class="browse-prev icon-button" aria-label="Previous move">‹</button>
+        <span class="browse-text" aria-live="polite"></span>
+        <button type="button" class="browse-next icon-button" aria-label="Next move">›</button>
+        <button type="button" class="browse-live subtle">Back to game</button>
       </div>
 
       <div class="chat-backdrop" hidden>

@@ -1,11 +1,11 @@
 // Rabbit Paint's shell: loads the catalog, works out today's page, and swaps
-// between home, painting and the gallery.
+// between home (its three tabs), painting and a page's gallery.
 
 import { loadArt } from './art';
 import { dailySlug, dayIndex, parseCatalog, type Catalog } from './catalog';
 import type { Fill } from './fills';
 import { mountGallery } from './gallery';
-import { mountHome } from './home';
+import { mountHome, type HomeTab } from './home';
 import { getMine, isMineSlug, mineId } from './mine';
 import { mountPaint } from './paint';
 import { openShare } from './share';
@@ -29,12 +29,20 @@ async function show(next: (root: HTMLElement) => Promise<() => void>) {
   unmount = await next(root);
 }
 
+/** The home tab last shown: where Done and Close come back to. */
+let tab: HomeTab = 'discover';
+
 function home() {
+  back = home;
   const day = today();
-  void show((r) => mountHome(r, { catalog, day, todaySlug: dailySlug(catalog, day), onOpen: paint, onGallery: gallery }));
+  void show((r) => mountHome(r, { catalog, day, todaySlug: dailySlug(catalog, day), tab, onTab: (t) => { tab = t; home(); }, onOpen: paint, onGallery: gallery }));
 }
 
+/** Where the gallery's close goes: the page it was opened from, or home. */
+let back: () => void = home;
+
 function paint(session: Session) {
+  back = () => paint(session);
   void show((r) => mountPaint(r, {
     session,
     onDone: home,
@@ -46,14 +54,11 @@ function paint(session: Session) {
   }));
 }
 
-function gallery(day: number) {
-  const slug = dailySlug(catalog, day);
-  if (!slug) { home(); return; }
+function gallery(slug: string) {
   void show((r) => mountGallery(r, {
     catalog,
-    day,
     slug,
-    onClose: home,
+    onClose: back,
     onOpen: paint,
     onShare: (s: string, fills: ReadonlyArray<Fill | null>) => {
       void loadArt(s, 'full').then((art) => openShare(document.body, art, fills)).catch(() => toast('Couldn’t open the picture'));

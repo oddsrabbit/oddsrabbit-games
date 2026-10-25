@@ -89,4 +89,19 @@ test('label points sit inside their region', () => {
   }
 });
 
+test('a thin channel between two thick lines, pinched off at its mouth, folds back into the page', () => {
+  const img = canvas();
+  const fill = (x0: number, y0: number, x1: number, y1: number) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) img[y * W + x] = 0; };
+  // Two 9 px lines 8 px apart, closed at the right, nearly touching at the
+  // left: the channel's paper is under minArea, though with its half of each
+  // line it is over.
+  fill(60, 80, 95, 89);
+  fill(60, 97, 95, 106);
+  fill(95, 80, 104, 106);
+  fill(60, 89, 66, 92);
+  fill(60, 94, 66, 97);
+  const res = prepare(img, W, H, opts);
+  assert.equal(res.regions.length, 1);
+});
+
 if (failures) process.exit(1);

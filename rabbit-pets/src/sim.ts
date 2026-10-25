@@ -35,6 +35,7 @@ import {
   WILDLIFE,
   FORAGE,
   SLEEP,
+  HANDS_ON,
   THRIVING,
   STEP_MS,
   TIMERS,
@@ -400,10 +401,12 @@ function careReward(state: PetState, nowMs: number, tz: string): { clover: numbe
 }
 const NO_REWARD = { clover: 0, bond: 0, lumps: [] as Lump[] };
 
-export function act(input: PetState, action: Action, nowMs: number, tz: string, opts: { food?: FoodId; toy?: string; hours?: number } = {}): ActionResult {
+/** `hands`: done by hand (tuning.ts HANDS_ON), for feed, pet and clean. */
+export function act(input: PetState, action: Action, nowMs: number, tz: string, opts: { food?: FoodId; toy?: string; hours?: number; hands?: boolean } = {}): ActionResult {
   const state = structuredCloneState(input);
   const asleep = isAsleep(state, nowMs, tz);
   const n = state.needs;
+  const byHand = opts.hands ? HANDS_ON.happy : 0;
   // out foraging, she isn't here to be looked after
   const out = isOut(state, nowMs);
   if (out && (action === 'feed' || action === 'pet' || action === 'play' || action === 'clean' || action === 'nap' || action === 'wake' || action === 'forage')) {
@@ -456,12 +459,12 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
       state.meals = meal + 1;
       const reaction = foodReaction(state.petId, meal, id);
       n.hunger = clamp(n.hunger + food.hunger);
-      const joy = reaction === 'okay' ? 0 : food.happy + (reaction === 'loves' ? LOVES_BONUS_HAPPY : 0);
+      const joy = (reaction === 'okay' ? 0 : food.happy + (reaction === 'loves' ? LOVES_BONUS_HAPPY : 0)) + byHand;
       n.happy = clamp(n.happy + joy);
       return { ok: true, state, ...careReward(state, nowMs, tz), reaction };
     }
     case 'pet': {
-      n.happy = clamp(n.happy + (asleep ? CARE.petAsleep.happy : CARE.pet.happy));
+      n.happy = clamp(n.happy + (asleep ? CARE.petAsleep.happy : CARE.pet.happy + byHand));
       const r = n.happy >= 100 && !asleep ? NO_REWARD : careReward(state, nowMs, tz);
       return { ok: true, state, ...r, note: asleep ? 'gently' : undefined };
     }
@@ -478,6 +481,7 @@ export function act(input: PetState, action: Action, nowMs: number, tz: string, 
       if (asleep) return { ok: false, reason: 'asleep' };
       if (n.clean >= CARE.full) return { ok: false, reason: 'clean' };
       n.clean = 100;
+      n.happy = clamp(n.happy + byHand);
       return { ok: true, state, ...careReward(state, nowMs, tz) };
     }
     case 'nap': {

@@ -64,6 +64,7 @@ h1, h2 { margin: 0; }
   width: 44px; height: 44px; border-radius: 22px; border: none; background: var(--surface); box-shadow: var(--shadow);
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
+.round-btn[aria-pressed="true"] { background: var(--ink); color: #fff; }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: var(--chip); border-radius: 14px; padding: 4px; }
 .seg-btn { height: 36px; border-radius: 11px; border: none; background: transparent; font-weight: 700; font-size: 14px; }
 .seg-btn[aria-selected="true"], .seg-btn[aria-checked="true"] { background: var(--surface); box-shadow: 0 1px 3px rgba(42, 34, 48, 0.15); }
@@ -90,9 +91,14 @@ h1, h2 { margin: 0; }
 .splashes { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .splashes svg { display: block; }
 .home-body { position: relative; }
-.home .bar { background: transparent; transition: background 0.2s; }
-.home.scrolled .bar { background: var(--ground); }
-.home-body { padding: 6px 16px calc(var(--safe-bottom) + 24px); display: flex; flex-direction: column; gap: 22px; max-width: 720px; margin: 0 auto; }
+/* Clear at the top so the splashes show; frosted once scrolled, like the tab bar,
+   so the art passes softly under the status bar and the app's back button. */
+.home .bar { background: transparent; border-bottom: 1px solid transparent; transition: background 0.2s, border-color 0.2s; }
+.home.scrolled .bar {
+  background: rgba(251, 247, 241, 0.82); border-bottom-color: var(--line-soft);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
+.home-body { padding: 6px 16px calc(var(--safe-bottom) + 88px); display: flex; flex-direction: column; gap: 22px; max-width: 720px; margin: 0 auto; }
 .today { background: var(--surface); border-radius: 24px; padding: 14px; box-shadow: 0 1px 0 var(--line), 0 10px 26px rgba(42, 34, 48, 0.08); display: flex; flex-direction: column; gap: 12px; }
 .today-top { display: flex; gap: 14px; }
 .today-pic { width: 150px; height: 150px; flex-shrink: 0; border-radius: 14px; overflow: hidden; border: 1px solid var(--line-soft); background: #fff; }
@@ -119,6 +125,17 @@ h1, h2 { margin: 0; }
 .tile-art { width: 112px; height: 112px; border-radius: 16px; background: #fff; border: 1px solid var(--line-soft); overflow: hidden; position: relative; }
 .tile-art img, .tile-art canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
 .tile-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shelf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+.shelf-grid .tile-wrap, .shelf-grid .tile { width: 100%; }
+.shelf-grid .tile-art { width: 100%; height: auto; aspect-ratio: 1; border-radius: 20px; }
+.shelf-grid .tile-name { font-size: 14px; }
+.tile-gallery {
+  position: absolute; top: 6px; right: 6px; height: 32px; min-width: 32px; padding: 0 8px; border-radius: 16px; border: none; gap: 4px;
+  background: rgba(255, 255, 255, 0.94); box-shadow: 0 1px 4px rgba(42, 34, 48, 0.2); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: 13px; font-weight: 800;
+}
+/* Small resume tiles leave the count to the same page's big tile below. */
+.shelf-list .tile-gallery { display: none; }
 .tile-progress { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.9); }
 .tile-progress-fill { height: 5px; border-radius: 3px; background: var(--accent); }
 
@@ -187,10 +204,12 @@ h1, h2 { margin: 0; }
 .stop-btn { height: 40px; border-radius: 12px; border: 1.5px solid var(--line); background: #fff; display: flex; align-items: center; gap: 8px; padding: 0 10px; font-weight: 700; font-size: 13px; }
 .stop-btn[aria-pressed="true"] { border: 2px solid var(--ink); }
 .stop-btn .dot { width: 22px; height: 22px; border-radius: 11px; border: 1px solid rgba(42, 34, 48, 0.15); }
-.mixer { display: flex; gap: 12px; }
-.sv { flex: 1; height: 120px; border-radius: 14px; position: relative; touch-action: none; }
+.mixer { display: flex; gap: 20px; justify-content: center; }
+.wheel { width: 150px; height: 150px; flex-shrink: 0; border-radius: 50%; position: relative; touch-action: none; margin: 0 auto; }
+.wheel canvas { width: 100%; height: 100%; display: block; border-radius: 50%; }
+.wheel-dim { position: absolute; inset: 0; border-radius: 50%; background: #000; opacity: var(--dim, 0); pointer-events: none; }
+.bright { width: 28px; height: 150px; border-radius: 14px; position: relative; touch-action: none; border: 1px solid var(--line-soft); }
 .knob { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 11px; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); pointer-events: none; }
-.hue { width: 28px; height: 120px; border-radius: 14px; position: relative; touch-action: none; background: linear-gradient(to bottom, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
 .hue-knob { position: absolute; left: -3px; right: -3px; height: 10px; margin-top: -5px; border-radius: 5px; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); pointer-events: none; }
 .swatch-row { display: flex; justify-content: space-between; gap: 4px; flex-wrap: wrap; min-height: 34px; align-items: center; }
 .swatch-row .swatch { width: 28px; height: 28px; }
@@ -228,8 +247,11 @@ h1, h2 { margin: 0; }
 .avatar { width: 22px; height: 22px; border-radius: 11px; object-fit: cover; flex-shrink: 0; }
 .avatar.initial { background: var(--chip); font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
 .entry-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.locked { text-align: center; padding: 40px 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.locked-icon { width: 64px; height: 64px; border-radius: 32px; background: var(--chip); display: flex; align-items: center; justify-content: center; }
+.entry-pic { position: relative; }
+.entry-badge {
+  position: absolute; left: 6px; top: 6px; padding: 2px 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.94);
+  font-size: 11px; font-weight: 800; color: var(--muted); box-shadow: 0 1px 4px rgba(42, 34, 48, 0.15);
+}
 
 /* --- toast ------------------------------------------------------------------- */
 .toast {
@@ -280,3 +302,28 @@ h1, h2 { margin: 0; }
 .spinner { width: 40px; height: 40px; border-radius: 50%; border: 4px solid var(--chip); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* --- home tabs ---------------------------------------------------------------------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: space-around;
+  padding: 6px 8px calc(var(--safe-bottom) + 6px); background: rgba(251, 247, 241, 0.94);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-top: 1px solid var(--line-soft);
+}
+.tab {
+  flex: 1; max-width: 140px; min-height: 52px; border: none; background: none; padding: 4px 0; border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  font: inherit; font-size: 12px; font-weight: 800; color: var(--muted);
+}
+.tab[aria-current="page"] { color: var(--accent); }
+.tab-title { font-size: 26px; font-weight: 800; margin: 0; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 32px 12px; text-align: center; }
+.tile-posted {
+  position: absolute; left: 8px; bottom: 8px; padding: 3px 9px; border-radius: 10px; background: rgba(255, 255, 255, 0.94);
+  font-size: 12px; font-weight: 800; color: var(--kicker); box-shadow: 0 1px 4px rgba(42, 34, 48, 0.15);
+}
+.entry-link { font: inherit; color: inherit; text-align: left; cursor: pointer; border: none; background: none; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.entry-likes { font-size: 12px; font-weight: 800; color: var(--muted); white-space: nowrap; margin-left: auto; padding-right: 6px; }
+.entry-likes svg { vertical-align: -2px; }
+.entry-page { font-size: 12px; color: var(--muted); padding: 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -4px; }
+/* Pages differ in shape: the feed shows each in a square, so the grid stays even. */
+.entry-link canvas { aspect-ratio: 1; object-fit: contain; background: #fff; }

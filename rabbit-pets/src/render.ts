@@ -6,10 +6,11 @@
 
 import { drawBurrow, drawWindowView, PLAIN_ROOM, ROOM_ARCH, SCENE_H, SCENE_W, WALL_INSET, windowOf, type RoomStyle } from './art/burrow';
 import { drawGlow, drawItem, type ItemArt } from './art/items';
-import { resizeCanvas, toSprite, type Sprite } from './art/pixels';
-import { drawPaw, drawRabbit, dressKey, RABBIT_GROUND, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
+import { lcg, resizeCanvas, toSprite, type Sprite } from './art/pixels';
+import { DARK_COATS, drawPaw, drawRabbit, dressKey, furMask, RABBIT_GROUND, RABBIT_H, RABBIT_W, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type BurrowState, type DecorDef, type PlacedItem } from './decor';
-import type { Coat, FoodReaction, Mood } from './sim';
+import type { Coat, FoodReaction, Mood, NeedKey } from './sim';
+import { LOW_NEED, THRIVING } from './tuning';
 import type { Season, Weather } from './world';
 
 export interface SceneModel {
@@ -49,7 +50,36 @@ export interface SceneModel {
   critter?: string | null;
   /** The player's local time, for the clocks' hands. */
   time?: { hour: number; minute: number };
+  /**
+   * Her needs, for how she looks: dirt on her coat as she gets grubby, heavy
+   * eyes and drooping ears when she's tired, sad brows when she's lonely, a
+   * rumbling tummy when she's hungry, a sparkle when she's thriving.
+   */
+  needs?: Record<NeedKey, number>;
 }
+
+/**
+ * How grubby she looks, by her Clean need: smudges appear from `from`, one
+ * more of DIRT_SPOTS for each step down; straw sticks to her coat under
+ * `straw`, and flies buzz round her under `flies`.
+ */
+export const DIRT = { from: 60, straw: 35, flies: 15 } as const;
+const DIRT_SPOTS = 16;
+/** Her looks, from her needs: smudges to show, straw, flies, ears and face. */
+export interface Look { spots: number; straw: boolean; flies: boolean; tired: boolean; lonely: boolean; hungry: boolean; thriving: boolean }
+
+export function lookOf(needs: Record<NeedKey, number> | undefined): Look {
+  const n = needs ?? { hunger: 100, happy: 100, energy: 100, clean: 100 };
+  const spots = n.clean >= DIRT.from ? 0 : Math.min(DIRT_SPOTS, Math.ceil(((DIRT.from - n.clean) / DIRT.from) * DIRT_SPOTS));
+  return {
+    spots, straw: n.clean < DIRT.straw, flies: n.clean < DIRT.flies,
+    tired: n.energy < LOW_NEED, lonely: n.happy < LOW_NEED, hungry: n.hunger < LOW_NEED,
+    thriving: n.hunger >= THRIVING.above && n.happy >= THRIVING.above && n.clean >= THRIVING.above,
+  };
+}
+
+/** Where a tap or stroke lands on her: ears and the top of her head, her nose, her feet, or the rest of her. */
+export type PetZone = 'ears' | 'nose' | 'feet' | 'body';
 
 /**
  * A clock hand's pixels out from the centre, pointing at 12, 1 and 2; the
@@ -109,7 +139,13 @@ function ceilingY(x: number): number {
   return Math.ceil(64 - 58 * Math.sqrt(Math.max(0, 1 - t * t))) + 1;
 }
 
-type Reaction = 'eating' | 'happy' | 'clean' | 'play';
+/**
+ * What she's doing because of you. 'melt': stroked behind the ears, she goes
+ * soft, ears flat; 'boop': a tap on the nose makes her sneeze; 'thump': she
+ * doesn't like her feet touched; 'scrub': being washed, kept going by scrub().
+ */
+type Reaction = 'eating' | 'happy' | 'clean' | 'play' | 'melt' | 'boop' | 'thump' | 'scrub';
+
 
 /**
  * A meal: she lifts it in her paws and nibbles it away from the top, eyes
@@ -117,6 +153,9 @@ type Reaction = 'eating' | 'happy' | 'clean' | 'play';
  */
 export const EAT_MS = 2300;
 export const EAT_SWALLOW_MS = 1850;
+const REACTION_MS: Record<Reaction, number> = { eating: EAT_MS, happy: 1400, clean: 1400, play: 2200, melt: 2200, boop: 1000, thump: 700, scrub: 1500 };
+/** A sneeze's squeezed eyes, at the start of a boop. */
+const SNEEZE_MS = 380;
 const EAT_LIFT_MS = 220;
 /** The food goes down between these two times. */
 const EAT_FROM_MS = 300, EAT_TO_MS = 1700;
@@ -139,6 +178,8 @@ export class Scene {
   private readonly items = new Map<string, Sprite>();
   private readonly glow: Sprite;
   private rabbitCache = new Map<string, Sprite>();
+  /** Which pixels of each cached sprite are fur, for dirt (by the same key). */
+  private furCache = new Map<string, boolean[][]>();
 
   private x = 40;
   private targetX = 40;
@@ -185,15 +226,24 @@ export class Scene {
     return s;
   }
 
-  rabbit(coat: Coat, face: Face, frame: Frame, dress?: Dress): Sprite {
-    const key = `${coat}:${face}:${frame}:${dressKey(dress)}`;
+  rabbit(coat: Coat, face: Face, frame: Frame, dress?: Dress, droop = 0): Sprite {
+    return this.rabbitWithFur(coat, face, frame, dress, droop).sprite;
+  }
+
+  private rabbitWithFur(coat: Coat, face: Face, frame: Frame, dress?: Dress, droop = 0): { sprite: Sprite; fur: boolean[][] } {
+    const key = `${coat}:${face}:${frame}:${dressKey(dress)}:${droop}`;
     let s = this.rabbitCache.get(key);
-    if (!s) {
-      if (this.rabbitCache.size > 60) this.rabbitCache.clear(); // outfits change rarely; don't grow forever
-      s = toSprite(drawRabbit(coat, face, frame, dress));
+    let fur = this.furCache.get(key);
+    if (!s || !fur) {
+      // outfits change rarely; don't grow forever
+      if (this.rabbitCache.size > 90) { this.rabbitCache.clear(); this.furCache.clear(); }
+      const g = drawRabbit(coat, face, frame, dress, undefined, droop);
+      s = toSprite(g);
+      fur = furMask(coat, g);
       this.rabbitCache.set(key, s);
+      this.furCache.set(key, fur);
     }
-    return s;
+    return { sprite: s, fur };
   }
 
   private views = new Map<string, Sprite>();
@@ -241,17 +291,91 @@ export class Scene {
     ctx.restore();
   }
 
-  /** The rabbit's box in scene pixels, for tap-to-pet. */
+  /** The rabbit's box in scene pixels, for tap-to-pet: where she's standing, up on a seat or in bed too. */
   rabbitBox(): { x: number; y: number; w: number; h: number } {
-    return { x: this.x - 14, y: STAND_Y - 32, w: 28, h: 32 };
+    return { x: this.x - 14, y: this.lastStandY - 32, w: 28, h: 32 };
   }
 
   /** `outcome`, for a meal: how she took it (sim.ts foodReaction), which sets how she finishes. */
   react(kind: Reaction, now: number, art?: ItemArt, outcome?: FoodReaction): void {
-    this.reaction = { kind, start: now, until: now + (kind === 'eating' ? EAT_MS : kind === 'play' ? 2200 : 1400), art, outcome };
+    this.reaction = { kind, start: now, until: now + REACTION_MS[kind], art, outcome };
     if (kind === 'happy' || kind === 'play') this.burst('heart', 3, now);
+    if (kind === 'melt') this.burst('heart', 4, now);
     if (kind === 'clean') this.burst('sparkle', 4, now);
+    if (kind === 'boop') this.burst('puff', 1, now + SNEEZE_MS - 80, { x: this.x + (this.facing === 1 ? -8 : 8), y: this.lastStandY - 16 });
+    if (kind === 'thump') this.burst('puff', 2, now + 60, { x: this.x, y: this.lastStandY - 3 });
   }
+
+  /**
+   * Where a point on her lands, in her own pixels, or null if it misses:
+   * the top of her head and ears, her nose, her feet or the rest of her.
+   */
+  petZone(px: number, py: number): PetZone | null {
+    const b = this.rabbitBox();
+    if (px < b.x || px > b.x + b.w || py < b.y - 6 || py > b.y + b.h) return null;
+    const { lx, ly } = this.local(px, py);
+    if (ly < 15) return 'ears';
+    if (ly >= 33) return 'feet';
+    if (Math.abs(lx - 19.5) <= 3.5 && ly >= 19 && ly <= 25) return 'nose';
+    return 'body';
+  }
+
+  /** A scene point in her sprite's own pixels, unmirrored. */
+  private local(px: number, py: number): { lx: number; ly: number } {
+    const x = px - this.lastLeft;
+    return { lx: this.facing === 1 ? RABBIT_W - 1 - x : x, ly: py - this.lastTop };
+  }
+
+  /**
+   * Washing her: the sponge at a point. Rubbing her keeps her standing still
+   * for it, wipes off the smudges under the sponge, and blows bubbles.
+   * Returns whether it was on her.
+   */
+  scrub(px: number, py: number, now: number): boolean {
+    const b = this.rabbitBox();
+    if (px < b.x - 3 || px > b.x + b.w + 3 || py < b.y - 3 || py > b.y + b.h + 3) return false;
+    if (this.reaction?.kind !== 'scrub') this.reaction = { kind: 'scrub', start: now, until: now + REACTION_MS.scrub };
+    this.reaction.until = now + REACTION_MS.scrub;
+    this.lastRub = now;
+    const { lx, ly } = this.local(px, py);
+    this.dirtSpots.forEach((d, i) => { if (Math.hypot(d.x - lx, d.y - ly) < 4.5) this.wiped.add(i); });
+    if (now - this.lastBubble > 90) {
+      this.lastBubble = now;
+      this.particles.push({ art: 'bubble', x: px - 2 + (Math.random() * 6 - 3), y: py - 3, vy: -0.01 - Math.random() * 0.01, born: now, life: 900 });
+    }
+    return true;
+  }
+
+  /** Smudges still on her, of those her Clean need shows. */
+  dirtLeft(m: Pick<SceneModel, 'needs'>): number {
+    const n = lookOf(m.needs).spots;
+    let left = 0;
+    for (let i = 0; i < n; i++) if (!this.wiped.has(i)) left++;
+    return left;
+  }
+
+  /** The sponge, drawn where the pointer is while you wash her (null: put away). */
+  setSponge(at: { x: number; y: number } | null): void { this.sponge = at; }
+
+  /**
+   * Food held out to her (dragged from the Feed tray), or null. Hungry, she
+   * comes for it sniffing and opens her mouth when it's close; full, she
+   * turns her head away.
+   */
+  setLure(l: { x: number; y: number; art: ItemArt; wants: boolean } | null): void { this.lure = l; }
+
+  private sponge: { x: number; y: number } | null = null;
+  private lure: { x: number; y: number; art: ItemArt; wants: boolean } | null = null;
+  private lastRub = -1e9;
+  private lastBubble = -1e9;
+  private lastLeft = 0;
+  private lastTop = 0;
+  /** Her smudges, in her own pixels, worst-placed last; the first ones show first. */
+  private dirtSpots: { x: number; y: number; shape: number }[] = [];
+  private dirtFor = '';
+  /** Smudges washed off this time; cleared once she's clean. */
+  private wiped = new Set<number>();
+  private nextGleam = 0;
 
   burst(art: ItemArt, n: number, now: number, at?: { x: number; y: number }): void {
     const ox = at?.x ?? this.x, oy = at?.y ?? STAND_Y - 30;
@@ -396,6 +520,10 @@ export class Scene {
 
     if (!m.absent) this.drawSleepAndThoughts(m, now);
     this.drawParticles(now);
+    if (this.sponge) {
+      const sp = this.item('sponge');
+      ctx.drawImage(sp.canvas, Math.round(this.sponge.x - sp.w / 2), Math.round(this.sponge.y - sp.h / 2));
+    }
     if (m.decorating && m.selected) {
       const sel = m.burrow.items.find((i) => i.uid === m.selected && i.placed);
       const b = sel ? this.itemBox(sel) : null;
@@ -689,7 +817,16 @@ export class Scene {
   private updateRabbit(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[], bed?: { x: number }): void {
     // asleep: she is already curled up on her cushion, not walking to it
     if (bed) { this.targetX = bed.x; this.x = bed.x; this.hopPhase = 0; this.idle = null; return; }
-    const free = m.mood !== 'asleep' && !this.reaction && !m.decorating && !m.absent;
+    const look = lookOf(m.needs);
+    // food held out: hungry, she comes over for it; full, she stays put
+    const lure = m.mood !== 'asleep' && !m.decorating && !m.absent ? this.lure : null;
+    if (lure) {
+      this.idle = null;
+      const d = lure.x - this.x;
+      this.targetX = lure.wants && Math.abs(d) > 16 ? clampX(lure.x - Math.sign(d) * 12) : this.x;
+      this.nextWander = now + 2500;
+    }
+    const free = m.mood !== 'asleep' && !this.reaction && !lure && !m.decorating && !m.absent;
     // Sleep, decorating or going out calls her away from whatever she was
     // doing. A tap or a meal doesn't: she's patted, or eats, where she is, and
     // goes on with it after (dropping it had the mood line flick to "content"
@@ -701,18 +838,28 @@ export class Scene {
       this.idle = this.pickIdle(m, now, placed);
       if (this.idle?.kind === 'spot') this.targetX = this.idle.x;
       else if (!this.idle) this.targetX = WALK_MIN + Math.random() * (WALK_MAX - WALK_MIN);
-      this.nextWander = now + 3500 + Math.random() * 4000;
+      // lonely, she mopes about rather than pottering
+      this.nextWander = now + 3500 + Math.random() * 4000 + (look.lonely ? 6000 : 0);
     }
     if (this.idle?.kind === 'spot' && this.arrived()) { this.facing = this.idle.facing; this.hopPhase = 0; return; }
     if (this.idle?.kind === 'binky') { this.hopPhase = 0; return; }
     const dx = this.targetX - this.x;
     if (Math.abs(dx) > 0.5 && (!this.reaction || bed)) {
-      if (reduceMotion) { this.x = this.targetX; this.hopPhase = 0; return; }
-      this.facing = dx > 0 ? -1 : 1;
-      this.x += Math.sign(dx) * Math.min(Math.abs(dx), 0.35);
-      this.hopPhase = (this.hopPhase + 0.09) % 1;
+      if (reduceMotion) { this.x = this.targetX; this.hopPhase = 0; }
+      else {
+        // tired, she plods; called over with food, she hurries
+        const speed = lure ? 0.55 : look.tired ? 0.2 : 0.35;
+        this.facing = dx > 0 ? -1 : 1;
+        this.x += Math.sign(dx) * Math.min(Math.abs(dx), speed);
+        this.hopPhase = (this.hopPhase + (look.tired && !lure ? 0.06 : 0.09)) % 1;
+      }
     } else {
       this.hopPhase = 0;
+    }
+    if (lure && this.arrived()) {
+      // full, she shakes her head at it
+      const toward = lure.x < this.x ? 1 : -1;
+      this.facing = lure.wants || reduceMotion ? toward : Math.floor(now / 280) % 2 ? 1 : -1;
     }
   }
 
@@ -778,11 +925,19 @@ export class Scene {
 
   private drawRabbit(m: SceneModel, now: number, standY: number): void {
     if (this.reaction && now > this.reaction.until) this.reaction = null;
+    const look = lookOf(m.needs);
+    const asleep = m.mood === 'asleep';
     let face: Face = 'content';
     let frame: Frame = 0;
     let lift = 0;
+    // tired or lonely, her ears hang; melting under a stroke, they lie flat
+    let droop = asleep ? 0 : look.lonely ? 2 : look.tired ? 1 : 0;
+    /** A shake, in pixels: a thump (up and down), or her tummy rumbling (side to side). */
+    let thud = 0, rumble = 0;
     const idle = this.idle;
-    if (m.mood === 'asleep') {
+    const r = this.reaction;
+    const lure = !asleep && !m.decorating ? this.lure : null;
+    if (asleep) {
       face = 'asleep';
       frame = !reduceMotion && Math.floor(now / 1400) % 2 ? 1 : 0;
     } else if (idle?.kind === 'binky') {
@@ -794,19 +949,44 @@ export class Scene {
     } else if (idle?.kind === 'spot' && idle.activity.kind === 'fire' && this.arrived()) {
       // eyes closed, cosy
       face = 'happy';
-    } else if (this.reaction) {
-      if (this.reaction.kind === 'eating') ({ face, frame } = eatingPose(now - this.reaction.start, this.reaction.outcome, reduceMotion));
+    } else if (r) {
+      const t = now - r.start;
+      if (r.kind === 'eating') ({ face, frame } = eatingPose(t, r.outcome, reduceMotion));
+      else if (r.kind === 'melt') { face = 'melt'; droop = 2; }
+      else if (r.kind === 'boop') face = t < SNEEZE_MS ? 'sneeze' : 'happy';
+      else if (r.kind === 'thump') { face = 'grumpy'; thud = reduceMotion ? 0 : Math.floor(t / 90) % 2; }
+      // eyes shut while the sponge is going, peeking when it stops
+      else if (r.kind === 'scrub') face = now - this.lastRub < 450 ? 'happy' : 'content';
       else face = 'happy';
+    } else if (lure) {
+      // hungry: sniffing at it, then mouth open when it's under her nose; full, she shakes her head
+      const near = Math.abs(lure.x - this.x) < 18 && lure.y > standY - 44 && lure.y < standY + 4;
+      face = !lure.wants ? 'polite' : near ? 'eating' : !reduceMotion && Math.floor(now / 160) % 2 ? 'chew' : 'content';
     } else if (m.mood === 'grumpy') {
       face = 'grumpy';
     } else {
-      if (now > this.blinkAt) { frame = 2; if (now > this.blinkAt + 140) this.blinkAt = now + 2500 + Math.random() * 3000; }
-      else if (!reduceMotion && this.hopPhase === 0 && Math.floor(now / 900) % 3 === 1) frame = 1;
+      // how she feels shows: a yawn now and then when tired, sad brows when
+      // lonely, sniffing about for food when hungry
+      const yawning = look.tired && !reduceMotion && now % 9000 < 1100;
+      const sniffing = look.hungry && !reduceMotion && (now + 2500) % 7000 < 1400;
+      if (yawning) face = 'yawn';
+      else if (look.lonely) face = 'sad';
+      else if (look.tired) face = 'drowsy';
+      else if (sniffing) face = Math.floor(now / 150) % 2 ? 'chew' : 'content';
+      if (!yawning && !sniffing) {
+        if (now > this.blinkAt) { frame = 2; if (now > this.blinkAt + 140) this.blinkAt = now + 2500 + Math.random() * 3000; }
+        else if (!reduceMotion && this.hopPhase === 0 && Math.floor(now / 900) % 3 === 1) frame = 1;
+      }
     }
-    const s = this.rabbit(m.coat, face, frame, m.dress);
+    // a hungry tummy rumbles now and then
+    const rumbling = look.hungry && !asleep && !r && !reduceMotion && now % 6000 < 480;
+    if (rumbling) rumble = Math.floor(now / 70) % 2 ? 1 : -1;
+    const { sprite: s, fur } = this.rabbitWithFur(m.coat, face, frame, m.dress, droop);
     const hop = (this.hopPhase ? Math.round(Math.sin(this.hopPhase * Math.PI) * 3) : 0) + lift;
-    const left = Math.round(this.x - RABBIT_W / 2);
-    const top = standY - RABBIT_GROUND - hop;
+    const left = Math.round(this.x - RABBIT_W / 2) + rumble;
+    const top = standY - RABBIT_GROUND - hop + thud;
+    this.lastLeft = left;
+    this.lastTop = top;
     const ctx = this.ctx;
     ctx.save();
     if (this.facing === 1) {
@@ -814,7 +994,26 @@ export class Scene {
       ctx.scale(-1, 1);
     }
     ctx.drawImage(s.canvas, left, top);
+    this.drawDirt(m, look, fur, left, top);
     ctx.restore();
+    if (look.flies) this.drawFlies(now, top);
+    if (rumbling) {
+      // a little wavy line by her tummy
+      ctx.fillStyle = '#FFF6C8';
+      const rx = Math.round(this.x + (this.facing === 1 ? 10 : -13)), ry = standY - 16;
+      for (const [dx, dy] of [[0, 0], [1, -1], [2, 0], [3, -1], [0, 3], [1, 2], [2, 3], [3, 2]] as const) ctx.fillRect(rx + dx, ry + dy, 1, 1);
+    }
+    // thriving, her coat catches the light now and then
+    if (look.thriving && !asleep && !reduceMotion && now > this.nextGleam) {
+      this.nextGleam = now + 2500 + Math.random() * 3500;
+      for (let tries = 0; tries < 20; tries++) {
+        const lx = 8 + Math.floor(Math.random() * 24), ly = 10 + Math.floor(Math.random() * 26);
+        if (!fur[ly]?.[lx]) continue;
+        const gx = this.facing === 1 ? left + RABBIT_W - 1 - lx : left + lx;
+        this.particles.push({ art: 'sparkle', x: gx - 2, y: top + ly - 2, vy: -0.002, born: now, life: 650 });
+        break;
+      }
+    }
 
     // what she's eating, held up in her paws
     if (this.reaction?.kind === 'eating' && this.reaction.art) drawMeal(ctx, m.coat, this.reaction.art, now - this.reaction.start, this.x, standY, reduceMotion);
@@ -831,6 +1030,50 @@ export class Scene {
 
   private lastStandY = STAND_Y;
 
+  /**
+   * Smudges on her coat (mud, or dust on a dark coat), drawn in her own
+   * pixels inside her mirrored transform, only where she's fur, so they follow
+   * her outline whatever she's doing. Washed-off ones stay off until she's clean.
+   */
+  private drawDirt(m: SceneModel, look: Look, fur: boolean[][], left: number, top: number): void {
+    if (!look.spots) { this.wiped.clear(); return; }
+    const key = `${(m.seed ?? '').split(':')[0]}:${m.coat}`;
+    if (this.dirtFor !== key) { this.dirtFor = key; this.dirtSpots = dirtSpots(key, m.coat); this.wiped.clear(); }
+    const ctx = this.ctx;
+    const show = (i: number) => !this.wiped.has(i) && !!this.dirtSpots[i];
+    ctx.fillStyle = DARK_COATS.includes(m.coat) ? 'rgba(232,222,204,0.6)' : 'rgba(120,88,58,0.5)';
+    for (let i = 0; i < look.spots; i++) {
+      if (!show(i)) continue;
+      const d = this.dirtSpots[i]!;
+      for (const [dx, dy] of SMUDGES[d.shape]!) {
+        const x = d.x + dx, y = d.y + dy;
+        if (fur[y]?.[x]) ctx.fillRect(left + x, top + y, 1, 1);
+      }
+    }
+    // bits of straw caught in her fur, up on her back
+    if (look.straw) for (const i of STRAW) {
+      if (!show(i)) continue;
+      const d = this.dirtSpots[i]!;
+      if (!fur[d.y]?.[d.x]) continue;
+      ctx.fillStyle = '#E8C25A';
+      ctx.fillRect(left + d.x, top + d.y, 1, 1); ctx.fillRect(left + d.x + 1, top + d.y - 1, 1, 1);
+      ctx.fillStyle = '#B8902E';
+      ctx.fillRect(left + d.x + 2, top + d.y - 2, 1, 1);
+    }
+  }
+
+  /** Two flies buzzing round her head. */
+  private drawFlies(now: number, top: number): void {
+    const ctx = this.ctx;
+    for (let i = 0; i < 2; i++) {
+      const a = reduceMotion ? i * 2.5 : now / 280 + i * Math.PI;
+      const fx = Math.round(this.x + Math.cos(a) * 13), fy = Math.round(top + 7 + Math.sin(a * 1.7) * 4);
+      ctx.fillStyle = '#2A2130';
+      ctx.fillRect(fx, fy, 1, 1);
+      if (reduceMotion || Math.floor(now / 50 + i) % 2) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(fx, fy - 1, 1, 1); }
+    }
+  }
+
   /** Drawn after the night pass so the z's and bubbles stay bright. */
   private drawSleepAndThoughts(m: SceneModel, now: number): void {
     const ctx = this.ctx;
@@ -844,7 +1087,7 @@ export class Scene {
     }
     // a thought bubble names what she wants
     const want: Partial<Record<Mood, ItemArt>> = { peckish: 'carrot', lonely: 'heart', sleepy: 'moon', dusty: 'droplet' };
-    const icon = !this.reaction && !m.decorating && !m.guest ? want[m.mood] : undefined;
+    const icon = !this.reaction && !this.lure && !this.sponge && !m.decorating && !m.guest ? want[m.mood] : undefined;
     if (icon) {
       const b = this.item('thought');
       const bx = Math.round(this.x + 6), by = standY - 44;
@@ -972,6 +1215,34 @@ function nightLight(ctx: CanvasRenderingContext2D): CanvasGradient {
   g.addColorStop(0.55, '#9C90B2');
   g.addColorStop(1, '#4C5088');
   return g;
+}
+
+/** A smudge's pixels, from its corner. */
+const SMUDGES: [number, number][][] = [[[0, 0], [1, 0], [0, 1]], [[0, 0], [1, 0], [1, 1], [2, 1]], [[1, 0], [0, 1], [1, 1]], [[0, 0], [0, 1], [1, 1]]];
+/** Which of her spots are straw: the highest two (dirtSpots sorts them bottom up). */
+const STRAW = [DIRT_SPOTS - 1, DIRT_SPOTS - 2];
+
+/**
+ * Where her smudges go, in her own pixels: on her fur, spread out, the same
+ * for her every time. Sorted from the bottom up, so dirt starts on her feet
+ * and belly and creeps up her as she gets grubbier.
+ */
+export function dirtSpots(seed: string, coat: Coat): { x: number; y: number; shape: number }[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  const rnd = lcg(h >>> 0);
+  const fur = furMask(coat, drawRabbit(coat, 'content', 0));
+  const spots: { x: number; y: number; shape: number }[] = [];
+  for (let tries = 0; tries < 600 && spots.length < DIRT_SPOTS; tries++) {
+    // below her ears: the highest two are straw, in the fur on top of her head
+    const x = 6 + Math.floor(rnd() * (RABBIT_W - 12)), y = 13 + Math.floor(rnd() * (RABBIT_H - 15));
+    if (!fur[y]?.[x]) continue;
+    // not on her face: the middle of her head, round her eyes and nose
+    if (y >= 16 && y <= 26 && Math.abs(x - 19.5) < 7) continue;
+    if (spots.some((p) => Math.abs(p.x - x) + Math.abs(p.y - y) < 5)) continue;
+    spots.push({ x, y, shape: Math.floor(rnd() * SMUDGES.length) });
+  }
+  return spots.sort((a, b) => b.y - a.y);
 }
 
 /** Where she can stand to be beside something: not half off the edge of the room. */

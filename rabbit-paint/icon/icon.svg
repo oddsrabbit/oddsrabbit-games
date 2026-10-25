@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="A rabbit coloring page, half colored in, with a tap on the next area">
+<rect width="512" height="512" fill="#ece5da"/>
+<g fill="#d6cbba"><circle cx="40" cy="40" r="5"/><circle cx="472" cy="40" r="5"/><circle cx="40" cy="472" r="5"/><circle cx="472" cy="472" r="5"/></g>
+<g transform="rotate(-5 256 256)">
+  <rect x="62" y="70" width="388" height="388" rx="22" fill="#2a2230" opacity="0.16"/>
+  <rect x="62" y="58" width="388" height="388" rx="22" fill="#ffffff"/>
+  <g stroke="#2a2230" stroke-width="10" stroke-linejoin="round" stroke-linecap="round">
+    <ellipse cx="206" cy="178" rx="40" ry="94" transform="rotate(-12 206 178)" fill="#b48ce0"/>
+    <ellipse cx="206" cy="186" rx="18" ry="62" transform="rotate(-12 206 186)" fill="#f4a6b8"/>
+    <ellipse cx="306" cy="178" rx="40" ry="94" transform="rotate(12 306 178)" fill="#ffffff"/>
+    <ellipse cx="306" cy="186" rx="18" ry="62" transform="rotate(12 306 186)" fill="#ffffff"/>
+    <ellipse cx="256" cy="320" rx="122" ry="102" fill="#f4d27a"/>
+    <circle cx="196" cy="350" r="24" fill="#f4a6b8"/>
+    <circle cx="316" cy="350" r="24" fill="#ffffff"/>
+    <path d="M244 338h24l-12 14z" fill="#2a2230"/>
+    <path d="M256 352v14M256 366c-8 10-20 10-26 2M256 366c8 10 20 10 26 2" fill="none" stroke-width="8"/>
+  </g>
+  <circle cx="218" cy="306" r="12" fill="#2a2230"/><circle cx="294" cy="306" r="12" fill="#2a2230"/>
+  <circle cx="222" cy="301" r="4" fill="#fff"/><circle cx="298" cy="301" r="4" fill="#fff"/>
+  <circle cx="318" cy="168" r="46" fill="none" stroke="#c4473a" stroke-width="7" opacity="0.35"/>
+  <circle cx="318" cy="168" r="28" fill="none" stroke="#c4473a" stroke-width="7" opacity="0.7"/>
+  <circle cx="318" cy="168" r="12" fill="#c4473a"/>
+</g>
+</svg>

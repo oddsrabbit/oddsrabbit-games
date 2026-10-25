@@ -97,6 +97,13 @@ export const CARE = {
   napBelowEnergy: 85,
 } as const;
 
+/**
+ * Care by hand (washing her with the sponge, handing her food, stroking her)
+ * rather than with a tap on the button: a little extra joy, nothing else, so
+ * the quick way is never a loss of clover.
+ */
+export const HANDS_ON = { happy: 4 } as const;
+
 /** Bond points per care action, capped per day so it can't be farmed. */
 export const BOND_PER_CARE = 1;
 export const BOND_DAILY_CAP = 10;
@@ -204,6 +211,15 @@ export const BERRY_HARVEST = 3;
 export const SPROUT_CLOVER = 10;
 /** The watering can makes crops grow this much faster. */
 export const CAN_SPEED = 1.25;
+
+/**
+ * Tending the beds by hand (extras.ts). A growing bed is thirsty until
+ * watered, once a planting, which takes `water` of its growing time off.
+ * `weedChance` of plantings sprout a dandelion weed `weedAt` of the way
+ * through; pulling it pays `weedClover` (flat) and she munches it, `weedFood`.
+ * Picking a bed, `digChance` of the time she digs up a find while she helps.
+ */
+export const TENDING = { water: 0.15, weedChance: 0.5, weedAt: 0.35, weedClover: 2, weedFood: 3, digChance: 0.12 } as const;
 
 /** Yard storage, in hours of output: 24, then 36 and 48 with the shed. */
 export const YARD_STORAGE_HOURS = [24, 36, 48] as const;

@@ -16,8 +16,14 @@
 //
 // A record: { id, bot: { name, rating, level, line }, me: "w" | "b",
 // moves: "e2e4 e7e5 g1f3=" (UCI, "=" marks a draw offer sent with the move),
-// end: null | { type: "resign", seat } | { type: "agreed" },
-// created, updated, ev } where `ev` is the bot's last evaluation, for resigning.
+// end: null | { type: "resign", seat } | { type: "agreed", seat } (seat is who
+// accepted; a record without one is the bot's acceptance), created, updated,
+// ev, botOffer, takebacks, hints, counted } where `ev` is the bot's last
+// evaluation, for resigning, `botOffer` the ply of the bot's last draw offer,
+// and `counted` that the result is in the record.
+//
+// The record against the computer is kept beside the games, per level:
+// { beginner: { w, l, d }, … }. It outlives the games, which are trimmed.
 
 (function (root) {
   var Rules = root.ChessRules;
@@ -76,7 +82,7 @@
 
   // -------------------------------------------------------------- the store
 
-  var store = { games: {}, loaded: null, saving: Promise.resolve(), storage: null, user: null };
+  var store = { games: {}, record: {}, loaded: null, saving: Promise.resolve(), storage: null, user: null };
   var watchers = {};
   var thinking = {};
   var changed = [];
@@ -99,9 +105,13 @@
       if (saved && Array.isArray(saved.games)) {
         saved.games.forEach(function (g) { if (g && typeof g.id === "string" && g.bot) store.games[g.id] = g; });
       }
+      if (saved && saved.record && typeof saved.record === "object") store.record = saved.record;
     }).catch(function (err) {
       console.warn("[chess] couldn't load computer games", err);
     }).then(function () {
+      // Games that ended before the record was kept go into it now.
+      var late = Object.keys(store.games).filter(function (id) { return tally(store.games[id]); });
+      if (late.length) save();
       Object.keys(store.games).forEach(botTurnIfDue);
     });
     return store.loaded;
@@ -115,13 +125,14 @@
     var open = all.filter(function (g) { return !build(g).over; });
     var done = all.filter(function (g) { return build(g).over; }).slice(0, KEEP_FINISHED);
     var keep = open.concat(done);
-    var text = JSON.stringify({ games: keep });
+    var text = JSON.stringify({ games: keep, record: store.record });
     while (text.length > MAX_BYTES && keep.length > 1) {
       keep.pop();
-      text = JSON.stringify({ games: keep });
+      text = JSON.stringify({ games: keep, record: store.record });
     }
     store.games = {};
     keep.forEach(function (g) { store.games[g.id] = g; });
+    Object.keys(built).forEach(function (id) { if (!store.games[id]) delete built[id]; });
     store.saving = store.saving.then(function () {
       return store.storage.set(STORE_KEY, text);
     }).catch(function (err) { console.warn("[chess] couldn't save computer games", err); });
@@ -143,10 +154,24 @@
     return rest === "" || (rest.length === 1 && /[nNbB]/.test(rest));
   }
 
+  // build() for each game, kept while its moves and ending stay the same:
+  // save, list and every view ask for it, and replaying a long game is not
+  // free on a phone. What it returns is shared, so callers only read it.
+  var built = {};
+
+  function build(g) {
+    var key = g.me + "|" + g.moves + "|" + (g.end ? JSON.stringify(g.end) : "");
+    var hit = built[g.id];
+    if (hit && hit.key === key) return hit.s;
+    var s = replayGame(g);
+    built[g.id] = { key: key, s: s };
+    return s;
+  }
+
   // Replay a record into the full game state: ChessRules::applyMove, move by
   // move, as the harness and the server do it. Seat 0 is the player, seat 1
   // the bot.
-  function build(g) {
+  function replayGame(g) {
     var white = g.me === "w" ? 0 : 1;
     var s = {
       pos: Rules.start(), halfmove: 0, fullmove: 1, ply: 0, positions: {}, history: [],
@@ -186,7 +211,8 @@
     if (!s.result && g.end) {
       if (g.end.type === "agreed") {
         s.result = { type: "agreed" };
-        s.history.push({ ply: s.history.length, seat: 0, move: { type: "acceptDraw" }, scoreDelta: 0 });
+        var accepted = typeof g.end.seat === "number" ? g.end.seat : 1;
+        s.history.push({ ply: s.history.length, seat: accepted, move: { type: "acceptDraw" }, scoreDelta: 0 });
         s.drawOffer = null;
       } else if (g.end.type === "resign") {
         s.resigned = g.end.seat;
@@ -199,8 +225,10 @@
     return s;
   }
 
+  // Always rising, as the server's is: a takeback removes at most two moves,
+  // so counting three per takeback keeps it moving up.
   function versionOf(g) {
-    return (g.moves ? g.moves.split(" ").length : 0) + (g.end ? 1 : 0) + 1;
+    return (g.moves ? g.moves.split(" ").length : 0) + (g.end ? 1 : 0) + 1 + 3 * (g.takebacks || 0);
   }
 
   // The record as the server's MatchView.
@@ -223,6 +251,7 @@
       isMyTurn: !s.over && s.turnSeat === 0, updatedAt: iso, joinCode: null,
       recap: s.last ? { san: s.last.san } : null, matchmaking: false, chatUnread: 0,
       thinking: !s.over && s.turnSeat === 1,
+      takebacks: g.takebacks || 0, hints: g.hints || 0,
       view: {
         board: s.pos.board, white: s.white, turn: s.pos.turn, castling: s.pos.castling, ep: s.pos.ep,
         halfmove: s.halfmove, fullmove: s.fullmove, ply: s.ply, drawOffer: s.drawOffer,
@@ -230,6 +259,33 @@
       },
       lastMove: lastMove
     };
+  }
+
+  // Put a finished game into the record, once. True when it was added.
+  function tally(g) {
+    if (g.counted) return false;
+    var s = build(g);
+    if (!s.over) return false;
+    var level = g.bot.level || "beginner";
+    var r = store.record[level] = store.record[level] || { w: 0, l: 0, d: 0 };
+    if (s.winner === 0) r.w++;
+    else if (s.winner === 1) r.l++;
+    else r.d++;
+    g.counted = true;
+    return true;
+  }
+
+  // Store a change: the record, storage, watchers and the list. `quiet` for
+  // the player's own verbs, whose caller takes the view from the reply (a
+  // watcher seeing it first would play the move in twice).
+  function commit(id, quiet) {
+    var g = store.games[id];
+    if (!g) return;
+    g.updated = Date.now();
+    tally(g);
+    save();
+    if (!quiet) notify(id);
+    changed.forEach(function (fn) { fn(id); });
   }
 
   function fail(code, message) {
@@ -262,7 +318,7 @@
     thinking[id] = true;
     var startedAt = Date.now();
     var moves = g.moves;
-    Engine.choose(s.pos, g.bot.rating, s.halfmove, s.fullmove).then(function (choice) {
+    Engine.choose(s.pos, g.bot.rating, s.halfmove, s.fullmove, id).then(function (choice) {
       var wait = Math.max(0, thinkMs(g, s) - (Date.now() - startedAt));
       return new Promise(function (resolve) { setTimeout(function () { resolve(choice); }, wait); });
     }).then(function (choice) {
@@ -271,15 +327,16 @@
       // Resigned, or otherwise changed, while the bot was thinking.
       if (!now || now.moves !== moves || now.end) return;
       var ev = choice && typeof choice.eval === "number" ? choice.eval : null;
-      if (ev !== null && answerDraw(now, s, ev)) { now.end = { type: "agreed" }; }
+      if (ev !== null && answerDraw(now, s, ev)) { now.end = { type: "agreed", seat: 1 }; }
       else if (ev !== null && wantsToResign(now, ev)) { now.end = { type: "resign", seat: 1 }; }
-      else if (choice && choice.move) { now.moves = (now.moves ? now.moves + " " : "") + choice.move; }
+      else if (choice && choice.move) {
+        var offer = ev !== null && wantsDraw(now, s, ev);
+        if (offer) now.botOffer = s.ply;
+        now.moves = (now.moves ? now.moves + " " : "") + choice.move + (offer ? "=" : "");
+      }
       else return;
       now.ev = ev;
-      now.updated = Date.now();
-      save();
-      notify(id);
-      changed.forEach(function (fn) { fn(id); });
+      commit(id);
     }).catch(function (err) {
       thinking[id] = false;
       console.error("[chess] the computer couldn't move", err);
@@ -294,6 +351,18 @@
     return ev <= -150 || (s.ply >= 60 && Math.abs(ev) <= 40);
   }
 
+  // The bot offers a draw itself in a long game that is going nowhere, and
+  // in an ending with no pawns left that is level: the player would
+  // otherwise have to shuffle to the fifty-move rule. Not again within 20
+  // plies of its last offer, and not while the player's offer is standing
+  // (that one it answers).
+  function wantsDraw(g, s, ev) {
+    if (s.drawOffer === 0) return false;
+    if (typeof g.botOffer === "number" && s.ply - g.botOffer < 20) return false;
+    var pawnless = !/[pP]/.test(s.pos.board);
+    return (s.ply >= 80 && Math.abs(ev) <= 25) || (s.ply >= 40 && pawnless && Math.abs(ev) <= 60);
+  }
+
   // Club players and up resign a lost position (down most of a queen, twice
   // running) rather than play it out. Weaker bots play on, as people do.
   function wantsToResign(g, ev) {
@@ -305,7 +374,7 @@
   // A new game against `bot` (from `roll`). `color` is "w", "b" or "random".
   function create(bot, color) {
     var me = color === "w" || color === "b" ? color : (Math.random() < 0.5 ? "w" : "b");
-    var g = { id: newId(), bot: bot, me: me, moves: "", end: null, created: Date.now(), updated: Date.now(), ev: null };
+    var g = { id: newId(), bot: bot, me: me, moves: "", end: null, created: Date.now(), updated: Date.now(), ev: null, takebacks: 0, hints: 0 };
     store.games[g.id] = g;
     save();
     botTurnIfDue(g.id);
@@ -337,13 +406,18 @@
     if (s.over) return fail("match/not-active", "This game is over.");
     if (version !== versionOf(g)) return fail("match/version-conflict", "The game moved on.");
     if (s.turnSeat !== 0) return fail("match/not-your-turn", "It isn’t your move.");
-    if (!mv || mv.type !== "move") return fail("match/illegal-move", "There is no draw offer to accept.");
+    if (mv && mv.type === "acceptDraw") {
+      if (s.drawOffer !== 1) return fail("match/illegal-move", "There is no draw offer to accept.");
+      g.end = { type: "agreed", seat: 0 };
+      commit(uuid, true);
+      return Promise.resolve(view(g));
+    }
+    if (!mv || mv.type !== "move") return fail("match/illegal-move", "That move is not legal.");
     var legal = Rules.find(s.pos, mv.from, mv.to, mv.promo || null);
     if (!legal) return fail("match/illegal-move", "That move is not legal.");
     var token = mv.from + mv.to + (legal.promo || "") + (mv.offerDraw ? "=" : "");
     g.moves = (g.moves ? g.moves + " " : "") + token;
-    g.updated = Date.now();
-    save();
+    commit(uuid, true);
     botTurnIfDue(uuid);
     return Promise.resolve(view(g));
   }
@@ -353,10 +427,58 @@
     if (!g) return fail("match/not-found", "That game is gone.");
     if (!build(g).over) {
       g.end = { type: "resign", seat: 0 };
-      g.updated = Date.now();
-      save();
+      commit(uuid, true);
     }
     return Promise.resolve(view(g));
+  }
+
+  // Take back the player's last move, and the bot's reply to it if it has
+  // made one, so it is the player's move again in the position before.
+  // While the bot is still thinking, its answer is thrown away when it comes.
+  function takeback(uuid) {
+    var g = store.games[uuid];
+    if (!g) return fail("match/not-found", "That game is gone.");
+    if (build(g).over) return fail("match/not-active", "This game is over.");
+    var list = g.moves ? g.moves.split(" ") : [];
+    var mine = g.me === "w" ? 0 : 1;   // the parity of the player's plies
+    var last = -1;
+    for (var i = list.length - 1; i >= 0; i--) if (i % 2 === mine) { last = i; break; }
+    if (last === -1) return fail("match/illegal-move", "There’s no move of yours to take back.");
+    g.moves = list.slice(0, last).join(" ");
+    g.takebacks = (g.takebacks || 0) + 1;
+    g.ev = null;
+    if (typeof g.botOffer === "number" && g.botOffer >= last) g.botOffer = null;
+    commit(uuid, true);
+    botTurnIfDue(uuid);
+    return Promise.resolve(view(g));
+  }
+
+  // The engine's best move for the player: { from: "g1", to: "f3", promo }
+  // or null when the engine can't say.
+  function hint(uuid) {
+    var g = store.games[uuid];
+    if (!g) return fail("match/not-found", "That game is gone.");
+    var s = build(g);
+    if (s.over || s.turnSeat !== 0) return fail("match/not-your-turn", "It isn’t your move.");
+    return Engine.hint(s.pos, s.halfmove, s.fullmove).then(function (best) {
+      if (!best || !best.move) return null;
+      var now = store.games[uuid];
+      if (now && now.moves === g.moves) {
+        now.hints = (now.hints || 0) + 1;
+        save();
+      }
+      return { from: best.move.slice(0, 2), to: best.move.slice(2, 4), promo: best.move.charAt(4) || null };
+    });
+  }
+
+  // Wins, losses and draws against each level: { beginner: { w, l, d }, … }.
+  function record() {
+    var out = {};
+    LEVELS.forEach(function (l) {
+      var r = store.record[l.id] || {};
+      out[l.id] = { w: r.w || 0, l: r.l || 0, d: r.d || 0 };
+    });
+    return out;
   }
 
   // Calls `cb(view)` whenever the game changes. Returns the unsubscribe.
@@ -396,6 +518,8 @@
 
   var api = {
     LEVELS: LEVELS, levelById: levelById, roll: roll, init: init, isLocal: isLocal, create: create, rematch: rematch,
+    takeback: takeback, hint: hint, record: record,
+    loaded: function () { return store.loaded || Promise.resolve(); },
     wrap: wrap, warm: function () { return Engine.warm(); },
     // `fn(uuid)` after the computer moves in any game, for the list.
     onChange: function (fn) { changed.push(fn); },

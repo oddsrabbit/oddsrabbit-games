@@ -12,7 +12,7 @@ npm test
 npm run build                        # → dist/word-battle/
 ```
 
-Upload `dist/word-battle/` to `apps.oddsrabbit.com/word-battle/`. The copies of the SDK and leaderboard files in `dist/` are only for running it locally. The live ones are deployed from the root build. Then bump the cache version as usual (see the root `build.config.mjs`).
+The deploy workflow ships `dist/word-battle/` to `apps.oddsrabbit.com/word-battle/` (see the root README's *Deploying*). The copies of the SDK and leaderboard files in `dist/` are only for running it locally.
 
 To run it without the platform, `dev/harness.html` fakes the host and the match server in memory (two games to start; the opponents pass). Serve the repo root with any static server after building, e.g. `python3 -m http.server 8765`, and open `http://localhost:8765/dev/harness.html`. Its params are at the top of the file.
 

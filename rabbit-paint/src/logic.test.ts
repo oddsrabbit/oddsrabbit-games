@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { postThreshold } from './autopost';
 import { dailySlug, dayIndex, msUntilNextDay, parseCatalog } from './catalog';
 import { cssFor, fillName, gradient, hexToHsv, hsvToHex, packColoring, parseFill, pattern, solid, unpackColoring } from './fills';
 
@@ -51,6 +52,13 @@ test('hsv conversions agree', () => {
     const [h, s, v] = hexToHsv(hex);
     assert.equal(hsvToHex(h, s, v), hex);
   }
+});
+
+test('a page goes in the gallery at 60% of its areas, and never at zero', () => {
+  assert.equal(postThreshold(100), 60);
+  assert.equal(postThreshold(7), 5);
+  assert.equal(postThreshold(1), 1);
+  assert.equal(postThreshold(0), 1);
 });
 
 const catalog = parseCatalog({

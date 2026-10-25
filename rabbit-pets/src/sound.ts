@@ -10,7 +10,8 @@ export type SoundName =
   | 'feed' | 'pet' | 'clean' | 'nap' | 'wake'
   | 'gift' | 'clover' | 'place' | 'flip' | 'nope'
   | 'play' | 'harvest' | 'find' | 'bake' | 'ding'
-  | 'drumroll' | 'fanfare' | 'puff';
+  | 'drumroll' | 'fanfare' | 'puff'
+  | 'scrub' | 'boop' | 'thump';
 
 type Ctx = AudioContext;
 const AudioCtor: (new () => Ctx) | undefined =
@@ -180,6 +181,18 @@ export function play(name: SoundName): void {
       [784, 988, 1175, 1568].forEach((f, i) => tone(c, { type: 'triangle', from: f, at: i * 0.08, dur: 0.22, vol: 0.24 }));
       tone(c, { type: 'triangle', from: 1568, at: 0.32, dur: 0.6, vol: 0.2, vibrato: 12 });
       [2093, 2637, 3136].forEach((f, i) => tone(c, { type: 'sine', from: f, at: 0.4 + i * 0.07, dur: 0.35, vol: 0.08 }));
+      break;
+    case 'scrub': // the sponge going round: a soft squeak and fizz
+      noise(c, { dur: 0.12, filter: 'bandpass', from: 3000, to: 4200, q: 2, vol: 0.12 });
+      tone(c, { from: 1300 + Math.random() * 300, to: 1700, at: 0.02, dur: 0.05, vol: 0.06 });
+      break;
+    case 'boop': // a tiny sneeze: a breath in, then "tchoo"
+      tone(c, { from: 700, to: 1000, dur: 0.14, vol: 0.12 });
+      noise(c, { at: 0.18, dur: 0.12, filter: 'highpass', from: 2500, to: 1200, vol: 0.3 });
+      break;
+    case 'thump': // a back foot on the floor
+      tone(c, { type: 'triangle', from: 140, to: 70, dur: 0.12, vol: 0.5 });
+      noise(c, { dur: 0.05, filter: 'lowpass', from: 600, vol: 0.2 });
       break;
     case 'puff': // the box pops open on a miss: soft, not sad
       noise(c, { dur: 0.2, filter: 'lowpass', from: 1800, to: 400, vol: 0.25 });

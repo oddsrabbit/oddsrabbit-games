@@ -6,12 +6,13 @@ import { roll } from './rng';
 import { bondLevel, earn } from './economy';
 import { COLLECTIBLES, EVENT_SHARE, RARE_SHARE, type Collectible } from './collectibles';
 import type { PetState } from './sim';
-import { MEADOW, CAN_SPEED, DAY_MS, HOUR_MS, BERRY_HARVEST, SOIL, SPROUT_CLOVER } from './tuning';
+import { MEADOW, CAN_SPEED, CLOVER, DAY_MS, HOUR_MS, BERRY_HARVEST, SOIL, SPROUT_CLOVER, TENDING } from './tuning';
 
 // ---------------------------------------------------------------- garden
 
 export type CropId = 'berry' | 'golden' | 'sprout';
-export interface Plot { crop: CropId; plantedAtMs: number; readyAtMs: number }
+/** `watered`, `weeded`: tended by hand this planting (TENDING). */
+export interface Plot { crop: CropId; plantedAtMs: number; readyAtMs: number; watered?: boolean; weeded?: boolean }
 
 export const CROPS: Record<CropId, { name: string; seedCost: number; growMs: number; yields: string }> = {
   berry: { name: 'Strawberries', seedCost: 0, growMs: 8 * HOUR_MS, yields: `${BERRY_HARVEST} strawberries` },
@@ -120,7 +121,12 @@ export function plant(s: PetState, index: number, crop: CropId, nowMs: number): 
   return { ok: true, state };
 }
 
-export function harvest(s: PetState, index: number, nowMs: number): { ok: true; state: PetState; crop: CropId; clover: number } | { ok: false; reason: 'empty' | 'growing' } {
+/**
+ * Picking a bed. `dug`: she was helping and dug up a find for the shelf
+ * (TENDING.digChance, seeded on the planting), paid like any other find and
+ * counted in `clover`.
+ */
+export function harvest(s: PetState, index: number, nowMs: number): { ok: true; state: PetState; crop: CropId; clover: number; dug?: Collectible } | { ok: false; reason: 'empty' | 'growing' } {
   const p = plots(s)[index];
   if (!p) return { ok: false, reason: 'empty' };
   if (p.readyAtMs > nowMs) return { ok: false, reason: 'growing' };
@@ -128,12 +134,65 @@ export function harvest(s: PetState, index: number, nowMs: number): { ok: true; 
   const pantry = { berries: 0, golden: 0, ...(state.pantry ?? {}) };
   if (p.crop === 'berry') pantry.berries += cropYield(s, 'berry');
   if (p.crop === 'golden') pantry.golden += cropYield(s, 'golden');
-  const clover = p.crop === 'sprout' ? earn(state, 'harvest', sproutClover(state)) : 0;
+  let clover = p.crop === 'sprout' ? earn(state, 'harvest', sproutClover(state)) : 0;
+  const seed = plantingSeed(p, index);
+  const dug = roll(s.petId, seed, 'dig') < TENDING.digChance ? pickFind(s.petId, seed) : undefined;
+  if (dug) {
+    clover += earn(state, 'find', dug.rarity === 'rare' ? CLOVER.rareFind : CLOVER.pebble);
+    state.collection = { ...(state.collection ?? {}), [dug.id]: (state.collection?.[dug.id] ?? 0) + 1 };
+  }
   state.pantry = pantry;
   const next = plots(state);
   next[index] = null;
   state.garden = { plots: next };
-  return { ok: true, state, crop: p.crop, clover };
+  return { ok: true, state, crop: p.crop, clover, ...(dug ? { dug } : {}) };
+}
+
+/**
+ * A planting's own number for seeded rolls: its bed and when it went in,
+ * negative so it never meets a step index (the finds she makes at home).
+ */
+const plantingSeed = (p: Plot, index: number): number => -(Math.floor(p.plantedAtMs / 1000) * 8 + index + 1);
+
+/** Growing and not watered yet this planting. */
+export function thirsty(p: Plot | null, nowMs: number): boolean {
+  return !!p && !p.watered && p.readyAtMs > nowMs;
+}
+
+/** Water a growing bed by hand: once a planting, it takes TENDING.water of its growing time off. */
+export function water(s: PetState, index: number, nowMs: number): { ok: true; state: PetState; savedMs: number } | { ok: false; reason: 'empty' | 'watered' | 'ready' } {
+  const p = plots(s)[index];
+  if (!p) return { ok: false, reason: 'empty' };
+  if (p.readyAtMs <= nowMs) return { ok: false, reason: 'ready' };
+  if (p.watered) return { ok: false, reason: 'watered' };
+  const state = clone(s);
+  const next = plots(state);
+  const savedMs = Math.min(p.readyAtMs - nowMs, Math.round((p.readyAtMs - p.plantedAtMs) * TENDING.water));
+  next[index] = { ...p, watered: true, readyAtMs: p.readyAtMs - savedMs };
+  state.garden = { plots: next };
+  return { ok: true, state, savedMs };
+}
+
+/**
+ * Whether a bed has a weed in it now: some plantings sprout one part of the
+ * way through, seeded on the planting, until it's pulled or the bed is picked.
+ */
+export function weedy(s: PetState, index: number, nowMs: number): boolean {
+  const p = plots(s)[index];
+  if (!p || p.weeded) return false;
+  if (roll(s.petId, plantingSeed(p, index), 'weed') >= TENDING.weedChance) return false;
+  return nowMs >= p.plantedAtMs + (p.readyAtMs - p.plantedAtMs) * TENDING.weedAt;
+}
+
+/** Pull a bed's weed: a little clover (flat), and (`munch`: she's in the garden, awake) she eats the dandelion. */
+export function pullWeed(s: PetState, index: number, nowMs: number, munch = true): { ok: true; state: PetState; clover: number } | { ok: false; reason: 'none' } {
+  if (!weedy(s, index, nowMs)) return { ok: false, reason: 'none' };
+  const state = clone(s);
+  const next = plots(state);
+  next[index] = { ...next[index]!, weeded: true };
+  state.garden = { plots: next };
+  if (munch) state.needs = { ...state.needs, hunger: Math.min(100, state.needs.hunger + TENDING.weedFood) };
+  return { ok: true, state, clover: earn(state, 'harvest', TENDING.weedClover) };
 }
 
 /** Growth stage for drawing: 0 seed, 1 sprout, 2 growing, 3 ready. */

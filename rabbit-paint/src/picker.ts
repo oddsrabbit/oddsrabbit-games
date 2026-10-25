@@ -1,5 +1,7 @@
 // The fill picker: a card over the painting toolbar. Solid, gradient or
-// pattern; a colour square and hue bar; basic swatches; favourites.
+// pattern; lighter and darker shades of the colour; a colour wheel (hue round
+// it, paler toward the middle) and a brightness bar; basic swatches;
+// favourites.
 // Every change applies at once (the next tap paints with it).
 
 import { cssFor, fillName, GRADIENTS, hexToHsv, hsvToHex, makeFill, parseFill, PATTERNS, type Fill, type FillKind, type ParsedFill } from './fills';
@@ -63,23 +65,35 @@ export function openPicker(host: HTMLElement, o: PickerOptions): { close(): void
     return b;
   });
 
-  // Colour square (saturation × value) and hue bar.
-  const sv = el('div', 'sv');
-  sv.setAttribute('role', 'slider');
-  sv.setAttribute('aria-label', 'Saturation and brightness');
-  const svKnob = el('div', 'knob');
-  sv.append(svKnob);
-  const hue = el('div', 'hue');
-  hue.setAttribute('role', 'slider');
-  hue.setAttribute('aria-label', 'Hue');
-  const hueKnob = el('div', 'hue-knob');
-  hue.append(hueKnob);
+  // The colour of the moment in lighter and darker steps: shading in one tap.
+  const shades = el('div', 'swatch-row shade-row');
+
+  // Colour wheel (hue round it, red at the top; saturation out from the
+  // middle) and a brightness bar beside it, lightest at the top.
+  const wheel = el('div', 'wheel');
+  wheel.setAttribute('role', 'slider');
+  wheel.setAttribute('aria-label', 'Colour');
+  wheel.append(wheelCanvas(), el('div', 'wheel-dim'));
+  const wheelKnob = el('div', 'knob');
+  wheel.append(wheelKnob);
+  const bright = el('div', 'bright');
+  bright.setAttribute('role', 'slider');
+  bright.setAttribute('aria-label', 'Brightness');
+  const brightKnob = el('div', 'hue-knob');
+  bright.append(brightKnob);
   const mixer = el('div', 'mixer');
-  mixer.append(sv, hue);
+  mixer.append(wheel, bright);
   let hsv = hexToHsv(activeHex());
 
-  drag(sv, (x, y) => { hsv = [hsv[0], x, 1 - y]; setActive(hsvToHex(...hsv)); });
-  drag(hue, (_x, y) => { hsv = [Math.min(359.9, y * 360), hsv[1] || 0.6, hsv[2] || 0.85]; setActive(hsvToHex(...hsv)); });
+  drag(wheel, (x, y) => {
+    const dx = x - 0.5;
+    const dy = y - 0.5;
+    const h = ((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360;
+    // Off black, a pick on the wheel should show: bring the brightness up.
+    hsv = [h, Math.min(1, Math.hypot(dx, dy) * 2), hsv[2] < 0.2 ? 0.85 : hsv[2]];
+    setActive(hsvToHex(...hsv));
+  });
+  drag(bright, (_x, y) => { hsv = [hsv[0], hsv[1], 1 - y]; setActive(hsvToHex(...hsv)); });
 
   const basics = el('div', 'swatch-row');
   for (const hex of BASICS) {
@@ -98,7 +112,7 @@ export function openPicker(host: HTMLElement, o: PickerOptions): { close(): void
     button('pill dark', 'Done', () => close()),
   );
 
-  card.append(tabs, preview, styles, stops, mixer, basics, favLabel, favRow, foot);
+  card.append(tabs, preview, shades, styles, stops, mixer, basics, favLabel, favRow, foot);
   host.append(card);
   requestAnimationFrame(() => card.classList.add('open'));
 
@@ -150,11 +164,23 @@ export function openPicker(host: HTMLElement, o: PickerOptions): { close(): void
     }
 
     const [h, s, v] = hsv;
-    sv.style.background = `linear-gradient(to top, #000, rgba(0,0,0,0)), linear-gradient(to right, #fff, hsl(${h}, 100%, 50%))`;
-    svKnob.style.left = `${s * 100}%`;
-    svKnob.style.top = `${(1 - v) * 100}%`;
-    svKnob.style.background = activeHex();
-    hueKnob.style.top = `${(h / 360) * 100}%`;
+    const a = (h * Math.PI) / 180;
+    wheel.style.setProperty('--dim', String(1 - v));
+    wheelKnob.style.left = `${50 + 50 * s * Math.sin(a)}%`;
+    wheelKnob.style.top = `${50 - 50 * s * Math.cos(a)}%`;
+    wheelKnob.style.background = activeHex();
+    bright.style.background = `linear-gradient(to bottom, ${hsvToHex(h, s, 1)}, #000)`;
+    brightKnob.style.top = `${(1 - v) * 100}%`;
+    wheel.setAttribute('aria-valuetext', fillName(activeHex()));
+    bright.setAttribute('aria-valuenow', String(Math.round(v * 100)));
+
+    shades.replaceChildren();
+    for (const hex of shadesOf(activeHex())) {
+      const b = button('swatch', '', () => { hsv = hexToHsv(hex); setActive(hex); }, `Use ${fillName(hex)}`);
+      b.style.background = hex;
+      b.setAttribute('aria-pressed', String(hex === activeHex()));
+      shades.append(b);
+    }
     for (const b of basics.children) (b as HTMLElement).setAttribute('aria-pressed', String((b as HTMLElement).dataset.hex === activeHex()));
 
     favRow.replaceChildren();
@@ -185,6 +211,49 @@ export function openPicker(host: HTMLElement, o: PickerOptions): { close(): void
 
   render();
   return { close };
+}
+
+/** Mixes `hex` toward white (t > 0) or black (t < 0) by |t|. */
+function mix(hex: string, t: number): string {
+  const to = t > 0 ? 255 : 0;
+  const k = Math.abs(t);
+  return '#' + [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16);
+    return Math.round(c + (to - c) * k).toString(16).padStart(2, '0');
+  }).join('');
+}
+
+/** Lighter steps, the colour itself, darker steps. */
+function shadesOf(hex: string): string[] {
+  return [0.75, 0.5, 0.25, 0, -0.25, -0.5, -0.7].map((t) => (t ? mix(hex, t) : hex));
+}
+
+/** The wheel at full brightness, drawn once; the brightness bar darkens it with an overlay. */
+function wheelCanvas(): HTMLCanvasElement {
+  const size = 320;
+  const c = el('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d')!;
+  const img = ctx.createImageData(size, size);
+  const r = size / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x + 0.5 - r;
+      const dy = y + 0.5 - r;
+      const d = Math.hypot(dx, dy) / r;
+      if (d > 1) continue;
+      const hex = hsvToHex(((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360, d, 1);
+      const p = (y * size + x) * 4;
+      img.data[p] = parseInt(hex.slice(1, 3), 16);
+      img.data[p + 1] = parseInt(hex.slice(3, 5), 16);
+      img.data[p + 2] = parseInt(hex.slice(5, 7), 16);
+      // Soft edge: a pixel's worth of fade.
+      img.data[p + 3] = Math.round(255 * Math.min(1, (1 - d) * r));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
 
 /** Pointer drag reporting 0..1 coordinates within `target`. */

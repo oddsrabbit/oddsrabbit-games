@@ -47,6 +47,7 @@
   --sq-select: rgb(43 122 82 / 0.5);
   --sq-dot: rgb(28 30 38 / 0.26);
   --sq-check: #e0452a;
+  --sq-hint: rgb(43 122 82 / 0.85);
 
   /* Pieces (pieces.js). Cream and ink in both themes: the board under
      them does not change much either, so neither do they. */
@@ -82,6 +83,7 @@ html[data-theme="dark"] {
   --sq-last: rgb(230 186 60 / 0.45);
   --sq-select: rgb(67 169 122 / 0.5);
   --sq-dot: rgb(16 17 22 / 0.4);
+  --sq-hint: rgb(67 169 122 / 0.9);
 }
 
    application.js sets data-overlay while the dialog is open. */
@@ -650,6 +652,10 @@ button { font: inherit; color: inherit; }
    reads as a heading and the bag as a chip. */
 .turn-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 24px; }
 .turn-main { font-weight: 700; font-size: 15px; }
+/* Back through the moves, pushed to the strip's far end. */
+.step-nav { display: flex; gap: 6px; margin-left: auto; }
+.step-nav .icon-button { width: 30px; height: 28px; font-size: 18px; }
+.step-nav .icon-button:disabled, .browse-bar .icon-button:disabled { opacity: 0.35; cursor: default; }
 .turn-main.is-mine { color: var(--turn); }
 .chip {
   border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600;
@@ -750,6 +756,9 @@ button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
   box-shadow: inset 0 0 0 calc(var(--sq, 40px) * 0.085) var(--sq-dot);
 }
 .cb-sq.is-hover { box-shadow: inset 0 0 0 3px rgb(255 255 255 / 0.75); }
+/* The engine's hint: a ring on the square to move to. */
+.cb-sq.is-hint { box-shadow: inset 0 0 0 calc(var(--sq, 40px) * 0.08) var(--sq-hint); }
+.chess-board.no-coords .cb-rank, .chess-board.no-coords .cb-file { display: none; }
 .cb-sq:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; z-index: 1; }
 .cb-rank, .cb-file {
   position: absolute; pointer-events: none; line-height: 1;
@@ -844,6 +853,43 @@ button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
 .sheet-num { color: var(--muted); }
 .sheet-san { font-weight: 600; }
 .sheet-san.is-last { color: var(--accent); }
+/* Each move opens its position on the board. */
+button.sheet-san {
+  justify-self: start; padding: 0 4px; margin: 0 -4px; border: 0; border-radius: 6px;
+  background: none; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-align: left;
+}
+button.sheet-san:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+button.sheet-san.is-last { color: var(--accent); }
+.mark { margin-left: 1px; font-weight: 800; }
+.mark.is-inaccuracy { color: var(--warn-ink); }
+.mark.is-mistake { color: var(--down-ink); }
+.mark.is-blunder { color: var(--danger); }
+
+/* ---- the engine's review */
+.review-progress { margin: 4px 0 10px; }
+.review-meter { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 8px; }
+.review-meter span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s; }
+.review-sides { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.review-side {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline;
+  padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--bg) 60%, var(--card));
+}
+.review-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.review-acc { font-family: var(--display); font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+.review-counts { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.review-moments { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 4px; }
+.review-moment {
+  display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; font-size: 14px;
+}
+.review-moment .muted { font-size: 13px; }
+.dialog h3.review-head { margin: 12px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+
+/* ---- the computer levels you have beaten */
+.cpu-progress { margin: 0 0 8px; }
+.cpu-progress[hidden] { display: none; }
+.cpu-level-record { font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cpu-level-record.is-beaten { color: var(--turn); }
 .sheet-offer { color: var(--muted); font-weight: 400; }
 .sheet-note { padding: 8px 6px; font-size: 14px; color: var(--muted); }
 
@@ -882,9 +928,14 @@ button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
    height, so the board above does not jump as one replaces another. */
 .move-hint, .move-bar, .wait-bar, .review-bar { min-height: 56px; box-sizing: border-box; }
 .move-hint {
-  margin: 0; display: flex; align-items: center; justify-content: center;
+  margin: 0; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
   font-size: 14px; text-align: center; color: var(--muted);
 }
+.move-hint[hidden] { display: none; }
+.assist { display: flex; gap: 6px; }
+.assist[hidden] { display: none; }
+.assist .chip { padding: 6px 11px; font-size: 13px; color: var(--ink); }
+.assist .chip:disabled { opacity: 0.45; cursor: default; }
 .move-bar { display: flex; align-items: center; gap: 8px; }
 .move-bar .undo-button { flex: 0 0 auto; padding: 13px 14px; font-size: 15px; }
 .move-bar .send-button { flex: 1 1 auto; min-width: 0; padding: 14px; font-size: 17px; white-space: nowrap; }
@@ -898,6 +949,16 @@ button.chip { font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); font-size: 14px; color: var(--muted);
 }
 .wait-text, .review-text { flex: 1; min-width: 0; }
+.wait-takeback[hidden] { display: none; }
+/* An earlier position on the board: where it is, and the way back. */
+.browse-bar {
+  display: flex; align-items: center; gap: 8px; min-height: 56px; box-sizing: border-box;
+  padding: 8px 10px; border-radius: 14px; border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--card)); font-size: 14px;
+}
+.browse-bar[hidden] { display: none; }
+.browse-text { flex: 1; min-width: 0; text-align: center; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.browse-bar .browse-live { flex: 0 0 auto; }
 .review-text { color: var(--ink); font-weight: 600; }
 .review-bar .result-button { flex: 0 0 auto; }
 

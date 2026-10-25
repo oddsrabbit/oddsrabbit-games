@@ -63,6 +63,11 @@ const GRIDS: Record<string, string[]> = {
   droplet: ['...k...', '..kbk..', '.kbbBk.', 'kbwbbBk', 'kbbbbBk', '.kBBBk.', '..kkk..'],
   moon: ['..kkk..', '.kyyk..', 'kyyk...', 'kyyk...', 'kyyk...', '.kyyk..', '..kkk..'],
   zz: ['kkkk', '..k.', '.k..', 'kkkk'],
+  // washing her (main.ts scrubbing): soap bubbles off her coat, and the sponge you rub her with
+  bubble: ['.bb.', 'bwBb', 'bBBb', '.bb.'],
+  sponge: ['.kkkkkkk.', 'kyyYyyyYk', 'kyYyyYyyk', 'kyyyYyyYk', 'kYYYYYYYk', '.kkkkkkk.'],
+  // a sneeze, or a thump's dust
+  puff: ['.CC.', 'CwwC', '.CC.'],
 
   // collectibles (the pebble is above)
   feather: ['.....kk', '....kbk', '...kbBk', '..kbBk.', '.kbBk..', '.kBk...', 'k.k....'],

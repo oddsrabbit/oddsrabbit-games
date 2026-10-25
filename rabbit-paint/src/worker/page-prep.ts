@@ -14,6 +14,8 @@
 //   A photo has no flat colours, so that alone gives hundreds of specks along
 //   every shade: the areas are found on a small, softened copy and the small
 //   ones merged into their closest-coloured neighbour, down to a set number.
+//   Long, narrow areas (a drawn outline, a soft edge, a shadow) are handed to
+//   the areas either side, and each border drawn as one smooth, even line.
 
 import { dilate, DEFAULTS, prepare, type PrepOptions } from '../../tools/lib/regions';
 import { inkSvg } from '../../tools/lib/trace';
@@ -297,12 +299,20 @@ export function simplifyAreas(rgb: Uint8Array, groups: Uint8Array, w: number, h:
   return { ids, count };
 }
 
-/** An area under this many work pixels across on average is a sliver, not a shape. */
-const THIN = 3.5;
-/** Smoothing passes over each border, in work pixels: irons out the copy's steps. */
-const BORDER_SMOOTH = 8;
+/**
+ * A long, narrow area (perimeter² over 4π·area above LONG; a disc is 1) is a
+ * sliver, not a shape, under THIN work pixels across on average; a dark one,
+ * a drawn line, under DRAWN_SHARE of the copy's long side.
+ */
+const LONG = 2.5;
+const THIN = 7;
+const DRAWN_SHARE = 1 / 40;
+const LINE_DARK = 90;
+/** Smoothing passes along each border (a blur about √(passes/2) work pixels wide): irons out the copy's steps and a photo's wiggles. */
+const BORDER_SMOOTH = 48;
+
 /** Line width, as a share of the picture's long side. */
-const LINE_SHARE = 1 / 400;
+const LINE_SHARE = 1 / 200;
 
 /**
  * Hands each sliver's pixels to the areas around it, growing them in step, so
@@ -310,39 +320,64 @@ const LINE_SHARE = 1 / 400;
  * shape, a shadow: each is one border then, where its two sides would be two
  * lines close together.
  */
-function dissolveSlivers(ids: Int32Array, count: number, w: number): Int32Array {
+function dissolveSlivers(rgb: Uint8Array, ids: Int32Array, count: number, w: number): Int32Array {
   const n = ids.length;
   const size = new Float64Array(count);
   const perimeter = new Float64Array(count);
+  const lum = new Float64Array(count);
   for (let p = 0; p < n; p++) {
     const a = ids[p];
     size[a]++;
+    lum[a] += 0.299 * rgb[p * 3] + 0.587 * rgb[p * 3 + 1] + 0.114 * rgb[p * 3 + 2];
     if (p % w < w - 1 && ids[p + 1] !== a) { perimeter[a]++; perimeter[ids[p + 1]]++; }
     if (p + w < n && ids[p + w] !== a) { perimeter[a]++; perimeter[ids[p + w]]++; }
   }
+  const drawn = Math.max(THIN, (Math.max(w, n / w) * DRAWN_SHARE));
+  const sliver = new Uint8Array(count);
+  for (let a = 0; a < count; a++) {
+    const across = (2 * size[a]) / perimeter[a];
+    const long = perimeter[a] ** 2 / (4 * Math.PI * size[a]) > LONG;
+    sliver[a] = perimeter[a] && long && (across < THIN || (lum[a] / size[a] < LINE_DARK && across < drawn)) ? 1 : 0;
+  }
+  // Each sliver pixel goes to the area of the nearest pixel outside any
+  // sliver, by straight-line distance (two sweeps passing nearest points on,
+  // 8SSEDT), so the sides meet evenly down the middle at any angle.
   const out = new Int32Array(ids);
-  let queue: number[] = [];
-  for (let p = 0; p < n; p++) {
-    const a = ids[p];
-    if (perimeter[a] && (2 * size[a]) / perimeter[a] < THIN) out[p] = -1;
-  }
-  for (let p = 0; p < n; p++) {
-    if (out[p] < 0) continue;
-    const x = p % w;
-    if ((x > 0 && out[p - 1] < 0) || (x < w - 1 && out[p + 1] < 0) || (p >= w && out[p - w] < 0) || (p + w < n && out[p + w] < 0)) queue.push(p);
-  }
-  while (queue.length) {
-    const next: number[] = [];
-    for (const p of queue) {
-      const x = p % w;
-      const grow = (q: number) => { if (out[q] < 0) { out[q] = out[p]; next.push(q); } };
-      if (x > 0) grow(p - 1);
-      if (x < w - 1) grow(p + 1);
-      if (p >= w) grow(p - w);
-      if (p + w < n) grow(p + w);
+  const near = new Int32Array(n).fill(-1);
+  for (let p = 0; p < n; p++) if (!sliver[ids[p]]) near[p] = p;
+  const offer = (p: number, q: number) => {
+    const s = near[q];
+    if (s < 0) return;
+    const d = (p % w - s % w) ** 2 + (Math.floor(p / w) - Math.floor(s / w)) ** 2;
+    const c = near[p];
+    if (c < 0 || d < (p % w - c % w) ** 2 + (Math.floor(p / w) - Math.floor(c / w)) ** 2) near[p] = s;
+  };
+  const h = n / w;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (x > 0) offer(p, p - 1);
+      if (y > 0) {
+        offer(p, p - w);
+        if (x > 0) offer(p, p - w - 1);
+        if (x < w - 1) offer(p, p - w + 1);
+      }
     }
-    queue = next;
+    for (let x = w - 2; x >= 0; x--) offer(y * w + x, y * w + x + 1);
   }
+  for (let y = h - 1; y >= 0; y--) {
+    for (let x = w - 1; x >= 0; x--) {
+      const p = y * w + x;
+      if (x < w - 1) offer(p, p + 1);
+      if (y < h - 1) {
+        offer(p, p + w);
+        if (x < w - 1) offer(p, p + w + 1);
+        if (x > 0) offer(p, p + w - 1);
+      }
+    }
+    for (let x = 1; x < w; x++) offer(y * w + x, y * w + x - 1);
+  }
+  for (let p = 0; p < n; p++) out[p] = near[p] >= 0 ? ids[near[p]] : -1;
   // A picture that is all slivers keeps them.
   for (let p = 0; p < n; p++) if (out[p] < 0) out[p] = ids[p];
   return out;
@@ -405,9 +440,10 @@ function borders(ids: Int32Array, w: number, h: number): [number, number][][] {
 }
 
 /**
- * Smooths a border: corners become the midpoints between them, then each
- * point is averaged with its neighbours. The ends stay put so borders still
- * meet; a loop has none.
+ * Smooths a border: its corners become points a work pixel apart, each then
+ * averaged with its neighbours, pass by pass, which rounds every bend by about
+ * the same amount. The ends stay put so borders still meet; a loop has none,
+ * and a small one is smoothed less so it doesn't shrink.
  */
 function smoothBorder(line: [number, number][]): [number, number][] {
   const loop = line.length > 2 && line[0][0] === line[line.length - 1][0] && line[0][1] === line[line.length - 1][1];
@@ -416,7 +452,8 @@ function smoothBorder(line: [number, number][]): [number, number][] {
   for (let i = 0; i + 1 < line.length; i++) pts.push([(line[i][0] + line[i + 1][0]) / 2, (line[i][1] + line[i + 1][1]) / 2]);
   if (!loop) pts.push(line[line.length - 1]);
   const n = pts.length;
-  for (let k = 0; k < BORDER_SMOOTH; k++) {
+  const passes = loop ? Math.min(BORDER_SMOOTH, Math.round(n / 6)) : BORDER_SMOOTH;
+  for (let k = 0; k < passes; k++) {
     pts = pts.map((p, i) => {
       if (!loop && (i === 0 || i === n - 1)) return p;
       const a = pts[(i + n - 1) % n];
@@ -471,7 +508,7 @@ export function outlineMask(rgb: Uint8Array, w: number, h: number, gaps: Gaps): 
   const r = Math.max(1, (side * LINE_SHARE) / 2);
   const sx = w / sw;
   const sy = h / sh;
-  for (const line of borders(dissolveSlivers(ids, count, sw), sw, sh)) {
+  for (const line of borders(dissolveSlivers(small, ids, count, sw), sw, sh)) {
     const pts = smoothBorder(line);
     for (let i = 0; i + 1 < pts.length; i++) stamp(ink, w, h, pts[i][0] * sx, pts[i][1] * sy, pts[i + 1][0] * sx, pts[i + 1][1] * sy, r);
   }

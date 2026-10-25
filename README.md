@@ -46,12 +46,18 @@ docs/           Deploy cache policy, header guidelines, proposals
 scripts/        sync-public-sdk.mjs
 ```
 
-`npm install && npm run build` produces `dist/`, which is what gets uploaded to
-apps.oddsrabbit.com; `npm test` runs the unit tests. `rabbit-pets/`,
-`word-battle/`, `chess/`, `word-rush/` and `rabbit-paint/` have their own `package.json`
-and build: build the root first, since they read its `dist/` and `src/`, then
-see each game's README. After an upload, bump the
-cache version, or clients keep the build they already hold: see
+`npm install && npm run build` produces `dist/`; `npm test` runs the unit
+tests. `rabbit-pets/`, `word-battle/`, `chess/`, `word-rush/` and
+`rabbit-paint/` have their own `package.json` and build: build the root first,
+since they read its `dist/` and `src/`, then see each game's README.
+
+**Deploying:** run *Deploy apps.oddsrabbit.com* from the Actions tab
+([`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)). It runs
+`npm run release` (every test and build, into one `release/` folder holding
+exactly what the server gets, plus `version.json`), uploads it over SSH,
+bumps the cache version through the WordPress site and checks every page
+serves the new build. To roll back, run it on an earlier commit. `npm run
+release` locally shows what would go up. Caching background:
 [`docs/deploy-cache-policy.md`](./docs/deploy-cache-policy.md).
 
 ## License

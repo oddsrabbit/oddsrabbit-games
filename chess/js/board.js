@@ -34,14 +34,16 @@
     this.opts = opts || {};
     this.board = null;
     this.orientation = "w";
-    this.marks = { last: null, check: null, selected: null, targets: [] };
+    this.marks = { last: null, check: null, selected: null, targets: [], hint: null };
     this.cursor = null;
     this.drag = null;
     this.size = 0;
     this.reduceMotion = !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
     this.el = el("div", "chess-board");
-    this.el.setAttribute("role", "grid");
+    // A group of buttons, not an ARIA grid: a grid needs row and cell
+    // structure, and the arrow keys here already do what a grid's would.
+    this.el.setAttribute("role", "group");
     this.el.setAttribute("aria-label", "Chess board");
     this.squaresEl = el("div", "cb-squares");
     this.piecesEl = el("div", "cb-pieces");
@@ -87,6 +89,11 @@
     }
   };
 
+  // Coordinates on the edge squares, or none.
+  ChessBoard.prototype.setCoords = function (on) {
+    this.el.classList.toggle("no-coords", !on);
+  };
+
   ChessBoard.prototype.setOrientation = function (color) {
     if (color === this.orientation) return;
     this.orientation = color;
@@ -97,7 +104,7 @@
   /**
    * What to show. `board` is the 64-char board string; `marks` is
    * { last: {from, to} | null, check: sq | null, selected: sq | null,
-   *   targets: [sq] }; `slide` is { from, to } to animate the piece now on
+   *   targets: [sq], hint: sq | null }; `slide` is { from, to } to animate the piece now on
    * `to` in from `from` (and the rook, for a castle).
    */
   ChessBoard.prototype.setPosition = function (board, marks, slide) {
@@ -106,7 +113,8 @@
       last: marks && marks.last || null,
       check: marks && typeof marks.check === "number" ? marks.check : null,
       selected: marks && typeof marks.selected === "number" ? marks.selected : null,
-      targets: marks && marks.targets || []
+      targets: marks && marks.targets || [],
+      hint: marks && typeof marks.hint === "number" ? marks.hint : null
     };
     this.render(slide || null);
   };
@@ -130,11 +138,13 @@
       node.classList.toggle("is-selected", m.selected === sq);
       node.classList.toggle("is-target", !!targets[sq] && piece === ".");
       node.classList.toggle("is-capture", !!targets[sq] && piece !== ".");
+      node.classList.toggle("is-hint", m.hint === sq);
       var label = Rules.squareName(sq) + ", " + pieceName(piece);
       if (m.selected === sq) label += ", selected";
       if (targets[sq]) label += piece === "." ? ", can move here" : ", can capture";
       if (m.check === sq) label += ", in check";
       if (m.last && m.last.to === sq) label += ", last move";
+      if (m.hint === sq) label += ", suggested move";
       node.setAttribute("aria-label", label);
     }
 

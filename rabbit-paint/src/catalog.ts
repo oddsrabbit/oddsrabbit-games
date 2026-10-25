@@ -39,8 +39,9 @@ export function msUntilNextDay(c: Pick<Catalog, 'epoch'>, ms: number): number {
   return epochMs(c) + (dayIndex(c, ms) + 1) * DAY_MS - ms;
 }
 
-export function dayRoundKey(day: number): string {
-  return `day-${day}`;
+/** A page's gallery: every player's posted version of it, as rows of one round. */
+export function pageRoundKey(slug: string): string {
+  return `page-${slug}`;
 }
 
 export function parseCatalog(data: unknown): Catalog | null {

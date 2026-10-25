@@ -15,7 +15,7 @@ import {
   canDig, digRoom, EXTRA_ROOMS, inRoom, openRoomsOf, ROOMS, ROOMS_OPEN, roomsOf, type ExtraRoom, type RoomId,
 } from './decor';
 import {
-  type Outfit, buyOutfit, buyToy, buyUpgrade, COLLECTIBLES, CROPS, endVacation, giveOutfit, growMs, harvest, hasUpgrade, onVacation, OUTFITS,
+  type Outfit, buyOutfit, buyToy, buyUpgrade, COLLECTIBLES, CROPS, endVacation, giveOutfit, growMs, harvest, hasUpgrade, onVacation, OUTFITS, pullWeed, thirsty, water, weedy,
   outfitById, ownsToy, plant, plotCount, plotOffer, plots, plotUpgrade, toyById, cropYield, soilLevel, soilMaxed, soilPrice, sproutClover, stage as cropStage, startVacation, TOYS, UPGRADES, upgradeUnlocked,
   VACATION_CHOICES, wardrobe, wear, type CropId, type Slot, type UpgradeId,
 } from './extras';
@@ -45,7 +45,7 @@ import {
 } from './guestbook';
 import { deviceTimeZone } from './localtime';
 import { desiredReminders, reconcile, REMINDER_KINDS } from './reminders';
-import { EAT_SWALLOW_MS, Scene, type Activity } from './render';
+import { EAT_SWALLOW_MS, Scene, type Activity, type PetZone } from './render';
 import { newPetId } from './rng';
 import { pauseSound, play, resumeSound, setMuted } from './sound';
 import {
@@ -821,7 +821,14 @@ function buildBurrowScreen(): void {
   new ResizeObserver(layoutStage).observe(stage);
   layoutStage();
 
-  for (const k of ['pet', 'clean'] as const) acts[k].addEventListener('click', () => doAction(k));
+  acts.pet.addEventListener('click', () => doAction('pet'));
+  // Clean hands you the sponge (wireWashing); again, or from the keyboard, it's done at once.
+  // With nothing to wash (or she can't be), it says why straight away.
+  acts.clean.addEventListener('click', (e) => {
+    if (washing) { stopWashing(true); return; }
+    if (e.detail === 0 || !canWash()) { doAction('clean'); return; }
+    startWashing();
+  });
   acts.feed.setAttribute('aria-expanded', 'false');
   acts.feed.addEventListener('click', () => toggleTray('feed'));
   acts.play.setAttribute('aria-expanded', 'false');
@@ -837,10 +844,10 @@ function buildBurrowScreen(): void {
   const letGo = () => { if (hold) window.clearTimeout(hold.timer); hold = null; };
   canvas.addEventListener('pointerdown', (e) => {
     heldOff = false;
-    if (decorating || !scene || away()) return;
+    if (decorating || !scene || away() || washing) return;
     const { x, y } = toScene(e);
-    const r = scene.rabbitBox();
-    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return; // holding her is still a pat
+    // on her: a tap or a stroke (wireStroking), not a long press
+    if (scene.petZone(x, y)) return;
     const piece = scene.hitTest(here(), x, y);
     if (!piece) return;
     letGo();
@@ -856,7 +863,7 @@ function buildBurrowScreen(): void {
   for (const ev of ['pointerup', 'pointercancel', 'pointerleave'] as const) canvas.addEventListener(ev, letGo);
   canvas.addEventListener('click', (e) => {
     if (heldOff) { heldOff = false; e.preventDefault(); return; }
-    if (decorating || !scene || away()) return;
+    if (decorating || !scene || away() || washing) return;
     const { x, y } = toScene(e);
     const gi = scene.guestAt({ guests: guestModels() } as Parameters<Scene['guestAt']>[0], x, y);
     if (gi !== null) { greetGuest(gi); return; }
@@ -868,8 +875,9 @@ function buildBurrowScreen(): void {
       if (c) toast(`The ${c.name.toLowerCase()} is happy to see you.`);
       return;
     }
-    const b = scene.rabbitBox();
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { doAction('pet'); return; }
+    if (stroked) { stroked = false; return; }
+    const zone = scene.petZone(x, y);
+    if (zone) { tapHer(zone); return; }
     // the wishing well: she makes a wish (just for the moment; nothing is paid)
     const piece = scene.hitTest(here(), x, y);
     if (piece?.id === 'corkboard') { play('flip'); openOwnCorkboard(); return; }
@@ -881,6 +889,146 @@ function buildBurrowScreen(): void {
     }
   });
   wireDecorDrag(canvas);
+  wireStroking(canvas);
+  wireWashing(canvas);
+}
+
+// ------------------------------------------------------------------ by hand
+
+/** A stroke just ended on her: the click that follows isn't a tap as well. */
+let stroked = false;
+let thumpTold = false;
+
+/**
+ * A tap on her, by where it lands: a pat, a boop on the nose (she sneezes),
+ * or her feet, which she doesn't like (a thump, and no care).
+ */
+function tapHer(zone: PetZone): void {
+  const asleep = isAsleep(pet, now());
+  if (zone === 'feet' && !asleep && !isOut(pet, now())) {
+    scene?.react('thump', performance.now());
+    play('thump');
+    haptic('light');
+    if (!thumpTold) { thumpTold = true; toast(`${pet.name} thumps her foot. Not the feet! Try behind her ears.`); }
+    return;
+  }
+  doAction('pet', zone === 'nose' ? { how: 'boop' } : {});
+}
+
+/**
+ * Stroking her: press on her and move. Once a stroke has gone far enough
+ * it's a pat by hand (behind the ears, she melts); keep stroking and she
+ * keeps enjoying it, with a heart now and then (one pat per stroke, so it
+ * can't be farmed by scribbling).
+ */
+function wireStroking(canvas: HTMLCanvasElement): void {
+  let s: { zone: PetZone; x: number; y: number; dist: number; petted: boolean; hearts: number } | null = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (decorating || !scene || away() || washing) return;
+    const p = toScene(e);
+    const zone = scene.petZone(p.x, p.y);
+    stroked = false;
+    if (!zone) return;
+    s = { zone, x: p.x, y: p.y, dist: 0, petted: false, hearts: 0 };
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!s || !scene) return;
+    const p = toScene(e);
+    const step = Math.hypot(p.x - s.x, p.y - s.y);
+    s.x = p.x; s.y = p.y;
+    // only what's on her (or just off her) counts
+    const zone = scene.petZone(p.x, p.y);
+    if (!zone) return;
+    s.dist += step;
+    if (!s.petted && s.dist >= STROKE_PX) {
+      s.petted = true;
+      stroked = true;
+      if (s.zone === 'feet' && !isAsleep(pet, now())) { tapHer('feet'); return; }
+      doAction('pet', { hands: true, how: s.zone === 'ears' || zone === 'ears' ? 'melt' : undefined });
+    } else if (s.petted && s.dist >= STROKE_PX * (2 + s.hearts * 2) && s.zone !== 'feet') {
+      s.hearts++;
+      scene.burst('heart', 1, performance.now(), { x: p.x, y: p.y - 6 });
+      if (s.hearts % 2) play('pet');
+    }
+  });
+  const end = () => { s = null; };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', () => { s = null; stroked = false; });
+}
+/** How far a stroke goes on her, in scene pixels, before it counts as a pat. */
+const STROKE_PX = 14;
+
+/**
+ * Washing her by hand. Clean hands you the sponge; rub it over her and the
+ * smudges come off where it goes, with bubbles. She's clean once every
+ * smudge is gone and she's had a good rub. Clean again finishes straight
+ * away (the quick way); left alone a while, the sponge is put away.
+ */
+let washing: { rubbed: number; down: boolean; last: { x: number; y: number } | null; idle: number; squeak: number } | null = null;
+/** How much rubbing a wash takes, in scene pixels on her, smudges or not. */
+const WASH_RUB_PX = 90;
+const WASH_IDLE_MS = 15_000;
+
+/** Whether she can be washed by hand now; if not, Clean says why straight away. */
+function canWash(): boolean {
+  const n = now();
+  return !away() && !isOut(pet, n) && !isAsleep(pet, n, tz) && pet.needs.clean < CARE.full;
+}
+
+function startWashing(): void {
+  if (!scene) return;
+  closeTray();
+  const b = scene.rabbitBox();
+  washing = { rubbed: 0, down: false, last: null, idle: 0, squeak: 0 };
+  scene.setSponge({ x: b.x + b.w + 6, y: b.y + b.h / 2 });
+  ui.acts.clean.classList.add('on');
+  ui.acts.clean.setAttribute('aria-pressed', 'true');
+  ui.acts.clean.querySelector('span')!.textContent = 'Done';
+  heldLine = { text: `Rub ${pet.name} with the sponge. Tap Done to finish.`, until: performance.now() + WASH_IDLE_MS };
+  setLine(ui.moodline, heldLine.text);
+  washing.idle = window.setTimeout(() => stopWashing(), WASH_IDLE_MS);
+}
+
+/** Put the sponge away; `clean`: and wash her, by hand if she was rubbed. */
+function stopWashing(clean = false): void {
+  if (!washing) return;
+  const byHand = washing.rubbed >= WASH_RUB_PX / 2;
+  window.clearTimeout(washing.idle);
+  washing = null;
+  scene?.setSponge(null);
+  ui.acts.clean.classList.remove('on');
+  ui.acts.clean.removeAttribute('aria-pressed');
+  ui.acts.clean.querySelector('span')!.textContent = 'Clean';
+  heldLine = null;
+  if (clean) doAction('clean', { hands: byHand });
+  else render();
+}
+
+function wireWashing(canvas: HTMLCanvasElement): void {
+  const rub = (e: PointerEvent) => {
+    if (!washing || !scene) return;
+    const p = toScene(e);
+    scene.setSponge(p);
+    if (!washing.down) return;
+    const t = performance.now();
+    if (!scene.scrub(p.x, p.y, t)) { washing.last = null; return; }
+    if (washing.last) washing.rubbed += Math.hypot(p.x - washing.last.x, p.y - washing.last.y);
+    washing.last = p;
+    if (t - washing.squeak > 220) { washing.squeak = t; play('scrub'); }
+    window.clearTimeout(washing.idle);
+    washing.idle = window.setTimeout(() => stopWashing(), WASH_IDLE_MS);
+    if (washing.rubbed >= WASH_RUB_PX && scene.dirtLeft({ needs: pet.needs }) === 0) stopWashing(true);
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!washing) return;
+    washing.down = true;
+    washing.last = null;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
+    rub(e);
+  });
+  canvas.addEventListener('pointermove', rub);
+  for (const ev of ['pointerup', 'pointercancel'] as const) canvas.addEventListener(ev, () => { if (washing) { washing.down = false; washing.last = null; } });
 }
 
 /** A pointer position in scene pixels. */
@@ -992,6 +1140,7 @@ function goTab(t: Tab, opts: { arrange?: string | true } = {}): void {
   const wasArranging = decorating;
   const tabFocused = ui.tabbar.contains(document.activeElement);
   closeTray();
+  stopWashing();
   if (decorating && !arrange) stopDecorating();
   if (from === 'garden' && arranging) stopArranging();
   if (arrange && !wasArranging) arrangeReturn = from;
@@ -1227,6 +1376,7 @@ function burrowModel(n: number, r: RoomId): Parameters<Scene['draw']>[0] {
     seed: `${pet.petId}:${dayKey(n, tz, DAY_ROLLOVER_HOUR)}`,
     critter: critterHere(),
     time: clockTime(n),
+    needs: pet.needs,
   };
 }
 
@@ -1770,7 +1920,12 @@ const REFUSAL: Record<string, string> = {
   notOut: "She's already home.",
 };
 
-function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number } = {}): void {
+/**
+ * `hands`: done by hand (the sponge, food handed to her, a stroke), for a
+ * little extra joy; `how`, for a pet: stroked behind the ears, she melts, and
+ * a boop on the nose makes her sneeze.
+ */
+function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number; hands?: boolean; how?: 'melt' | 'boop' } = {}): void {
   const t = performance.now();
   if (a === 'bake' && pet.treats >= 3) { toast('The pantry is full. Feed her a treat first.'); return; }
   if (away()) { play('nope'); toast(`${pet.name} is on holiday.`); return; }
@@ -1785,7 +1940,7 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
   const bondAfter = bondLevel(pet.bond).level;
   if (bondAfter > bondBefore) note(`Your bond grew to level ${bondAfter}.`, 'heart', `bond:${bondAfter}`);
   const reward = r.clover > 0 ? ` +${r.clover} clover` : '';
-  if (a !== 'gift' && a !== 'nap' && a !== 'wake' && a !== 'bake' && a !== 'forage' && a !== 'recall') play(a);
+  if (a !== 'gift' && a !== 'nap' && a !== 'wake' && a !== 'bake' && a !== 'forage' && a !== 'recall') play(a === 'pet' && opts.how === 'boop' && !isAsleep(pet, now()) ? 'boop' : a);
   if (a === 'feed' || a === 'pet' || a === 'play' || a === 'clean') careClover(r.clover, r.bond);
   payLumps(r.lumps);
   const goals: Partial<Record<Action, StarterGoal>> = { feed: 'feed', nap: 'nap', bake: 'bake', play: 'toy', clean: 'groom', forage: 'forage' };
@@ -1808,7 +1963,8 @@ function doAction(a: Action, opts: { food?: FoodId; toy?: string; hours?: number
       break;
     }
     case 'pet':
-      scene?.react('happy', t);
+      // asleep, any pat is a gentle one
+      scene?.react(isAsleep(pet, now()) ? 'happy' : opts.how ?? 'happy', t);
       haptic('light');
       break;
     case 'play':
@@ -1980,7 +2136,11 @@ function foodTray(): HTMLElement {
     img(s, Math.max(1, Math.floor(30 / Math.max(s.w, s.h)))),
     h('span', { class: 'nm', text: info.short }),
     h('span', { class: 'cost' }, paysClover ? img(itemSprite('clover'), 1) : null, cost));
-    b.addEventListener('click', () => { closeTray(); doAction('feed', { food: id }); });
+    b.addEventListener('click', () => {
+      if (b.dataset.dragged) { delete b.dataset.dragged; return; }
+      closeTray(); doAction('feed', { food: id });
+    });
+    if (!cantEat && available) b.addEventListener('pointerdown', (e) => holdOutFood(e, b, id));
     if (cantEat) setOff(b, cantEat);
     else if (!available) setOff(b, id === 'treat' ? REFUSAL.noTreats! : `Strawberries cost 3 clover, or grow them in the garden.`);
     return b;
@@ -1989,11 +2149,62 @@ function foodTray(): HTMLElement {
   bake.addEventListener('click', () => { closeTray(); doAction('bake'); });
   renderBakeButton(bake, n);
   const hint = cantEat ? `${isOut(pet, n) ? "She's out foraging" : "Shh, she's asleep"}. You can still bake her a treat for later.`
-    : 'Baked treats and berries delight her most.';
+    : 'Tap one, or drag it to her. Treats and berries delight her most.';
   return h('div', { class: 'food-tray', role: 'group', 'aria-label': `What would ${pet.name} like?` },
     h('div', { class: 'food-row', style: `grid-template-columns:repeat(${buttons.length},minmax(0,1fr))` }, ...buttons),
     h('p', { class: 'food-hint', text: hint }),
     bake);
+}
+
+/**
+ * Food dragged out of the tray and held out to her. Over the room she sees
+ * it: hungry, she comes for it, sniffing; full, she turns away. Let go on her
+ * and she eats it from your hand; anywhere else, it goes back in the tray.
+ * A press that doesn't move is still a tap.
+ */
+function holdOutFood(e: PointerEvent, b: HTMLButtonElement, food: FoodId): void {
+  if (!scene || e.button > 0) return;
+  const art = FOOD_INFO[food].art;
+  const x0 = e.clientX, y0 = e.clientY;
+  let ghost: HTMLElement | null = null;
+  const overHer = (ev: PointerEvent): { x: number; y: number } | null => {
+    const r = ui.canvas.getBoundingClientRect();
+    if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return null;
+    return toScene(ev);
+  };
+  const move = (ev: PointerEvent) => {
+    if (!ghost) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 8) return;
+      const s = itemSprite(art);
+      ghost = h('div', { class: 'food-ghost', 'aria-hidden': 'true' }, img(s, Math.max(2, Math.round(scale * 0.9))));
+      document.body.append(ghost);
+      b.dataset.dragged = '1';
+      // the tray fades so she can be seen (it sits over the foot of the room)
+      tray?.el.classList.add('lifted');
+    }
+    ghost.style.transform = `translate(${ev.clientX}px, ${ev.clientY}px)`;
+    const p = overHer(ev);
+    scene?.setLure(p ? { ...p, art, wants: pet.needs.hunger < CARE.full } : null);
+  };
+  const up = (ev: PointerEvent) => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', cancel);
+    scene?.setLure(null);
+    if (!ghost) return;
+    ghost.remove();
+    tray?.el.classList.remove('lifted');
+    const p = overHer(ev);
+    const box = scene?.rabbitBox();
+    const onHer = !!p && !!box && p.x >= box.x - 6 && p.x <= box.x + box.w + 6 && p.y >= box.y - 10 && p.y <= box.y + box.h;
+    // released over the tray button itself, a click follows; anywhere else none does
+    window.setTimeout(() => delete b.dataset.dragged, 0);
+    if (onHer) { closeTray(); doAction('feed', { food, hands: true }); }
+  };
+  const cancel = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', cancel); scene?.setLure(null); ghost?.remove(); tray?.el.classList.remove('lifted'); delete b.dataset.dragged; };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', cancel);
 }
 
 /** Bake, at the foot of the Feed tray: a treat for the pantry in an hour, or the countdown to one. */
@@ -2754,7 +2965,7 @@ function drawShopScene(t: number): void {
   // awake and on her own, whatever she's really up to: it's a fitting room
   shopView.scene.draw({
     ...burrowModel(now(), 'main'), burrow: inRoom(burrow, 'main'), decorating: false, selected: null,
-    mood: 'content', absent: false, guests: [], critter: null, guest: true,
+    mood: 'content', absent: false, guests: [], critter: null, guest: true, needs: undefined,
     room: { ...roomOf(burrow), ...p.room },
   }, t);
 }
@@ -3398,13 +3609,18 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
     return;
   }
   if (hit.kind === 'plot') {
+    // she comes over to help with whatever you're doing there
+    if (hit.state !== 'locked') gardenScene.tend(hit.index, performance.now());
     if (hit.state === 'locked') { if (plotOffer(pet, hit.index) === 'next') confirmPlot(hit.index); else toast(plotLockReason(hit.index)); }
     else if (hit.state === 'empty') openSeeds(hit.index);
     // picked, the bed's empty: straight on to what to grow next, the same again first
     else if (hit.state === 'ready') { const crop = pickPlot(hit.index); if (crop) openSeeds(hit.index, crop); }
+    // growing: a weed to pull first, then a drink
+    else if (weedy(pet, hit.index, n)) weedPlot(hit.index);
+    else if (thirsty(plots(pet)[hit.index] ?? null, n)) waterPlot(hit.index);
     else {
       const p = plots(pet)[hit.index]!;
-      toast(`${CROPS[p.crop].name}: ready in ${fmtDuration(p.readyAtMs - n)}.`);
+      toast(`${CROPS[p.crop].name}: ready in ${fmtDuration(p.readyAtMs - n)}.${p.watered ? ' Watered.' : ''}`);
     }
   } else if (hit.kind === 'building') {
     if (hit.state === 'owned') {
@@ -3415,6 +3631,42 @@ function gardenTap(e: { clientX: number; clientY: number }): void {
   } else if (hit.state === 'owned') toast(`The shed holds ${storageHours(pet)} hours of clover.`);
   else if (hit.state === 'free') confirmShed();
   else toast('The shed comes after 3 clover patches.');
+  renderGarden();
+}
+
+/** Water a growing bed by hand (extras.ts water): it grows a little faster. */
+function waterPlot(i: number): void {
+  const r = water(pet, i, now());
+  if (!r.ok) return;
+  pet = r.state;
+  savePet();
+  play('clean');
+  haptic('light');
+  const spot = PLOT_SPOTS[i];
+  if (spot) gardenScene?.burst('droplet', 3, performance.now(), { x: spot.x, y: spot.y - 10 });
+  const p = plots(pet)[i]!;
+  toast(`Watered. ${CROPS[p.crop].name} ready ${p.readyAtMs <= now() ? 'now' : `in ${fmtDuration(p.readyAtMs - now())}`}, ${fmtDuration(r.savedMs)} sooner.`);
+  note('Watered the garden by hand for the first time.', 'droplet', 'garden:water');
+  queueReconcile();
+  renderGarden();
+}
+
+/** Pull a weed: a little clover, and if she's out here with you she eats the dandelion. */
+function weedPlot(i: number): void {
+  const n = now();
+  const here = !isAsleep(pet, n, tz) && !isOut(pet, n);
+  const r = pullWeed(pet, i, n, here);
+  if (!r.ok) return;
+  pet = r.state;
+  savePet();
+  play('harvest');
+  haptic('light');
+  const spot = PLOT_SPOTS[i];
+  if (spot) {
+    gardenScene?.burst('dandelion', 1, performance.now(), { x: spot.x, y: spot.y - 12 });
+    gardenScene?.burst('clover', 2, performance.now() + 200, { x: spot.x, y: spot.y - 6 });
+  }
+  toast(`Pulled a dandelion: +${r.clover} clover.${here ? ` ${pet.name} munches it happily.` : ''}`);
   renderGarden();
 }
 
@@ -3432,6 +3684,16 @@ function pickPlot(i: number, quiet = false): CropId | null {
     : cropYield(pet, 'golden') > 1 ? 'Two golden carrots, in the pantry. She always loves these.' : 'A golden carrot, in the pantry. She always loves these.';
   if (!quiet) toast(`Picked! ${got}`);
   note(`First ${CROPS[r.crop].name.toLowerCase()} from the garden.`, CROP_ART[r.crop], `harvest:${r.crop}`);
+  if (r.dug) {
+    // she was helping, and dug something up: said after the picking
+    if (spot) {
+      const at = { x: spot.x, y: spot.y - 8 };
+      gardenScene?.burst(r.dug.id as ItemArt, 1, performance.now() + 500, at);
+      gardenScene?.burst('sparkle', 2, performance.now() + 600, at);
+    }
+    window.setTimeout(() => { play('find'); toast(`${pet.name} dug up ${article(r.dug!.name)} in the bed! It's on her shelf.`); }, 900);
+    note(`${pet.name} dug up ${article(r.dug.name)} in the garden.`, r.dug.id as ItemArt, `dug:${r.dug.id}`);
+  }
   if (r.crop === 'sprout') goal('sprout');
   queueReconcile();
   renderGarden();
@@ -3622,6 +3884,13 @@ function renderGarden(): void {
   const chips: string[] = [];
   if (area === 'patch') {
     line = ready ? `${ready === 1 ? 'A crop is' : `${ready} crops are`} ready to pick.` : empty >= 0 ? 'A bed is free. What shall we grow?' : 'Everything is growing nicely.';
+    // beds to tend by hand, when there's nothing to pick or plant
+    if (!ready && empty < 0) {
+      const weeds = ps.filter((_, i) => weedy(pet, i, n)).length;
+      const dry = ps.filter((p) => thirsty(p, n)).length;
+      if (weeds) line = `${weeds === 1 ? 'A weed has' : 'Weeds have'} come up. Tap the bed to pull ${weeds === 1 ? 'it' : 'them'}.`;
+      else if (dry) line = `${dry === 1 ? 'A bed is' : `${dry} beds are`} thirsty. Tap to water: it grows faster.`;
+    }
     if (growing) chips.push(`${CROPS[growing.crop].name} · ${fmtDuration(growing.readyAtMs - n)}`);
   } else if (area === 'yard') {
     line = perHour(pet)
@@ -5857,7 +6126,9 @@ function visitFriend(f: Friend, onLeave?: () => void): void {
     const r = view === 'garden' ? 'main' : view;
     sc.draw({ coat: d.coat, night: isNight(n, tz), mood: asleep ? 'asleep' : 'content', burrow: guestRooms[r] ?? guestRooms.main!, decorating: false, selected: null,
       dress: { head: d.head, neck: d.neck, ears: d.ears }, season: w.season, weather: w.weather, guest: true, absent: holiday || out,
-      room: { wall: d.wall ?? 'plainwall', floor: d.floor ?? 'plainfloor', window: d.window ?? 'roundwindow', ...(r !== 'main' ? { variant: r } : {}) }, moon: moonPhase(n), time: clockTime(n) }, t);
+      room: { wall: d.wall ?? 'plainwall', floor: d.floor ?? 'plainfloor', window: d.window ?? 'roundwindow', ...(r !== 'main' ? { variant: r } : {}) }, moon: moonPhase(n), time: clockTime(n),
+      // she looks as she is: a bit grubby or droopy is a hint what to bring
+      needs: friendNeeds(d, n) }, t);
   };
   raf = requestAnimationFrame(loop);
   canvas.addEventListener('click', (e) => {

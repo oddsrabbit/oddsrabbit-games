@@ -14,7 +14,8 @@
 //   day=N        today is day N (default 0); the harness moves the server clock there
 //   user=0       signed out (account storage and posting refused, as on the real hosts)
 //   fresh=1      forget saved progress and posts
-//   others=N     how many other players have posted today (default 14; 0 for an empty gallery)
+//   others=N     the most other players who have posted a page (default 14; 0 for empty
+//                galleries). Pages get from none to N, so some tiles show no count
 //   likes=0      a host without scores.like: no hearts, earliest first
 //   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
 //   submit=0     a host without content.submit: no "Share with everyone" for players' pictures
@@ -50,11 +51,16 @@ const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
 const ready = fetch('../dist/rabbit-paint/catalog.json').then((r) => r.json()).then(async (cat) => {
   EPOCH_MS = Date.parse(`${cat.epoch}T00:00:00Z`);
-  const slug = cat.daily[((TODAY % cat.daily.length) + cat.daily.length) % cat.daily.length];
+  const most = Number(q.get('others') ?? 14);
+  await Promise.all(cat.pages.map((p) => seed(p.slug, Math.floor(rnd(`count${p.slug}`) * (most + 1)))));
+  persist();
+});
+
+// `n` other players' posts in a page's gallery, the same each load.
+async function seed(slug, n) {
   const info = await fetch(`../dist/rabbit-paint/pages/${slug}/page.json`).then((r) => r.json());
-  const key = `day-${TODAY}`;
+  const key = `page-${slug}`;
   saved.posts[key] ??= {};
-  const n = Number(q.get('others') ?? 14);
   NAMES.slice(0, n).forEach((username, i) => {
     const uuid = `${(0x22222200 + i).toString(16)}-2222-4222-8222-222222222222`;
     if (saved.posts[key][uuid]) return;
@@ -71,13 +77,12 @@ const ready = fetch('../dist/rabbit-paint/catalog.json').then((r) => r.json()).t
       if (k < 0) { f.push(fill); k = f.length - 1; }
       r += B64[k];
     });
-    saved.posts[key][uuid] = { uuid, username, avatar: null, score: info.regions.length, likes: Math.floor(rnd(`likes${username}`) * 15), createdAt: new Date(serverNow() - (n - i) * 600e3).toISOString(), metadata: { v: 1, slug, f, r, t: 300 + i * 40 } };
+    saved.posts[key][uuid] = { uuid, username, avatar: null, score: info.regions.length, likes: Math.floor(rnd(`likes${username}${slug}`) * 15), createdAt: new Date(serverNow() - (n - i) * 600e3).toISOString(), metadata: { v: 1, slug, f, r, t: 300 + i * 40 } };
   });
-  persist();
-});
+}
 
 // likes=0 plays a host from before scores.like (no hearts, earliest first).
-const caps = ['storage.get', 'storage.set', 'storage.delete', 'actions.share', 'actions.haptic', 'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'time.now', ...(q.get('likes') === '0' ? [] : ['scores.like', 'scores.myLikes']), ...(q.get('submit') === '0' ? [] : ['content.submit']), ...(q.get('chat') === '0' ? [] : ['chat.sharePicture'])];
+const caps = ['storage.get', 'storage.set', 'storage.delete', 'actions.share', 'actions.haptic', 'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'scores.distribution', 'time.now', ...(q.get('likes') === '0' ? [] : ['scores.like', 'scores.myLikes']), ...(q.get('submit') === '0' ? [] : ['content.submit']), ...(q.get('chat') === '0' ? [] : ['chat.sharePicture'])];
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 let initSent = false;
 function init() { send({ type: 'init', user: q.get('user') === '0' ? null : ME, sessionToken: 'x', expiresAt: null, colorScheme: 'light', capabilities: caps }); }
@@ -111,10 +116,19 @@ window.addEventListener('message', async (e) => {
       console.log('submit', p.roundKey, p.score, json.length + ' bytes', json);
       if (json.length > 2048) return fail('scores/invalid-metadata');
       saved.posts[p.roundKey] ??= {};
-      if (saved.posts[p.roundKey][ME.uuid]) return fail('scores/already-submitted');
-      saved.posts[p.roundKey][ME.uuid] = { ...ME, score: p.score, likes: 2, createdAt: new Date(serverNow()).toISOString(), metadata: p.metadata ?? null };
+      const had = saved.posts[p.roundKey][ME.uuid];
+      if (had && !p.keepBest) return fail('scores/already-submitted');
+      // keepBest, as the platform does: replace the row only when the score beats it.
+      if (had && p.score <= had.score) return ok({ submittedAt: had.createdAt });
+      saved.posts[p.roundKey][ME.uuid] = { ...ME, score: p.score, likes: had?.likes ?? 2, createdAt: new Date(serverNow()).toISOString(), metadata: p.metadata ?? null };
       persist();
       return ok({ submittedAt: new Date().toISOString() });
+    }
+    case 'scores.distribution': {
+      await ready;
+      const counts = {};
+      for (const row of rows(p.roundKey)) counts[row.score] = (counts[row.score] ?? 0) + 1;
+      return ok(Object.entries(counts).map(([score, count]) => ({ score: Number(score), count })));
     }
     case 'scores.top': {
       await ready;

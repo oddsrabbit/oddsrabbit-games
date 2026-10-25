@@ -1,9 +1,11 @@
 // The painting screen: the picture fills the screen behind floating controls.
-// One finger drags, two pinch; a quick tap fills the region under it.
+// One finger drags, two pinch; a quick tap fills the region under it, and a
+// still hold grabs its fill (as does a tap with the dropper on).
 
 import { composite, loadArt, Painter, regionAt, type Art } from './art';
-import { dayRoundKey } from './catalog';
-import { cssFor, filledCount, packColoring, type Fill } from './fills';
+import { canAutoPost, postThreshold, postVersion } from './autopost';
+import { cssFor, filledCount, type Fill } from './fills';
+import { isMineSlug } from './mine';
 import { openPicker } from './picker';
 import { loadColors, loadProgress, pushRecent, saveColors, saveProgress, type ColorPrefs, type Progress, type Session } from './store';
 import { button, confirmSheet, el, formatDuration, haptic, icon, OR, toast } from './ui';
@@ -12,7 +14,8 @@ export interface PaintOptions {
   session: Session;
   onDone(): void;
   onShare(art: Art, fills: ReadonlyArray<Fill | null>): void;
-  onGallery(day: number): void;
+  /** A catalog page's gallery: everyone's versions of it. */
+  onGallery(slug: string): void;
   /** The player's own picture, and sending for review is available. */
   onSuggest?(): void;
 }
@@ -23,7 +26,11 @@ type Step = Array<{ id: number; prev: Fill | null; next: Fill | null }>;
 
 const TAP_MOVE = 10;
 const TAP_MS = 600;
+/** A finger held this long without moving grabs the fill under it. */
+const HOLD_MS = 500;
 const MAX_ZOOM = 10;
+/** A page in the gallery is written again this long after the last change, or on leaving. */
+const POST_IDLE_MS = 20_000;
 
 export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<() => void> {
   const { session } = o;
@@ -74,11 +81,19 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   status.append(statusTop, statusSub);
   status.addEventListener('click', () => { if (filledCount(progress.fills) === total) showFinish(); });
   const shareBtn = button('round-btn', icon('share'), () => o.onShare(art, progress.fills), 'Share or save');
-  const doneBtn = button('done-btn', 'Done', () => { void flush().then(o.onDone); });
-  bar.append(status, el('div', 'grow'), shareBtn, doneBtn);
+  const doneBtn = button('done-btn', 'Done', () => { void leave().then(o.onDone); });
+  // The player's own pictures have no gallery: they stay on this device.
+  const hasGallery = !isMineSlug(session.slug);
+  const galleryBtn = button('round-btn', icon('people'), () => { void leave().then(() => o.onGallery(session.slug)); }, 'See everyone’s versions');
+  bar.append(status, el('div', 'grow'), ...(hasGallery ? [galleryBtn] : [shareBtn]), doneBtn);
 
   const side = el('div', 'side-tools');
+  const dropperBtn = button('round-btn', icon('dropper'), () => setDropper(!eyedropper), 'Pick a fill from the picture');
+  dropperBtn.setAttribute('aria-pressed', 'false');
+  // With a gallery, Share moves down here to leave the title room up top.
   side.append(
+    ...(hasGallery ? [shareBtn] : []),
+    dropperBtn,
     button('round-btn', icon('fit'), () => { fit(); animate(); }, 'Fit to screen'),
     button('round-btn', icon('find'), findEmpty, 'Find an empty area'),
   );
@@ -149,6 +164,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   const pointers = new Map<number, { x: number; y: number }>();
   let mode: 'idle' | 'tap' | 'pan' | 'pinch' | 'done' = 'idle';
   let start = { x: 0, y: 0, t: 0, tx: 0, ty: 0 };
+  let holdTimer = 0;
   let pinch = { d: 1, mx: 0, my: 0, s: 1, tx: 0, ty: 0 };
   const local = (e: PointerEvent) => {
     const r = stage.getBoundingClientRect();
@@ -167,7 +183,14 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
       const p = local(e);
       mode = 'tap';
       start = { x: p.x, y: p.y, t: performance.now(), tx: view.tx, ty: view.ty };
+      holdTimer = window.setTimeout(() => {
+        if (mode !== 'tap') return;
+        // The finger is still down: this gesture is spent, so lifting it doesn't also fill.
+        mode = 'done';
+        grab(p.x, p.y);
+      }, HOLD_MS);
     } else if (pointers.size === 2) {
+      clearTimeout(holdTimer);
       mode = 'pinch';
       pinch = { ...pinchState(), s: view.s, tx: view.tx, ty: view.ty };
     }
@@ -176,7 +199,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     if (!pointers.has(e.pointerId)) return;
     const p = local(e);
     pointers.set(e.pointerId, p);
-    if (mode === 'tap' && Math.hypot(p.x - start.x, p.y - start.y) > TAP_MOVE) mode = 'pan';
+    if (mode === 'tap' && Math.hypot(p.x - start.x, p.y - start.y) > TAP_MOVE) { mode = 'pan'; clearTimeout(holdTimer); }
     if (mode === 'pan') {
       view.tx = start.tx + p.x - start.x;
       view.ty = start.ty + p.y - start.y;
@@ -195,6 +218,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     if (!pointers.has(e.pointerId)) return;
     const p = local(e);
     pointers.delete(e.pointerId);
+    clearTimeout(holdTimer);
     if (mode === 'tap' && e.type === 'pointerup' && performance.now() - start.t < TAP_MS) tap(p.x, p.y);
     // After a pinch, wait for every finger to lift before the next gesture.
     mode = pointers.size ? 'done' : 'idle';
@@ -212,13 +236,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   function tap(x: number, y: number) {
     const id = regionAt(art, (x - view.tx) / view.s, (y - view.ty) / view.s);
     if (id === null) return;
-    if (eyedropper) {
-      eyedropper = false;
-      stage.classList.remove('dropper');
-      const f = progress.fills[id];
-      if (f) { setCurrent(f); toast('Picked that fill'); } else toast('That area is still empty');
-      return;
-    }
+    if (eyedropper) { grab(x, y); return; }
     const prev = progress.fills[id] ?? null;
     if (prev === current) return;
     const wasDone = filledCount(progress.fills) === total;
@@ -234,6 +252,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     renderChrome();
     if (!wasDone && filledCount(progress.fills) === total) {
       haptic('success');
+      void sendPost();
       setTimeout(showFinish, 350);
     }
   }
@@ -242,6 +261,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     painter.paint(id, f);
     pulse.hidden = true;
     scheduleSave();
+    notePost();
   }
   function step(from: Step[], to: Step[], which: 'prev' | 'next') {
     const s = from.pop();
@@ -267,6 +287,25 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   function setCurrent(f: Fill) {
     current = f;
     renderChrome();
+  }
+
+  // --- grabbing a fill from the picture ------------------------------------------------
+  function setDropper(on: boolean) {
+    eyedropper = on;
+    stage.classList.toggle('dropper', on);
+    dropperBtn.setAttribute('aria-pressed', String(on));
+    if (on) toast('Tap an area to pick its fill');
+  }
+  /** Takes the fill at stage point (x, y). An empty area leaves the dropper on to try again. */
+  function grab(x: number, y: number) {
+    const id = regionAt(art, (x - view.tx) / view.s, (y - view.ty) / view.s);
+    if (id === null) return;
+    const f = progress.fills[id];
+    if (!f) { toast('That area is still empty'); return; }
+    setDropper(false);
+    setCurrent(f);
+    haptic('light');
+    toast('Picked that fill');
   }
 
   let findCursor = 0;
@@ -302,9 +341,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
       onFavsChange: () => void saveColors(colors),
       onEyedropper: () => {
         picker?.close();
-        eyedropper = true;
-        stage.classList.add('dropper');
-        toast('Tap an area to pick its fill');
+        setDropper(true);
       },
       onClose: () => { picker = null; moreBtn.setAttribute('aria-expanded', 'false'); },
     });
@@ -313,8 +350,7 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
 
   function renderChrome() {
     const filled = filledCount(progress.fills);
-    statusSub.textContent = filled === total ? 'Finished · tap to post' : `${filled} of ${total} areas`;
-    if (session.day === null && filled === total) statusSub.textContent = 'Finished';
+    statusSub.textContent = filled === total ? (progress.posted || !hasGallery ? 'Finished' : 'Finished · tap to post') : `${filled} of ${total} areas`;
     undoBtn.disabled = !undo.length;
     clearBtn.disabled = filled === 0;
     redoBtn.disabled = !redo.length;
@@ -339,8 +375,47 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     saving = saving.then(() => saveProgress(session, progress)).catch(() => {});
     return saving;
   }
-  const offPause = OR().lifecycle.on('pause', () => void flush());
-  const onHide = () => { if (document.visibilityState === 'hidden') void flush(); };
+  /** Saves, and brings the page's gallery version up to date. */
+  function leave(): Promise<void> {
+    return Promise.all([flush(), sendPost()]).then(() => {});
+  }
+  const offPause = OR().lifecycle.on('pause', () => void leave());
+  const onHide = () => { if (document.visibilityState === 'hidden') void leave(); };
+
+  // --- the gallery -------------------------------------------------------------------
+  // Most of the page colored: it goes in, and is written again as they color
+  // (autopost.ts).
+  let postTimer = 0;
+  let postDue = false;
+  let posting: Promise<void> = Promise.resolve();
+  const autoPosts = () => hasGallery && canAutoPost();
+  function notePost() {
+    if (!autoPosts()) return;
+    if (!progress.posted && filledCount(progress.fills) < postThreshold(total)) return;
+    postDue = true;
+    clearTimeout(postTimer);
+    postTimer = window.setTimeout(() => void sendPost(), POST_IDLE_MS);
+  }
+  function sendPost(): Promise<void> {
+    clearTimeout(postTimer);
+    posting = posting.then(async () => {
+      if (!postDue) return;
+      postDue = false;
+      try {
+        await postVersion(session.slug, progress);
+      } catch {
+        postDue = true;
+        return;
+      }
+      if (!progress.posted) {
+        progress.posted = true;
+        renderChrome();
+        if (filledCount(progress.fills) < total) toast('It’s in the gallery now');
+        await flush();
+      }
+    });
+    return posting;
+  }
   document.addEventListener('visibilitychange', onHide);
 
   // --- finishing ---------------------------------------------------------------------
@@ -360,13 +435,12 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
       pic,
       actions,
     );
-    if (session.day !== null) {
-      const day = session.day;
-      if (progress.posted) {
-        actions.append(button('primary-btn', 'See today’s gallery', () => { close(); void flush().then(() => o.onGallery(day)); }));
+    if (hasGallery) {
+      if (progress.posted || autoPosts()) {
+        actions.append(button('primary-btn', 'See everyone’s', () => { close(); void leave().then(() => o.onGallery(session.slug)); }));
       } else {
-        const post = button('primary-btn', 'Post to today’s gallery', () => void postToday(day, post, close));
-        actions.append(post);
+        const postBtn = button('primary-btn', 'Post to the gallery', () => void post(postBtn, close));
+        actions.append(postBtn);
       }
     }
     if (o.onSuggest) {
@@ -383,35 +457,27 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
     requestAnimationFrame(() => wrap.classList.add('open'));
   }
 
-  async function postToday(day: number, btn: HTMLButtonElement, close: () => void) {
+  async function post(btn: HTMLButtonElement, close: () => void) {
     if (!OR().user) {
-      if (OR().capabilities.has('actions.requestSignIn')) void OR().actions.requestSignIn('Sign in to post your page to today’s gallery');
+      if (OR().capabilities.has('actions.requestSignIn')) void OR().actions.requestSignIn('Sign in to post your page to the gallery');
       else toast('Sign in to post to the gallery');
       return;
     }
     btn.disabled = true;
     btn.textContent = 'Posting…';
     try {
-      await OR().scores.submit({
-        roundKey: dayRoundKey(day),
-        // Areas colored. The gallery orders by posting time, not this.
-        score: total,
-        metadata: { v: 1, slug: session.slug, ...packColoring(progress.fills), t: Math.round(progress.seconds) },
-      });
-    } catch (e) {
-      const code = (e as { code?: string })?.code ?? '';
-      if (code !== 'scores/already-submitted') {
-        btn.disabled = false;
-        btn.textContent = 'Post to today’s gallery';
-        toast('Couldn’t post. Try again in a moment.');
-        return;
-      }
+      await postVersion(session.slug, progress);
+    } catch {
+      btn.disabled = false;
+      btn.textContent = 'Post to the gallery';
+      toast('Couldn’t post. Try again in a moment.');
+      return;
     }
     progress.posted = true;
     await flush();
     haptic('success');
     close();
-    o.onGallery(day);
+    o.onGallery(session.slug);
   }
 
   // --- go ------------------------------------------------------------------------------
@@ -419,11 +485,13 @@ export async function mountPaint(root: HTMLElement, o: PaintOptions): Promise<()
   window.addEventListener('resize', onResize);
   renderChrome();
   requestAnimationFrame(fit);
-  // Back on a finished daily that wasn't posted: offer it straight away.
-  if (session.day !== null && !progress.posted && filledCount(progress.fills) === total) setTimeout(showFinish, 400);
+  // Ready for the gallery but not in it (the last try failed, or it was colored signed out): now.
+  if (!progress.posted) { notePost(); void sendPost(); }
+  // Back on a finished page that wasn't posted: offer it straight away.
+  if (hasGallery && !progress.posted && filledCount(progress.fills) === total) setTimeout(showFinish, 400);
 
   return () => {
-    void flush();
+    void leave();
     offPause();
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('resize', onResize);

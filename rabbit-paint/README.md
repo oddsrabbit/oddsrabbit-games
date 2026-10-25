@@ -13,13 +13,21 @@ decisions so far and a link to the mockups are in [docs/plan.md](docs/plan.md).
 - **Fills** (`src/picker.ts`, `src/fills.ts`): solid, gradient (4 directions)
   or pattern (dots, stripes, checks, grid, confetti), a colour square and hue
   bar, basic swatches, favourites, and pick-from-picture.
-- **Today's gallery** (`src/gallery.ts`): finishing today's page offers
-  *Post to today's gallery*. A post is a `scores.submit` on `day-N` whose
-  metadata is the packed fills (~150 bytes for the monkey; the cap is 2 KB);
+- **Into the gallery** (`src/autopost.ts`): once 60% of a page's areas are
+  colored, a signed-in player's version goes in its gallery, and is written
+  again 20 s after they stop and on leaving the page. A guest who finishes is
+  offered *Post to the gallery*, which asks them to sign in. Writes use `keepBest` with the
+  seconds since 2026 as the score, so each later version replaces the row.
+- **A page's gallery** (`src/gallery.ts`): a post is a `scores.submit` on
+  `page-<slug>` whose metadata is the packed fills (~150 bytes for the monkey; the cap is 2 KB);
   Everyone reads `scores.top` (100 rows, Most liked or Newest), Friends
   `scores.friends`. Hearts are `scores.like`, filled from `scores.myLikes`;
   a host without them gets no hearts and earliest-first. Thumbnails are drawn
   from the page's region map, so no images are stored. Names show on Everyone.
+  Posts still being colored carry an *In progress* label.
+- **Gallery tab** (`src/feed.ts`): posts across every page, Everyone or
+  Friends, Newest or Most liked; hearts work on the card (`src/likes.ts`), and
+  the picture opens that page's gallery.
 - **Your pictures** (`src/upload.ts`, `src/mine.ts`, `src/worker/`): a player
   adds an image and the game turns it into a page on the device, the same
   steps as `prep-page` run in a Web Worker, with ink found against the local
@@ -56,7 +64,7 @@ SDK source at the repo root, and the stamp from the root `dist/`.
 npm install
 npm test && npm run type-check
 npm run build        # → dist/rabbit-paint/, real pages only
-npm run build:dev    # the same plus the sample pages
+npm run build:dev    # the same plus any `"sample": true` pages
 ```
 
 Local play: `npm run build:dev`, then `python3 -m http.server 8767` in
@@ -68,8 +76,13 @@ the host: `?fresh=1` forgets everything, `?user=0` plays signed out,
 harness fakes them),
 `?chrome=app` fakes the app's insets. See the top of `dev/harness.html`.
 
-Upload `dist/rabbit-paint/` to `apps.oddsrabbit.com/rabbit-paint/`.
+The deploy workflow ships `dist/rabbit-paint/` to `apps.oddsrabbit.com/rabbit-paint/` (see the root README's *Deploying*).
 `dist/sdk-v1.js` is a copy for the harness only.
+
+The app icon is in `icon/`: `icon-512.png` is what the platform manifest points
+at (`<slug>/icon-512.png`) and the build copies it into the bundle;
+`icon-1024.png` is for store listings; `icon.svg` is the source (no text, so
+any SVG renderer gives the same PNGs).
 
 The daily epoch (`art/catalog.json` `epoch`) is a placeholder: before it, the
 game shows day 0. Pick the launch day there.
@@ -89,10 +102,6 @@ art/monkey-sun-hat/
   thumb-*.png        generated: line art (thickened) and region map, 360 px on the long side
   preview.png        generated, not committed: each region a distinct pastel
 ```
-
-`npm run sample-pages` writes eight simple placeholder pages
-(`art/sample-*`, `"sample": true`) so shelves and the rotation have
-something in them during development. `npm run build` leaves them out.
 
 ```bash
 npm install

@@ -8,11 +8,13 @@
 //                        used only to find regions, never drawn
 // 4. regions             4-connected white areas between the walls; every pixel
 //                        (ink included) is owned by its nearest region
-// 5. merge               a piece under `minArea` that the walls pinched off
-//                        (an eye crescent's tip, a corner where lines meet)
-//                        touches its shape through paper, not ink: it folds
-//                        into the neighbour it shares the most open border
-//                        with. A piece walled in by ink is a real shape and
+// 5. merge               a piece with under `minArea` of paper that the walls
+//                        pinched off (an eye crescent's tip, a corner where
+//                        lines meet, a thin channel between two lines) touches
+//                        its shape through paper, not ink: it folds into the
+//                        neighbour it shares the most open border with. Paper,
+//                        because a thin channel owns half of each line beside
+//                        it and can be mostly ink. A piece walled in by ink is a real shape and
 //                        stays, however small, unless it's noise (under a
 //                        sixth of `minArea`). Then the curator's hints
 
@@ -184,7 +186,11 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
   spreadOwners(owner, w, ink);
 
   const area = new Array<number>(R).fill(0);
-  for (let p = 0; p < n; p++) area[owner[p]]++;
+  const paperArea = new Array<number>(R).fill(0);
+  for (let p = 0; p < n; p++) {
+    area[owner[p]]++;
+    if (!ink[p]) paperArea[owner[p]]++;
+  }
   // Border length with each neighbour: all of it, and the open part (paper on both sides).
   const adj = Array.from({ length: R }, () => new Map<number, number>());
   const open = Array.from({ length: R }, () => new Map<number, number>());
@@ -208,6 +214,7 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
   const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const members = Array.from({ length: R }, (_, i) => [i]);
   const size = [...area];
+  const paper = [...paperArea];
   /** The other merged region that `c`'s members share the most `border` with, or -1. */
   const longest = (c: number, border: Array<Map<number, number>>) => {
     const sum = new Map<number, number>();
@@ -225,7 +232,7 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
   // shape, and that one then folds on, so repeat until nothing moves.
   for (let changed = true; changed; ) {
     changed = false;
-    const small = [...size.keys()].filter((c) => find(c) === c && size[c] < o.minArea).sort((a, b) => size[a] - size[b]);
+    const small = [...size.keys()].filter((c) => find(c) === c && paper[c] < o.minArea).sort((a, b) => paper[a] - paper[b]);
     for (const c of small) {
       if (find(c) !== c) continue;
       let to = longest(c, open);
@@ -233,6 +240,7 @@ export function prepare(grey: Uint8Array, w: number, h: number, opts: Partial<Pr
       if (to < 0) continue;
       parent[c] = to;
       size[to] += size[c];
+      paper[to] += paper[c];
       members[to].push(...members[c]);
       members[c] = [];
       merged++;

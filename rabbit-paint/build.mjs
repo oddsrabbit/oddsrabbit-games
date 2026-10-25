@@ -61,6 +61,9 @@ async function copyAssets() {
   await Promise.all([
     writeFile(`${OUT}/index.html`, html.replaceAll('__BUILD_ID__', BUILD_ID).replaceAll('__SDK_VERSION__', SDK_VERSION)),
     copyFile('styles.css', `${OUT}/styles.css`),
+    // The platform manifest points at <slug>/icon-512.png (tools/setup-apps-
+    // platform.php in the web repo), so the icon ships with the bundle.
+    copyFile('icon/icon-512.png', `${OUT}/icon-512.png`),
     copyPages(),
   ]);
 }

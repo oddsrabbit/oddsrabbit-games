@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { dayKey, localParts, nextLocalHour } from './localtime';
 import { act, advance, thriving, bondLevel, earsOf, foodReaction, giftReady, isAsleep, isNight, isPetState, mood, newPet, rewindFuture, sleepMs, visit, type FoodId, type PetState } from './sim';
-import { BOND_DAILY_CAP, DAY_MS, DAY_ROLLOVER_HOUR, FOODS, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
+import { BOND_DAILY_CAP, CARE, DAY_MS, DAY_ROLLOVER_HOUR, FOODS, HANDS_ON, HOUR_MS, LOVES_BONUS_HAPPY, MAX_CATCH_UP_MS, SLEEP, STEP_MS } from './tuning';
 
 const UTC = 'UTC';
 // 2026-09-24 12:00 UTC, a Thursday afternoon.
@@ -427,4 +427,25 @@ test('a trip started on a clock running ahead keeps its length when brought back
   const t = fixed.timers.find((x) => x.kind === 'forage')!;
   assert.ok(t.startedAtMs <= NOON + STEP_MS);
   assert.equal(t.endsAtMs - t.startedAtMs, 4 * HOUR_MS);
+});
+
+test('care by hand adds a little joy, and nothing else: the same clover and bond as the button', () => {
+  const s = pet();
+  s.needs = { hunger: 40, happy: 40, energy: 80, clean: 30 };
+  for (const [a, opts] of [['pet', {}], ['clean', {}], ['feed', { food: 'carrot' as FoodId }]] as const) {
+    const quick = act(s, a, NOON, UTC, opts);
+    const byHand = act(s, a, NOON, UTC, { ...opts, hands: true });
+    assert.ok(quick.ok && byHand.ok);
+    assert.equal(byHand.state.needs.happy - quick.state.needs.happy, HANDS_ON.happy, a);
+    assert.equal(byHand.clover, quick.clover, a);
+    assert.equal(byHand.bond, quick.bond, a);
+  }
+  // asleep, a pat is gentle either way
+  const tired = pet();
+  tired.needs.energy = 10;
+  const asleep = act(tired, 'nap', NOON, UTC);
+  assert.ok(asleep.ok);
+  const gentle = act(asleep.state, 'pet', NOON + STEP_MS, UTC, { hands: true });
+  assert.ok(gentle.ok);
+  assert.equal(gentle.state.needs.happy - asleep.state.needs.happy, CARE.petAsleep.happy);
 });

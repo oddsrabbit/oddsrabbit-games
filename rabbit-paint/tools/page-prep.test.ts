@@ -103,7 +103,7 @@ test('outline: a black background is an area to color, not solid ink', () => {
   assert.equal(outline.regions.length, 2);
 });
 
-test('outline: thin dark strokes in a colour picture stay lines', () => {
+test('outline: a drawn stroke between two colours becomes one line', () => {
   const w = 1000;
   const h = 600;
   // Two colours split by a 6 px black stroke at x = 300.
@@ -111,6 +111,22 @@ test('outline: thin dark strokes in a colour picture stay lines', () => {
   const r = prepPicture(rgb, w, h, 1, 'outline');
   assert.equal(r.ink[300 * w + 300], 1);
   assert.equal(r.regions.length, 2);
+});
+
+test('outline: a thick black outline round a shape is one line, not two', () => {
+  const w = 1000;
+  const h = 1000;
+  // A white disc with a 24 px black ring, on blue.
+  const rgb = picture(w, h, (x, y) => {
+    const r = Math.hypot(x - 500, y - 500);
+    return r < 300 ? [255, 255, 255] : r < 324 ? [20, 20, 30] : [120, 190, 240];
+  });
+  const r = prepPicture(rgb, w, h, 1, 'outline');
+  assert.equal(r.regions.length, 2);
+  // Across the ring, one run of ink.
+  let runs = 0;
+  for (let x = 700; x < 900; x++) if (r.ink[500 * w + x] && !r.ink[500 * w + x - 1]) runs++;
+  assert.equal(runs, 1);
 });
 
 test('outline: a grainy photo is simplified to a few dozen areas', () => {

@@ -11,8 +11,8 @@ import { SHOP_ART } from './art/shop';
 import { resizeCanvas, toSprite, type Sprite } from './art/pixels';
 import { drawRabbit, dressKey, K_GARDEN, RABBIT_GROUND, type Dress, type Face, type Frame } from './art/rabbit';
 import { byId, type PlacedItem } from './decor';
-import { plotOffer, plotUpgrade, stage } from './extras';
-import { AREA_W, areaX, FIELD, gardenView, STRIP_H, STRIP_W, timerLabel, type AreaId, type GardenThing } from './garden';
+import { plotOffer, plotUpgrade, stage, thirsty, weedy } from './extras';
+import { AREA_W, areaX, FIELD, gardenView, PLOT_SPOTS, STRIP_H, STRIP_W, timerLabel, type AreaId, type GardenThing } from './garden';
 import type { Coat, PetState } from './sim';
 import type { Season, Weather } from './world';
 import type { BuildingId } from './yard';
@@ -79,6 +79,8 @@ const STROLL_MS = 700;
 const FOLLOW_MS = 250;
 /** Her hop, px/ms: from the edge of the view to her spot (about 90 px) in about 450 ms. */
 const HOP_SPEED = 0.2;
+/** How long she stays by a bed you're tending before she goes back to her spot. */
+const TEND_MS = 4000;
 /** Landed, she looks round this long after: back into the area, not at the edge she hopped to. */
 const TURN_MS = 350;
 /** Dragged `over` pixels past an end, the camera goes this far: less and less. */
@@ -119,6 +121,20 @@ export class GardenScene {
   private particles: { art: ItemArt; x: number; y: number; born: number }[] = [];
   /** The furthest area you can walk to: past it (an area still to pay for) a drag gives like the strip's end. */
   reach: AreaId = 'meadow';
+
+  /**
+   * She comes to help with bed `i`: hops over beside it and has a sniff
+   * about for a few seconds, then goes back to her spot.
+   */
+  tend(i: number, now: number): void {
+    const spot = PLOT_SPOTS[i];
+    if (!spot) return;
+    // beside it, on the side towards the middle of the patch
+    const side = spot.x < AREA_W / 2 ? 1 : -1;
+    this.help = { x: spot.x + side * 15, field: spot.x, until: now + TEND_MS };
+  }
+
+  private help: { x: number; field: number; until: number } | null = null;
 
   /** A few sprites rising from a strip point: clover from the yard, a picked crop. */
   burst(art: ItemArt, n: number, now: number, at: { x: number; y: number }): void {
@@ -399,6 +415,16 @@ export class GardenScene {
       const p = m.pet.garden?.plots?.[t.index] ?? null;
       const st = p ? stage(p, m.nowMs) : 0;
       this.put(this.sprite(`field:${m.season}:${p?.crop}:${st}`, () => toSprite(drawField(m.season, p?.crop ?? null, st))), t.spot.x, t.spot.y);
+      if (p?.watered && t.state === 'growing') {
+        // watered: the soil's dark and damp between the plants
+        this.ctx.fillStyle = 'rgba(40,24,14,0.22)';
+        this.ctx.fillRect(Math.round(t.spot.x - FIELD.w / 2) + 1, t.spot.y - FIELD.h + 1, FIELD.w - 2, FIELD.h - 4);
+      }
+      if (p && !m.guest && weedy(m.pet, t.index, m.nowMs)) {
+        // a dandelion come up between the rows, somewhere of its own
+        const wx = Math.round(t.spot.x - FIELD.w / 2 + 5 + ((p.plantedAtMs / 60_000 + t.index * 7) % (FIELD.w - 10)));
+        this.put(this.sprite('item:dandelion', () => toSprite(drawItem('dandelion'))), wx, t.spot.y - 5);
+      }
       if (!p && !m.guest) {
         // empty and yours: a seed packet bobbing over the soil, its shadow on the furrows, to say "plant here"
         const bob = reduceMotion ? 0 : Math.floor(now / 500) % 2;
@@ -410,6 +436,11 @@ export class GardenScene {
         // how long it has left, on a tag over the field's front edge
         const label = timerLabel(p.readyAtMs - m.nowMs);
         this.put(this.sprite(`timer:${label}`, () => toSprite(drawTag(label))), t.spot.x, t.spot.y);
+        // thirsty: a drop bobbing over it, to say "water me"
+        if (!m.guest && thirsty(p, m.nowMs)) {
+          const bob = reduceMotion ? 0 : Math.floor(now / 450) % 2;
+          this.put(this.sprite('item:droplet', () => toSprite(drawItem('droplet'))), t.spot.x + FIELD.w / 2 - 3, t.spot.y - FIELD.h + 4 - bob);
+        }
       }
       return;
     }
@@ -455,7 +486,9 @@ export class GardenScene {
     }
     const dt = Math.min(100, Math.max(0, now - this.lastNow));
     this.lastNow = now;
-    const goal = RABBIT_SPOT[m.area];
+    if (this.help && (now > this.help.until || m.area !== 'patch')) this.help = null;
+    const help = this.help;
+    const goal = help ? help.x : RABBIT_SPOT[m.area];
     const waiting = now < this.followAt;
     if (!waiting && this.followAt) {
       // setting off: from just past the edge you came in by, unless she's already nearer than that
@@ -473,8 +506,9 @@ export class GardenScene {
       this.rabbitX += Math.sign(dx) * Math.min(Math.abs(dx), HOP_SPEED * dt);
       this.turnAt = now + (reduceMotion ? 0 : TURN_MS);
     } else if (!waiting) this.rabbitX = goal;
-    // settled: she looks back into the area (her spot is off to one side), not at the edge of the view
-    if (!moving && !waiting && this.turnAt && now >= this.turnAt) {
+    // helping, she looks at the bed; settled, back into the area (her spot is off to one side), not at the edge of the view
+    if (help && !moving) this.facing = help.field < this.rabbitX ? 1 : -1;
+    else if (!moving && !waiting && this.turnAt && now >= this.turnAt) {
       this.turnAt = 0;
       const middle = AREAS_ORDER[m.area] * AREA_W + AREA_W / 2;
       this.facing = this.rabbitX > middle ? 1 : -1;
@@ -484,7 +518,8 @@ export class GardenScene {
       if (now > this.blinkAt) { frame = 2; if (now > this.blinkAt + 140) this.blinkAt = now + 2500 + Math.random() * 3000; }
       else if (!reduceMotion && Math.floor(now / 900) % 3 === 1) frame = 1;
     }
-    const face: Face = 'content';
+    // by a bed, she has a good sniff at it
+    const face: Face = help && !moving && !reduceMotion && Math.floor(now / 160) % 2 ? 'chew' : 'content';
     const s = this.sprite(`rabbit:${m.coat}:${face}:${frame}:${dressKey(m.dress)}`, () => toSprite(drawRabbit(m.coat, face, frame, m.dress, K_GARDEN)));
     const hop = moving ? Math.round(Math.abs(Math.sin(this.rabbitX / 5)) * 3) : 0;
     const left = Math.round(this.rabbitX - s.w / 2), top = STRIP_H - RABBIT_GROUND - hop - 1;

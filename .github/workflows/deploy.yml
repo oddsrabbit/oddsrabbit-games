@@ -1,0 +1,100 @@
+# Deploys release/ to apps.oddsrabbit.com: its own application on the Cloudways
+# server that also runs the WordPress site, which deploys the same way (rsync
+# over SSH; see that repo's .github/workflows/deploy.yml).
+#
+# Run by hand from the Actions tab: pick a branch or commit and press Run.
+# Rolling back is running it again on an earlier commit.
+#
+# Secrets:
+#   CLOUDWAYS_SSH_KEY, CLOUDWAYS_SERVER, CLOUDWAYS_USER
+#                      as in the WordPress repo. The user must reach the apps
+#                      application: the server's master user does; an
+#                      application user reaches only its own.
+#   APPS_TARGET_PATH   the apps application's public_html, e.g.
+#                      /home/master/applications/<app>/public_html
+#   APPS_DEPLOY_KEY    OR_APPS_DEPLOY_KEY on the WordPress side (secrets.php)
+name: Deploy apps.oddsrabbit.com
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-apps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Build release/
+        run: node scripts/release.mjs --install
+
+      - name: Set up SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.CLOUDWAYS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh ~/.ssh/controlmasters
+          echo "$PRIVATE_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat > ~/.ssh/config << EOF
+          Host ${{ secrets.CLOUDWAYS_SERVER }}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            ServerAliveInterval 60
+            ControlMaster auto
+            ControlPath ~/.ssh/controlmasters/%r@%h:%p
+            ControlPersist 1m
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Upload
+        env:
+          DEST: ${{ secrets.CLOUDWAYS_USER }}@${{ secrets.CLOUDWAYS_SERVER }}:${{ secrets.APPS_TARGET_PATH }}/
+        run: |
+          # Everything but the HTML first, then the HTML: a page is never live
+          # before the files it points at. --delay-updates puts each pass's
+          # files in place together at its end, so a player loading mid-upload
+          # gets the old build or the new one. --checksum skips unchanged files.
+          #
+          # No --delete: the folder may hold files this repo doesn't build. A
+          # file dropped from a build stays on the server until removed by hand.
+          RSYNC="rsync -rz --checksum --delay-updates --no-perms --omit-dir-times"
+          $RSYNC --exclude '*.html' release/ "$DEST"
+          $RSYNC --include '*/' --include '*.html' --exclude '*' release/ "$DEST"
+
+      - name: Bump the cache version
+        run: |
+          # Moves every app's manifest updatedAt, which the web and mobile hosts
+          # put in the game's URL: clients fetch the new HTML instead of the copy
+          # they hold. Was the "Bump cache version" button.
+          curl -fsS -X POST \
+            -H "X-Deploy-Key: ${{ secrets.APPS_DEPLOY_KEY }}" \
+            https://www.oddsrabbit.com/api/oddsrabbit/v1/apps-deploy/bump-versions
+          echo
+
+      - name: Verify
+        run: |
+          # Each page's HTML, fresh from the server (a query string no cache has
+          # seen), must carry this build's id.
+          BUILD_ID=$(jq -r .buildId release/version.json)
+          FAILED=0
+          for page in $(jq -r '.pages[]' release/version.json); do
+            grep -q "$BUILD_ID" "release/$page/index.html" || continue
+            if curl -fsS "https://apps.oddsrabbit.com/$page/?deploycheck=$RANDOM$RANDOM" | grep -q "$BUILD_ID"; then
+              echo "✅ $page"
+            else
+              echo "❌ $page is not serving build $BUILD_ID"
+              FAILED=1
+            fi
+          done
+          exit $FAILED

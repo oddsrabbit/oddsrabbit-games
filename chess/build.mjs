@@ -20,6 +20,21 @@ const JS = ['rules.js', 'pieces.js', 'board.js', 'engine.js', 'computer.js', 'ap
 // separate worker and ships with its licence; see README.md.
 const ENGINE_SRC = 'node_modules/stockfish';
 const ENGINE = ['bin/stockfish-18-lite-single.js', 'bin/stockfish-18-lite-single.wasm', 'Copying.txt'];
+// GPLv3 section 6(d): the compiled engine ships with directions to its
+// source. Written from the installed package, so a version bump can't leave
+// it pointing at the wrong release.
+const engineVersion = JSON.parse(await readFile(`${ENGINE_SRC}/package.json`, 'utf8')).version;
+const ENGINE_SOURCE = `Stockfish.js ${engineVersion}: the lite single-threaded WASM build of
+Stockfish 18, unmodified (npm package stockfish@${engineVersion}).
+
+Licensed under the GNU General Public License v3; see Copying.txt.
+
+Source for this exact release:
+  https://github.com/nmrugg/stockfish.js/tree/v${engineVersion}
+  https://github.com/nmrugg/stockfish.js/archive/refs/tags/v${engineVersion}.tar.gz
+
+Stockfish itself: https://github.com/official-stockfish/Stockfish
+`;
 
 async function hash(files) {
   const bufs = await Promise.all(files.map((f) => readFile(`${SDK_DIST}/${f}`))).catch(() => null);
@@ -59,6 +74,9 @@ await Promise.all([
   copyFile('fonts/OFL.txt', 'dist/chess/fonts/OFL.txt'),
   ...JS.map((name) => copyFile(`js/${name}`, `dist/chess/js/${name}`)),
   ...ENGINE.map((file) => copyFile(`${ENGINE_SRC}/${file}`, `dist/chess/engine/${file.split('/').pop()}`)),
+  // Ours, not Stockfish's: the worker that loads it (see the file).
+  copyFile('js/engine-worker.js', 'dist/chess/engine/worker.js'),
+  writeFile('dist/chess/engine/SOURCE.txt', ENGINE_SOURCE),
 ]);
 
 // Local copies so the game runs from dist/ with `../sdk-v1.js` resolving.

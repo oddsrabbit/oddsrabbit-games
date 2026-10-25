@@ -46,7 +46,8 @@
     "build:watch": "node build.config.mjs --watch",
     "test": "node test.config.mjs",
     "type-check": "tsc --noEmit",
-    "clean": "rm -rf dist .test-build *.tsbuildinfo"
+    "clean": "rm -rf dist release .test-build *.tsbuildinfo",
+    "release": "node scripts/release.mjs"
   },
   "keywords": [
     "oddsrabbit",

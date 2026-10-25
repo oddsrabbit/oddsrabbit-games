@@ -1,5 +1,6 @@
-// What's saved for the player: each page's fills, the "keep coloring" list,
-// recent and favourite fills, and whether today's page was posted.
+// What's saved for the player: each page's fills, the index of library pages
+// they've painted (for My art), recent and favourite fills, and whether a
+// page was posted.
 //
 // A session is today's page (`day-N`: its own copy, so a page that comes
 // round again in the rotation starts blank), a library page (`page-<slug>`),
@@ -36,15 +37,17 @@ export interface Progress {
   posted: boolean;
 }
 
-export interface WipEntry {
+/** A library page the player has painted, in progress or finished. */
+export interface ArtEntry {
   key: SessionKey;
   slug: string;
   filled: number;
   total: number;
+  posted: boolean;
   at: number;
 }
 
-const WIP_MAX = 12;
+const ART_INDEX = 'art';
 const DAYS_KEPT = 7;
 
 const isLocal = (key: SessionKey) => key.startsWith('mine-');
@@ -65,14 +68,33 @@ export async function saveProgress(s: Session, p: Progress): Promise<void> {
   if (p.posted) value.posted = true;
   await writeJson(s.key, value, isLocal(s.key));
   if (s.day !== null) await noteDay(s.day);
-  // Library pages in progress only: today's page has its own card, and the
-  // player's own pictures their own shelf.
+  // Library pages only: today's page has its own card, and the player's own
+  // pictures their own shelf.
   if (s.day !== null || isLocal(s.key)) return;
   const filled = p.fills.filter(Boolean).length;
-  const total = p.fills.length;
-  const wip = (await loadWip()).filter((w) => w.key !== s.key);
-  if (filled > 0 && filled < total) wip.unshift({ key: s.key, slug: s.slug, filled, total, at: Date.now() });
-  await writeJson('wip', wip.slice(0, WIP_MAX));
+  const list = ((await readJson<ArtEntry[] | null>(ART_INDEX, null)) ?? []).filter((e) => e.key !== s.key);
+  if (filled > 0) list.unshift({ key: s.key, slug: s.slug, filled, total: p.fills.length, posted: p.posted, at: Date.now() });
+  await writeJson(ART_INDEX, list);
+}
+
+/**
+ * The library pages the player has painted, newest first. Built once from each
+ * page's saved fills, for players from before the index; kept by saveProgress
+ * since.
+ */
+export async function loadArtIndex(pages: ReadonlyArray<{ slug: string; regions: number }>): Promise<ArtEntry[]> {
+  const saved = await readJson<ArtEntry[] | null>(ART_INDEX, null);
+  if (Array.isArray(saved)) return saved.filter((e) => e && typeof e.slug === 'string' && typeof e.key === 'string');
+  const found = await Promise.all(pages.map(async (page): Promise<ArtEntry | null> => {
+    const key = `page-${page.slug}` as const;
+    const p = await loadProgress({ key, slug: page.slug, day: null }, page.regions);
+    const filled = p.fills.filter(Boolean).length;
+    return filled ? { key, slug: page.slug, filled, total: page.regions, posted: p.posted, at: 0 } : null;
+  }));
+  const list = found.filter((e): e is ArtEntry => e !== null);
+  await writeJson(ART_INDEX, list);
+  await removeJson('wip');
+  return list;
 }
 
 /** Records a day with saved progress, and deletes all but the latest few. */
@@ -87,14 +109,16 @@ async function noteDay(day: number): Promise<void> {
   await Promise.all(all.slice(DAYS_KEPT).map((d) => removeJson(`day-${d}`)));
 }
 
+/** Clears a page's fills to color it again from blank. */
+export async function clearProgress(key: SessionKey): Promise<void> {
+  await removeJson(key, isLocal(key));
+  const list = await readJson<ArtEntry[] | null>(ART_INDEX, null);
+  if (Array.isArray(list) && list.some((e) => e.key === key)) await writeJson(ART_INDEX, list.filter((e) => e.key !== key));
+}
+
 /** Forgets a deleted picture's progress. */
 export function forgetProgress(key: SessionKey): Promise<void> {
   return removeJson(key, isLocal(key));
-}
-
-export async function loadWip(): Promise<WipEntry[]> {
-  const list = await readJson<WipEntry[]>('wip', []);
-  return Array.isArray(list) ? list.filter((w) => w && typeof w.slug === 'string' && typeof w.key === 'string') : [];
 }
 
 export interface ColorPrefs {

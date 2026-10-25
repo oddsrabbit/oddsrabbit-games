@@ -65,12 +65,12 @@ let UI_VERSION = BUILD_ID;
 // app ever requests.
 //
 // Until that exists, the manifest's `updatedAt` is the only cache-bust that
-// works, and it is MANUAL — bump it from the WP setup tool
-// (`tools/setup-apps-platform.php` → "Bump cache version") after every upload.
-// Both hosts append it, web via `inc/js/pages/games.js` and mobile via
-// `AppHost.tsx`, so one bump moves the host URL and the game iframe URL
-// together. Skip it and clients legitimately keep serving what they already
-// hold; that is not a bug in the app.
+// works. The deploy workflow (`.github/workflows/deploy.yml`) bumps it after
+// every upload; an upload made by hand needs the WP setup tool's "Bump cache
+// version" (`tools/setup-apps-platform.php`). Both hosts append it, web via
+// `inc/js/pages/games.js` and mobile via `AppHost.tsx`, so one bump moves the
+// host URL and the game iframe URL together. Skip it and clients legitimately
+// keep serving what they already hold; that is not a bug in the app.
 //
 // See docs/deploy-cache-policy.md.
 

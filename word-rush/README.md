@@ -31,7 +31,7 @@ npm test && npm run type-check
 npm run build                        # → dist/word-rush/
 ```
 
-Upload `dist/word-rush/` to `apps.oddsrabbit.com/word-rush/`. `dist/sdk-v1.js` and `dist/leaderboard-v1.css` are copies for the harness only; the live ones deploy from the root build.
+The deploy workflow ships `dist/word-rush/` to `apps.oddsrabbit.com/word-rush/` (see the root README's *Deploying*). `dist/sdk-v1.js` and `dist/leaderboard-v1.css` are copies for the harness only.
 
 ### Boards
 
@@ -47,7 +47,7 @@ Copy `data/word-rush-boards.json` to the backend's `tools/data/` and deploy. The
 
 1. **Pick the launch day** and set it as the epoch in all three places: `EPOCH` in `src/puzzle.ts`, `'epoch'` for `word-rush` in the backend's `DailyGameRegistry.php`, and the boards file (rerun `npm run gen-boards`, which writes `EPOCH` into it). It's `2026-10-07` (a Wednesday). `WordGridProvider` refuses a file whose epoch doesn't match the registry. The backend's `WordSprintSealerTest` also hard-codes the epoch; update it too.
 2. Copy the boards file to the backend's `tools/data/` and check the two copies match (`sha256sum`): a stale copy once shipped boards with blocked words. Deploy, and run `tools/setup-apps-platform.php` to seed the app row. It's seeded `admin_only`.
-3. Build here and upload `dist/word-rush/` (it includes `icon-512.png`, which the manifest points at), then **Bump cache version** in `tools/setup-apps-platform.php` (`../docs/deploy-cache-policy.md`: it's the only cache-bust that works).
+3. Run the deploy workflow (root README, *Deploying*). It ships `dist/word-rush/`, including `icon-512.png`, which the manifest points at, and bumps the cache version.
 4. Run the provisioning cron once by hand and check `puzzle-0` was seeded (before launch it seeds from day 0 and doesn't alert). If any `puzzle-N` rows were seeded from an older boards file, delete them first: a seeded day is never rewritten.
 5. Play it as an admin, then flip it public: `POST /admin/apps/word-rush {adminOnly:false}`.
 

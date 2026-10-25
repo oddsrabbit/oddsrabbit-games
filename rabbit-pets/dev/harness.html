@@ -38,6 +38,7 @@
 //   raffle=9                      that many tickets already bought in every event's raffle (9: the next one wins)
 //   click=Feed,Pet                press buttons in order after load (an exact text match first)
 //   drag=x1,y1,x2,y2              then drag on the burrow, in scene pixels
+//   needs=20,80,25,10             the seeded pet's food, joy, energy and clean (to see how she looks)
 const q = new URLSearchParams(location.search);
 const store = {};
 let offset = 0;
@@ -61,6 +62,7 @@ if (seed) {
     { uid: 'd', id: 'lantern', slot: 'h2' }, { uid: 'e', id: 'jar', slot: 'f3' },
   ] });
   store['v1:settings'] = JSON.stringify({ v: 1, rev: 1, reminders: q.get('ask') ? null : 'on', scheduled: {} });
+  if (q.get('needs')) { const p = JSON.parse(store['v1:pet']); const [hunger, happy, energy, clean] = q.get('needs').split(',').map(Number); p.needs = { hunger, happy, energy, clean }; store['v1:pet'] = JSON.stringify(p); }
   if (q.get('ask')) { const p = JSON.parse(store['v1:pet']); p.timers = []; store['v1:pet'] = JSON.stringify(p); }
   // nap=1: she's asleep, two hours in; holiday=1: she's away for two days
   if (q.get('nap')) { const p = JSON.parse(store['v1:pet']); p.needs.energy = 30; p.timers.push({ kind: 'nap', startedAtMs: t - gap, endsAtMs: t + 2 * 3600e3 }); store['v1:pet'] = JSON.stringify(p); }
