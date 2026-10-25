@@ -68,6 +68,29 @@ jobs:
           EOF
           chmod 600 ~/.ssh/config
 
+      - name: Check the target folder
+        env:
+          USER: ${{ secrets.CLOUDWAYS_USER }}
+          HOST: ${{ secrets.CLOUDWAYS_SERVER }}
+          TARGET: ${{ secrets.APPS_TARGET_PATH }}
+        run: |
+          # rsync takes the path literally: no ~ expansion on the server.
+          case "$TARGET" in
+            /*) ;;
+            *) echo "::error::APPS_TARGET_PATH must be a full path starting with / (no ~)."; exit 1 ;;
+          esac
+          # Shown either way, so a run's log says where it's writing. GitHub
+          # masks any text equal to a secret, so the path itself may read ***.
+          echo "Applications this user can see (* = holds host/, the apps one):"
+          ssh "${USER}@${HOST}" 'for d in ~/applications/*/public_html; do [ -d "$d" ] || continue; m=" "; [ -d "$d/host" ] && m="*"; echo "  $m $(readlink -f "$d")"; done'
+          if ! ssh "${USER}@${HOST}" "test -d '${TARGET}'"; then
+            echo "::error::APPS_TARGET_PATH isn't a folder ${USER} can see on the server. Use the * path above."
+            exit 1
+          fi
+          echo "Target: $(ssh "${USER}@${HOST}" "readlink -f '${TARGET}'")"
+          echo "It holds:"
+          ssh "${USER}@${HOST}" "ls -1 '${TARGET}'" | sed 's/^/  /'
+
       - name: Upload
         env:
           DEST: ${{ secrets.CLOUDWAYS_USER }}@${{ secrets.CLOUDWAYS_SERVER }}:${{ secrets.APPS_TARGET_PATH }}/
