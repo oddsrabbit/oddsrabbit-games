@@ -51,8 +51,9 @@ tests. `rabbit-pets/`, `word-battle/`, `chess/`, `word-rush/` and
 `rabbit-paint/` have their own `package.json` and build: build the root first,
 since they read its `dist/` and `src/`, then see each game's README.
 
-**Deploying:** run *Deploy apps.oddsrabbit.com* from the Actions tab
-([`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)). It runs
+**Deploying:** every push to `main` deploys, except one that only touches docs
+or Markdown ([`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml));
+*Deploy apps.oddsrabbit.com* in the Actions tab runs it by hand. It runs
 `npm run release` (every test and build, into one `release/` folder holding
 exactly what the server gets, plus `version.json`), uploads it over SSH,
 bumps the cache version through the WordPress site and checks every page

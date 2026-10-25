@@ -2,8 +2,14 @@
 # server that also runs the WordPress site, which deploys the same way (rsync
 # over SSH; see that repo's .github/workflows/deploy.yml).
 #
-# Run by hand from the Actions tab: pick a branch or commit and press Run.
-# Rolling back is running it again on an earlier commit.
+# Runs on every push to main, as the WordPress repo's deploy does; a push that
+# only touches docs or Markdown is skipped, since it changes nothing served.
+# The release build runs every test first, so a failing test stops the deploy.
+# A game uploaded unfinished isn't reachable: players only get apps registered
+# in WordPress, and a new one is seeded admin_only.
+#
+# It can also be run by hand from the Actions tab, on any branch or commit:
+# that's how to redeploy, or roll back to an earlier commit.
 #
 # Secrets:
 #   CLOUDWAYS_SSH_KEY, CLOUDWAYS_SERVER, CLOUDWAYS_USER
@@ -15,6 +21,11 @@
 #   APPS_DEPLOY_KEY    OR_APPS_DEPLOY_KEY on the WordPress side (secrets.php)
 name: Deploy apps.oddsrabbit.com
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
