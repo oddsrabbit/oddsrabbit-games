@@ -111,7 +111,8 @@ jobs:
           # Moves every app's manifest updatedAt, which the web and mobile hosts
           # put in the game's URL: clients fetch the new HTML instead of the copy
           # they hold. Was the "Bump cache version" button.
-          curl -fsS -X POST \
+          # --fail-with-body: on an error, print the server's message too.
+          curl -sS --fail-with-body -X POST \
             -H "X-Deploy-Key: ${{ secrets.APPS_DEPLOY_KEY }}" \
             https://www.oddsrabbit.com/api/oddsrabbit/v1/apps-deploy/bump-versions
           echo
