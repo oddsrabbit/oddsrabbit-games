@@ -280,6 +280,7 @@
     attemptLogged = true;
     if (game.isDailyWonAlready()) return;
     storage.bumpDailyAttempts(game.getDailyId());
+    submitDailyStart(game.getDailyId());
   }
 
   function dailyRetries(id) {
@@ -556,13 +557,14 @@
         storage.setStreak(nextStreak);
         storage.setLastDaily(dailyId, true);
       }
-      // Submit to the daily leaderboard + populate the friends panel. The
-      // submit is idempotent server-side (a replay 409s on already-submitted
-      // and is swallowed), so it's safe to call on counted + replay alike.
+      // Submit to the daily leaderboard + populate the friends panel. First
+      // win only: the submit is keepBest (it has to replace the "started"
+      // zero), so a replay of a deal already won — retries no longer bumped,
+      // the line already known — would otherwise be able to raise the score.
       var retries = dailyRetries(dailyId);
       var result = { timeMs: ms, moves: moves, retries: retries };
-      submitDailyScore(dailyId, result);
-      // A replay's submit 409s, so the board keeps the first win's score —
+      if (!alreadyCounted) submitDailyScore(dailyId, result);
+      // A replay doesn't submit, so the board keeps the first win's score —
       // splicing this game in would show the viewer a row that isn't theirs
       // on the board. Null takes the backend's own `isSelf` row instead.
       loadAndRenderFriends(dailyId, alreadyCounted ? null : result);
@@ -666,16 +668,42 @@
     return retries === 1 ? "1 retry" : retries + " retries";
   }
 
+  // A daily the player has started but not solved goes on the board as a
+  // zero, so the field shows who played today and not only who finished — a
+  // deal that got the better of someone is still a day they turned up. Zero
+  // sits below every solve under both schemes and adds nothing to the season
+  // total (a `sum`), so it records attendance without being worth anything.
+  //
+  // Both submits pass keepBest so the round holds one row per player that
+  // only ever rises: the start writes the zero, the first win replaces it,
+  // and a start after a win (noteDailyAttempt skips those anyway) could
+  // never knock a solve back down.
+  var UNSOLVED_SCORE = 0;
+
+  function isUnsolvedRow(row) {
+    var meta = row.metadata || null;
+    return row.score === UNSOLVED_SCORE && !!meta && meta.solved === false;
+  }
+
+  function submitDailyStart(id) {
+    submitDaily(id, UNSOLVED_SCORE, { solved: false });
+  }
+
   function submitDailyScore(id, result) {
+    submitDaily(id, dailyScore(id, result), {
+      solved: true,
+      timeMs: result.timeMs,
+      moves: result.moves,
+      retries: result.retries
+    });
+  }
+
+  function submitDaily(id, score, metadata) {
     if (!OR.scores || typeof OR.scores.submit !== "function") return;
     try {
       OR.scores
-        .submit({
-          roundKey: dailyRoundKey(id),
-          score: dailyScore(id, result),
-          metadata: { timeMs: result.timeMs, moves: result.moves, retries: result.retries },
-        })
-        .catch(function () {}); // 409 on replay (already-submitted) is expected.
+        .submit({ roundKey: dailyRoundKey(id), score: score, metadata: metadata, keepBest: true })
+        .catch(function () {});
     } catch (_) {}
   }
 
@@ -736,6 +764,7 @@
 
     function formatResult(row) {
       var meta = row.metadata || null;
+      if (isUnsolvedRow(row)) return "Unsolved";
       if (byMoves) {
         return meta && typeof meta.moves === "number" ? meta.moves + " moves" : "Solved";
       }
@@ -751,6 +780,12 @@
       var meta = row.metadata || null;
       if (!byMoves || !meta || typeof meta.retries !== "number" || meta.retries <= 0) return null;
       return [retriesLabel(meta.retries)];
+    }
+
+    // Unsolved rows are listed but hold no place — a dash, not a number or a
+    // medal. Ignored by an older cached UI bundle, which numbers them instead.
+    function isRanked(row) {
+      return !isUnsolvedRow(row);
     }
 
     // The viewer's own row comes from the just-finished game, so it can be shown
@@ -816,6 +851,7 @@
         },
         formatValue: formatResult,
         badges: resultBadges,
+        ranked: isRanked,
         signInPrompt: OR.user
           ? null
           : {
@@ -850,7 +886,8 @@
           return OR.scores.top({ roundKey: roundKey, order: "top", limit: BOARD_LIMIT });
         },
         formatValue: formatResult,
-        badges: resultBadges
+        badges: resultBadges,
+        ranked: isRanked
       };
       // The viewer's own placement when they're outside the top 20. Gated
       // separately from the board — `scores.rank` ships after `scores.top`, so
@@ -861,7 +898,11 @@
         globalTab.loadPinned = function () {
           return OR.scores
             .rank({ roundKey: roundKey, order: "top" })
-            .then(UI.pinnedFromRank);
+            .then(UI.pinnedFromRank)
+            .then(function (pinned) {
+              // "#412" would claim a place an unsolved row doesn't hold.
+              return pinned && isUnsolvedRow(pinned.row) ? null : pinned;
+            });
         };
       }
       tabs.push(globalTab);
@@ -1951,6 +1992,12 @@
         // attempt. A saved deal with a move in it was counted when it was made.
         attemptLogged = (saved.moves | 0) > 0;
         if (game.restoreSaved(saved)) {
+          // Not a new attempt, but a deal begun before "started" rows were
+          // submitted (or whose submit was lost) should still be on the board.
+          // keepBest makes the repeat a no-op once the row exists.
+          if (attemptLogged && saved.mode === GameClass.MODE_DAILY && !game.isDailyWonAlready()) {
+            submitDailyStart(today);
+          }
           statsContainerEl.classList.add("ready");
           OR.ready();
           return;

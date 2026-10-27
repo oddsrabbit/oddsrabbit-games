@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   medalsFor,
   pinnedFromRank,
+  rankLabelsFor,
   ranksFor,
   type LeaderboardRow,
 } from './leaderboard';
@@ -57,6 +58,18 @@ test('a medal needs a place nobody else reached', () => {
   // Positional boards never share a rank, so they never lose a medal.
   assert.deepEqual(medalsFor([1, 2, 3]), ['🥇', '🥈', '🥉']);
   assert.deepEqual(medalsFor([]), []);
+});
+
+test('an unranked row gets a dash and never a medal', () => {
+  // One solver and one player who started but didn't finish: the second row
+  // is the only holder of rank 2, and must not take silver for it.
+  const unsolvedAtZero = { ranked: (row: LeaderboardRow) => row.score > 0 };
+  assert.deepEqual(rankLabelsFor(rows(10, 0), unsolvedAtZero), ['🥇', '–']);
+  assert.deepEqual(rankLabelsFor(rows(10, 9, 8, 7, 0, 0), unsolvedAtZero), [
+    '🥇', '🥈', '🥉', '4', '–', '–',
+  ]);
+  // Without the hook every row places, as before.
+  assert.deepEqual(rankLabelsFor(rows(10, 0), {}), ['🥇', '🥈']);
 });
 
 test('pinnedFromRank maps a rank answer, and null through', () => {

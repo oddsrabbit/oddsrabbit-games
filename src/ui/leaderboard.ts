@@ -98,6 +98,14 @@ export interface LeaderboardTab {
    */
   rankTies?: boolean;
   /**
+   * Whether a row holds a place. Default every row. An unranked row is still
+   * listed, with a dash in the rank cell and never a medal — for players who
+   * took part without finishing, e.g. a solitaire deal started but not solved.
+   * The board sorts by score alone, so give these rows a score below every
+   * ranked one; ranks above them are unaffected.
+   */
+  ranked?(row: LeaderboardRow, index: number): boolean;
+  /**
    * The viewer's own placement, pinned as a separated row under the board when
    * they don't appear in it — the `…  #412 @you` line.
    *
@@ -269,6 +277,24 @@ export function medalsFor(ranks: readonly number[]): (string | null)[] {
 }
 
 /**
+ * The rank cell for each row of a board: a medal, a number, or a dash for a
+ * row the tab marks unranked. Unranked rows sit out of the medal count too — a
+ * lone unfinished row in second place would otherwise be the only holder of
+ * its rank, and take 🥈.
+ *
+ * Exported for tests only, like {@link ranksFor}.
+ */
+export function rankLabelsFor(
+  rows: readonly LeaderboardRow[],
+  tab: Pick<LeaderboardTab, 'rankTies' | 'ranked'>
+): string[] {
+  const ranks = ranksFor(rows, tab.rankTies !== false);
+  const ranked = rows.map((row, i) => tab.ranked?.(row, i) !== false);
+  const medals = medalsFor(ranks.map((rank, i) => (ranked[i] ? rank : Infinity)));
+  return ranks.map((rank, i) => (ranked[i] ? medals[i] ?? String(rank) : '–'));
+}
+
+/**
  * `OddsRabbit.scores.rank(...)`'s answer as a `PinnedRank`, or null when there
  * is nothing to pin.
  *
@@ -385,17 +411,15 @@ function renderList(
   pinned: PinnedRank | null
 ): HTMLElement {
   const list = el('ul', 'lb-list');
-  const ranks = ranksFor(rows, tab.rankTies !== false);
-  const medals = medalsFor(ranks);
+  const labels = rankLabelsFor(rows, tab);
 
   rows.forEach((row, i) => {
-    const rank = ranks[i] ?? i + 1;
     list.appendChild(
       renderRow(
         row,
         i,
         tab,
-        medals[i] ?? String(rank),
+        labels[i] ?? String(i + 1),
         isViewerRow(row, viewerUuid),
         undefined
       )
