@@ -42,13 +42,14 @@ word-battle/    Word Battle — async multiplayer word tiles (rules: TilesRules.
 chess/          Chess — async two-player chess (rules: ChessRules.php)
 word-rush/      Word Rush — daily word grid, Ranked + Casual
 rabbit-paint/   Rabbit Paint — tap-to-fill coloring with a daily gallery
+rabbit-sudoku/  Rabbit Sudoku — one calm daily 9×9 sudoku, with streaks and hints
 docs/           Deploy cache policy, header guidelines, proposals
 scripts/        sync-public-sdk.mjs
 ```
 
 `npm install && npm run build` produces `dist/`; `npm test` runs the unit
-tests. `rabbit-pets/`, `word-battle/`, `chess/`, `word-rush/` and
-`rabbit-paint/` have their own `package.json` and build: build the root first,
+tests. `rabbit-pets/`, `word-battle/`, `chess/`, `word-rush/`,
+`rabbit-paint/` and `rabbit-sudoku/` have their own `package.json` and build: build the root first,
 since they read its `dist/` and `src/`, then see each game's README.
 
 **Deploying:** every push to `main` deploys, except one that only touches docs

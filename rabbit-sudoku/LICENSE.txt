@@ -1,0 +1,8 @@
+Copyright (c) 2026 OddsRabbit. All rights reserved.
+
+This game is proprietary. It is not covered by the MIT license at the root of
+this repository. No permission is granted to copy, modify, distribute or host
+it, in whole or in part, without written permission from OddsRabbit.
+
+Third-party assets bundled with it keep their own licenses, listed in this
+game's README.

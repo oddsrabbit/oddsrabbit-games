@@ -1,0 +1,22 @@
+{
+  "name": "rabbit-sudoku",
+  "private": true,
+  "description": "Rabbit Sudoku: a daily sudoku for OddsRabbit.",
+  "type": "module",
+  "scripts": {
+    "test": "node test.mjs",
+    "type-check": "tsc --noEmit",
+    "build": "node build.mjs",
+    "build:watch": "node build.mjs --watch",
+    "serve": "python3 -m http.server 8770",
+    "gen-puzzles": "node tools/run.mjs gen-puzzles"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

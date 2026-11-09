@@ -1,0 +1,115 @@
+# Rabbit Sudoku
+
+A daily 9×9 sudoku for OddsRabbit. Calm, not competitive: one shared puzzle a
+day for signed-in players, with no clock and no ranking. Friends see who solved
+it, you keep a streak, and hints explain the next step. The plan is
+[../docs/proposals/rabbit-sudoku.md](../docs/proposals/rabbit-sudoku.md).
+
+**Status:** the engine, the puzzles file and a first client are built.
+The client has two screens:
+- **Home:** today's puzzle, streak, the week tinted by difficulty, friends who
+  solved it, and a countdown to the next puzzle.
+- **Play:** the grid, Undo, Erase, Notes and Hint, and a row-of-nine pad.
+
+It also has settings (vibration on touch devices only), help and the solved
+sheet.
+
+The look is Word Battle's family, the same as chess: a sheet over a band of
+art (here, a slice of sudoku board in the icon's rust, with the eared title
+card on it), white cards,
+Bricolage Grotesque headings, and rust and green. It uses Word Battle's token
+names, but its neutrals are a cool white and grey instead of warm paper. Its
+font is copied from `../word-battle/fonts` at build time. It is light only, on
+purpose, and doesn't follow the host's dark theme.
+
+The icon (`icon/`) is a tilted sudoku box wearing rabbit ears, on the rust of
+the Play button. `icon.svg` is the source; `icon-512.png` ships with the build
+and `icon-1024.png` is for stores. The digits use Bricolage Grotesque, so
+render the PNGs from a page that loads that font. The server side isn't started.
+
+Because `package.json` now has a `build` script, `scripts/release.mjs` ships
+this folder on the next push to `main`. It lands at
+`apps.oddsrabbit.com/rabbit-sudoku/`, reachable by URL but in no catalog until
+the app row exists.
+
+## Play it locally
+
+```bash
+(cd .. && npm run build)   # the SDK first
+npm install && npm run build
+npm run serve              # then open http://localhost:8770/dev/harness.html
+```
+
+`dev/harness.html` stands in for the host. It serves days from the puzzles
+file, keeps your saves in this browser, and fakes five friends. Parameters
+(listed at the top of the file):
+
+- `day=N`: the day to play (default 6, a Monday).
+- `user=0`: signed out.
+- `fresh=1`: start over.
+- `friends=0`: no friends have solved it.
+- `sendfail=N`: the first N Daily submissions fail.
+- `chrome=app`: the app's insets.
+- `help=0`: skip the first-run help.
+- `open=1`: open straight into the puzzle.
+
+## Engine (`src/`)
+
+- `sudoku.ts`: cells (0–80, row by row), the 27 units, peers, candidate masks,
+  the 81-character text form (`.` for empty), duplicate checks.
+- `solver.ts`: the fast solver. Bitmask depth-first search on the cell with
+  the fewest candidates. Counts solutions (stopping at 2), solves, and fills
+  random complete grids.
+- `logic.ts`: the logic solver. `nextStep()` finds the easiest step a person
+  could take. It tries 16 named techniques in order (`TECHNIQUES`), from full
+  house to simple colouring, and returns the pattern (cells, digits, units) and
+  its placement or eliminations. The game will build hints on it.
+- `grade.ts`: a puzzle's tier is the hardest technique it needs (`TIER_OF`).
+  A puzzle logic can't finish has no tier and is never served.
+- `generate.ts`: generates puzzles in three steps.
+  - Fills a random complete grid.
+  - Removes clues in 180°-symmetric pairs. A removal stays only if the puzzle
+    keeps one solution, stays solvable with the target tier's techniques, and
+    stays above the clue floor (`CLUE_FLOOR`).
+  - Accepts a puzzle only if it really needs the target tier, at least twice
+    from Medium up (`MIN_STEPS_AT_TIER`). The tool keeps the best of three.
+- `puzzle.ts`: the calendar (`EPOCH`, `puzzleIndexAt`), the week
+  (`dailyTierFor`: Easy Monday and Tuesday, Medium Wednesday and Thursday,
+  Hard Friday, Expert Saturday, Hard Sunday), and `parseDay()` for the content
+  blob.
+
+## Puzzles file
+
+```bash
+npm install
+npm test && npm run type-check
+npm run gen-puzzles                        # 400 days from puzzle-0 → data/rabbit-sudoku-puzzles.json (~3 min)
+npm run gen-puzzles -- --days 30 --stats   # clue counts and hardest techniques per tier
+npm run gen-puzzles -- --preview 2         # print two days, write nothing
+```
+
+Each day is `{ v: 2, tier, givens }`, about 100 bytes, far under the
+backend's 16 KB per content row. Puzzles are seeded from their day and slot, so the same inputs rebuild the
+same file. The 400-day run from 2026-11-08 gave:
+
+| Tier | Clues | Hardest technique needed |
+|---|---|---|
+| Easy | 32–33 | hidden single (483), naked single (32) |
+| Medium | 27–32 | naked pair (196), pointing (143), claiming (89), hidden pair (86) |
+| Hard | 24–34 | XY-Wing (502), X-Wing (8), triples (4) |
+| Expert | 24–32 | Skyscraper (138), 2-String Kite (125), simple colouring (87), XYZ-Wing (77), Swordfish (30) |
+
+`EPOCH` is a placeholder (`2026-12-01`). The weekday plan depends on it, so
+when the launch day is picked, set it here, regenerate, and match it in the
+backend's `DailyGameRegistry`.
+
+## Tests
+
+`npm test`:
+
+- **Soundness.** Every step of every technique is checked against the true
+  solution on 300 hard (minimal) puzzles. No wrong placement and no removed
+  answer is allowed, and every technique must fire at least once.
+- **Generator.** Each tier comes out unique, symmetric, in tier and
+  deterministic.
+- **The rest.** Solver, grid basics, calendar and content parsing.

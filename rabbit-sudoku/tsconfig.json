@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    // The SDK lives at the repo root (../src), read from source, as in
+    // word-rush. Nothing imports it yet; the client will.
+    "paths": {
+      "@oddsrabbit/apps-sdk": ["../src/sdk/sdk.ts"],
+      "@oddsrabbit/apps-sdk/ui/*": ["../src/ui/*"]
+    }
+  },
+  "include": ["src/**/*", "tools/**/*.ts", "dev/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,495 @@
+/* Rabbit Sudoku, in Word Battle's family (word-battle/styles.css; chess
+   borrows the same frame): a sheet over a band of art, white cards, Bricolage
+   Grotesque 800 for headings and digits, rust for the primary action, green
+   for good news. Token names are Word Battle's; the neutrals are cooler and
+   whiter than its warm paper, because a sudoku reads best on white.
+
+   Light only, on purpose. It doesn't follow the host's dark theme. */
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("./fonts/bricolage-grotesque-800-latin.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --display: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg: #f3f5f8;
+  --card: #ffffff;
+  --ink: #1f2330;
+  --muted: #6b7280;
+  --line: #dde1e8;
+  --accent: #c0491f;
+  --accent-ink: #ffffff;
+  --danger: #a32b1f;
+  --turn: #2b7a52;
+  --warn-bg: #fdf3d8;
+  --warn-ink: #7a5510;
+  --warn-line: #e6cf95;
+  --tile: #ffffff;
+  --tile-pending: #ffe9a8;
+  --tile-edge: #c9cfd9;
+  --tile-ink: #1f2937;
+  --tile-value-ink: #4b5563;
+  --sq-plain: #eef1f5;
+  --sq-grid: #cdd3dc;
+  --sq-blue: #2f6ba8;
+  --sq-blue-soft: #dbe8f5;
+  --sq-rose: #f0a59a;
+  --sq-sky: #9cc3e6;
+  /* Difficulty, as chips and the week strip. */
+  --t-easy: #dcefe3;
+  --t-medium: #fdf3d8;
+  --t-hard: #f7e0d6;
+  --t-expert: #f3d3dc;
+  /* Home's header band: the icon's rust board. */
+  --band-cell: #c0491f;
+  --band-given: #b5441c;
+  --band-line: #a93d17;
+  --band-box: #7e2c10;
+  --ear-pink: #f0a59a;
+}
+/* What the status bar sits on: the rust band on home, the scrim while a sheet
+   is up (later, so it wins). */
+html[data-screen="home"] { --oddsrabbit-edge-top: var(--band-cell); }
+html[data-sheet] { --oddsrabbit-edge-top: #7a7872; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+button { font: inherit; color: inherit; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); }
+
+#app { max-width: 560px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
+.boot, .unavailable { text-align: center; margin: 48px 16px; color: var(--muted); }
+.unavailable-title { color: var(--ink); font-weight: 700; font-size: 18px; }
+
+/* ---------- header row (docs/game-header-guidelines.md), as Word Battle's ---------- */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 48px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 12px) + var(--oddsrabbit-safe-left, 0px));
+}
+.bar .title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-space { flex: 1; }
+/* 32px to match the host's back button; the tap area stays 44px. */
+.icon-button {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon-button::after { content: ''; position: absolute; inset: -6px; }
+
+/* ---------- buttons and bits ---------- */
+.primary, .subtle {
+  border-radius: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 700; }
+.primary.big { width: 100%; padding: 15px 16px; font-size: 17px; }
+.primary.small { padding: 8px 14px; font-size: 14px; }
+.primary.is-done { background: var(--turn); }
+.primary:disabled, .subtle:disabled { opacity: 0.45; cursor: default; }
+.subtle { font-weight: 600; }
+
+.tier {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.tier-easy { background: var(--t-easy); }
+.tier-medium { background: var(--t-medium); }
+.tier-hard { background: var(--t-hard); }
+.tier-expert { background: var(--t-expert); }
+
+.group-title { margin: 18px 0 8px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.notice { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-size: 14px; }
+
+/* ---------- home: the band, and the sheet pulled up over it ---------- */
+.screen-home { position: relative; flex: 1; display: flex; flex-direction: column; }
+.screen-home .bar { position: relative; z-index: 1; }
+.band {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  height: calc(var(--oddsrabbit-safe-top, 0px) + 150px);
+  background: var(--band-line); /* the thin lines, between the cells */
+  overflow: hidden;
+}
+/* The title: a card laid on the board, edged in the box lines' ink, centred
+   in the strip of board between the status bar and the sheet. The sheet's top
+   sits 118px below the safe area (150px band, less its 32px overlap). */
+.brand {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--oddsrabbit-safe-top, 0px) + 59px);
+  transform: translate(-50%, -50%);
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px 5px;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 3px 0 var(--ink);
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 21px;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+@media (max-width: 359px) { .brand { font-size: 16px; padding: 5px 9px 4px; } }
+.brand-rabbit { color: var(--ink); }
+/* The icon's ears, behind the card's top edge (the card comes later in the
+   bar, so it paints over their bottoms). The card's top is about 18px above
+   its centre; the ears sink 12px behind it. */
+.brand-ears {
+  position: absolute;
+  left: 50%;
+  /* Never above the page: with no status bar (the web) they sink further. */
+  top: max(4px, calc(var(--oddsrabbit-safe-top, 0px) + 59px - 18px + 12px - 64px));
+  transform: translateX(-50%);
+  width: 104px;
+  height: 64px;
+  pointer-events: none;
+}
+.brand-ears .ear { fill: var(--card); stroke: var(--ink); stroke-width: 4; }
+.brand-ears .ear-in { fill: var(--ear-pink); }
+.screen-home .bar .icon-button { border-color: var(--band-box); }
+.brand-sudoku { color: var(--accent); }
+.band svg { display: block; width: 100%; height: 100%; }
+.band .b-cell { fill: var(--band-cell); }
+.band .b-given { fill: var(--band-given); }
+.band .b-box { stroke: var(--band-box); stroke-width: 2.5; fill: none; }
+.band text { font-family: var(--display); font-weight: 800; text-anchor: middle; dominant-baseline: central; }
+.band .b-digit { font-size: 22px; fill: rgba(255, 255, 255, 0.55); }
+.band .b-mine { fill: var(--tile-pending); }
+
+.home-sheet {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  margin-top: calc(150px - var(--oddsrabbit-chrome-height, 48px) - 32px);
+  padding: 18px
+           calc(14px + var(--oddsrabbit-safe-right, 0px))
+           calc(24px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(14px + var(--oddsrabbit-safe-left, 0px));
+  border-radius: 24px 24px 0 0;
+  background: var(--bg);
+  box-shadow: 0 -8px 20px -12px rgb(0 0 0 / 0.35);
+}
+.sheet-head { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; }
+
+/* Today's puzzle: Word Battle's spotlight card. */
+.spotlight {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: 0 12px 28px -18px rgb(0 0 0 / 0.4);
+}
+.spot-head { display: flex; align-items: center; gap: 12px; }
+.spot-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.spot-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.spot-kicker.is-done { color: var(--turn); }
+.spot-name { font-family: var(--display); font-size: 22px; font-weight: 800; }
+.spot-board {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  width: 100%;
+  max-width: 250px;
+  align-self: center;
+  aspect-ratio: 1;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card);
+}
+.pv {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid #e3e7ed;
+  border-bottom: 1px solid #e3e7ed;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(10px, 3.2vw, 15px);
+  line-height: 1;
+}
+.pv:nth-child(9n) { border-right: 0; }
+.pv:nth-child(n + 73) { border-bottom: 0; }
+.pv-br { border-right: 2px solid var(--ink); }
+.pv-bb { border-bottom: 2px solid var(--ink); }
+.pv-given { background: var(--sq-plain); }
+.spot-note { margin: 0; color: var(--muted); font-size: 14px; }
+.spot-clock { margin: -2px 0 0; text-align: center; font-size: 14px; color: var(--muted); }
+.spot-clock-time { color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.spot-scores {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--card));
+}
+.score-cell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.score-cell.is-end { align-items: flex-end; }
+.score-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.score-num { font-family: var(--display); font-size: 24px; font-weight: 800; line-height: 1.1; }
+
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+/* .tier-* also tints chips; on a day only its box carries the colour. */
+.day[class*="tier-"] { background: none; border: 0; padding: 0; }
+.day-label { font-size: 12px; font-weight: 700; color: var(--muted); }
+.day-mark {
+  width: 100%;
+  max-width: 40px;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #fff;
+}
+.day.tier-easy .day-mark { background: var(--t-easy); }
+.day.tier-medium .day-mark { background: var(--t-medium); }
+.day.tier-hard .day-mark { background: var(--t-hard); }
+.day.tier-expert .day-mark { background: var(--t-expert); }
+.day.is-solved .day-mark { background: var(--turn); border-color: var(--turn); }
+.day.is-today .day-mark { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+.day.is-future .day-mark { opacity: 0.55; border-style: dashed; }
+.foot { margin: 18px 4px 0; text-align: center; font-size: 13px; }
+
+/* ---------- play ---------- */
+.play {
+  flex: 1;
+  padding: 8px calc(12px + var(--oddsrabbit-safe-right, 0px)) calc(16px + var(--oddsrabbit-safe-bottom, 0px)) calc(12px + var(--oddsrabbit-safe-left, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.board {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  aspect-ratio: 1;
+  border: 2.5px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--card);
+  box-shadow: 0 12px 28px -18px rgb(0 0 0 / 0.4);
+  touch-action: manipulation;
+}
+.cell {
+  position: relative;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid #dfe3ea;
+  border-bottom: 1px solid #dfe3ea;
+  background: var(--card);
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: clamp(18px, 5.6vw, 26px);
+  line-height: 1;
+  color: var(--sq-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cell:nth-child(9n) { border-right: 0; }
+.cell:nth-child(n + 73) { border-bottom: 0; }
+.cell.br { border-right: 2px solid var(--ink); }
+.cell.bb { border-bottom: 2px solid var(--ink); }
+.cell.given { color: var(--ink); background: var(--sq-plain); }
+.cell.peer { background: #f4f7fb; }
+.cell.given.peer { background: #e6eaf0; }
+.cell.same { background: var(--sq-blue-soft); }
+.cell.sel { background: var(--tile-pending); }
+.cell.dupe, .cell.wrong { color: var(--danger); }
+.cell.dupe::after, .cell.wrong::after {
+  content: '';
+  position: absolute;
+  left: 25%;
+  right: 25%;
+  bottom: 12%;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--danger);
+}
+.cell.hint-unit { background: var(--warn-bg); }
+.cell.hint-cell { background: #ffe1a3; }
+.cell.hint-elim { box-shadow: inset 0 0 0 2.5px var(--accent); }
+.cell.done { animation: done 0.6s ease-out both; }
+.cell.sweep { animation: sweep 0.5s ease-out both; }
+@keyframes sweep { 40% { background: #cde9d8; } }
+@keyframes done { 40% { background: #cde9d8; } }
+.notes {
+  position: absolute;
+  inset: 1px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  align-items: center;
+  justify-items: center;
+  font: 600 clamp(9px, 2.6vw, 12px)/1 system-ui, -apple-system, sans-serif;
+  color: var(--muted);
+}
+.notes .on { color: #fff; background: var(--sq-blue); border-radius: 3px; padding: 0 2px; }
+
+.hintbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border-radius: 14px;
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  color: var(--warn-ink);
+}
+.hint-text { margin: 0; flex: 1; font-weight: 600; font-size: 15px; }
+.hint-actions { display: flex; align-items: center; gap: 6px; }
+
+.tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tool {
+  min-height: 46px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-weight: 700;
+  font-size: 15px;
+}
+.tool.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.tool:disabled { opacity: 0.45; }
+
+/* The pad: Word Battle's wooden rack tiles, with how many are left where a
+   tile shows its value. */
+.pad { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; touch-action: manipulation; }
+.key {
+  position: relative;
+  min-width: 0;
+  height: 60px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--tile);
+  box-shadow: inset 0 -3px 0 var(--tile-edge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.key:active { transform: translateY(1px); box-shadow: inset 0 -1px 0 var(--tile-edge); }
+.key-digit { font-family: var(--display); font-weight: 800; font-size: clamp(20px, 6vw, 26px); line-height: 1; color: var(--tile-ink); }
+.key-left { position: absolute; right: 5px; bottom: 6px; font-size: 10px; font-weight: 700; color: var(--tile-value-ink); }
+.key.active { background: var(--sq-blue); box-shadow: inset 0 -3px 0 #1f4d7d; }
+.key.active .key-digit, .key.active .key-left { color: #fff; }
+.key:disabled { opacity: 0.3; transform: none; }
+.pad.notes-mode .key { background: var(--card); box-shadow: inset 0 0 0 1px var(--line), inset 0 -3px 0 var(--line); }
+.pad.notes-mode .key-digit { font-family: system-ui, sans-serif; font-weight: 600; font-size: 16px; color: var(--muted); }
+
+/* ---------- sheets ---------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgb(0 0 0 / 0.5);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: max(16px, calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px))) 0 0;
+}
+.sheet {
+  width: min(560px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+  border-radius: 24px 24px 0 0;
+  padding: 18px 18px calc(22px + var(--oddsrabbit-safe-bottom, 0px));
+  box-shadow: 0 -8px 20px -12px rgb(0 0 0 / 0.35);
+  animation: rise 0.22s ease-out;
+}
+@keyframes rise { from { transform: translateY(24px); opacity: 0; } }
+.sheet > .sheet-head { align-items: center; margin-bottom: 6px; }
+.sheet > .sheet-head h2 { margin: 0; flex: 1; font-family: var(--display); font-size: 22px; font-weight: 800; }
+.sheet-actions { display: flex; gap: 10px; margin-top: 16px; }
+.sheet-actions button { flex: 1; padding: 13px 16px; font-size: 16px; }
+.help p { margin: 10px 0; font-size: 15px; }
+.settings { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; }
+.toggle {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+.toggle:last-child { border-bottom: 0; }
+.toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
+.solved { text-align: center; }
+.solved-big { margin: 6px 0; font-family: var(--display); font-size: 34px; font-weight: 800; color: var(--turn); }
+.solved-line { margin: 0; font-weight: 600; color: var(--muted); }
+.solved-streak { margin: 6px 0 0; font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cell.sweep, .cell.done, .sheet { animation: none; }
+}
