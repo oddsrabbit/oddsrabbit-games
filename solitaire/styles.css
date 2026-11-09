@@ -519,6 +519,24 @@ h1.title {
 .game-message[data-state="won"] .share-button,
 .game-message[data-state="won"] .leaderboard-button-overlay { display: inline-block; }
 
+/* Countdown to the next daily deal. Muted like the how-to-play line, the time
+   itself in the overlay's headline cream. */
+.daily-clock {
+  display: none;
+  margin: -6px 0 0;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--wood-pale);
+  opacity: 0.85;
+}
+.daily-clock-time {
+  font-weight: normal;
+  color: var(--card-cream);
+  font-variant-numeric: tabular-nums;
+}
+.game-message[data-state="idle"] .daily-clock,
+.game-message[data-state="won"] .daily-clock { display: block; }
+
 /* The capability gate beats the per-state rules above: on a host that can't
    serve a board there is nothing to open, whatever screen we're on. */
 .game-message .lower .leaderboard-button-overlay[hidden] { display: none !important; }

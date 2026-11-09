@@ -35,7 +35,7 @@ let tab: HomeTab = 'discover';
 function home() {
   back = home;
   const day = today();
-  void show((r) => mountHome(r, { catalog, day, todaySlug: dailySlug(catalog, day), tab, onTab: (t) => { tab = t; home(); }, onOpen: paint, onGallery: gallery }));
+  void show((r) => mountHome(r, { catalog, day, todaySlug: dailySlug(catalog, day), tab, onTab: (t) => { tab = t; home(); }, onOpen: paint, onGallery: gallery, onNewDay: home }));
 }
 
 /** Where the gallery's close goes: the page it was opened from, or home. */

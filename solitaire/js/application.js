@@ -78,6 +78,8 @@
   var stuckNewBtn = document.querySelector(".stuck-new");
   var stuckDismissBtn = document.querySelector(".stuck-dismiss");
   var retryDailyBtn = document.querySelector(".retry-daily-button");
+  var dailyClockEl = document.querySelector(".daily-clock");
+  var dailyClockTimeEl = document.querySelector(".daily-clock-time");
   var retryRandomBtn = document.querySelector(".retry-random-button");
   var shareBtn = document.querySelector(".share-button");
   // Two entry points to the same modal, because neither covers the whole game
@@ -169,6 +171,56 @@
     overlay.classList.toggle("visible", visible);
     if (visible) document.documentElement.setAttribute("data-overlay", state);
     else document.documentElement.removeAttribute("data-overlay");
+    if (state === "idle" || state === "won") startDailyClock();
+    else stopDailyClock();
+  }
+
+  // --- Next-daily countdown ---
+  //
+  // "New deal in HH:MM:SS" under the overlay's buttons, counting to the UTC
+  // midnight that opens the next daily (Deck.dailyStartMs, the same boundary
+  // Deck.dailyId keys on). Ticks only while the idle or won overlay is up.
+  // At zero it re-runs what re-entering the screen does — the daily cache and
+  // buttons are keyed by day id, so re-reading them is what re-arms the daily
+  // (see setDailyFailed) — once per boundary.
+  var dailyClockHandle = null;
+  var dailyClockTarget = 0;
+  var dailyClockFired = false;
+
+  function formatCountdown(ms) {
+    var s = Math.max(0, Math.ceil(ms / 1000));
+    return pad2(Math.floor(s / 3600)) + ":" + pad2(Math.floor((s % 3600) / 60)) + ":" + pad2(s % 60);
+  }
+
+  function startDailyClock() {
+    if (!dailyClockEl) return;
+    dailyClockTarget = Deck.dailyStartMs(Deck.dailyId() + 1);
+    dailyClockFired = false;
+    // Today already solved: the next one is what's being counted to.
+    dailyClockEl.firstChild.nodeValue = game.isDailyWonAlready() ? "Next deal in " : "New deal in ";
+    tickDailyClock();
+    if (dailyClockHandle === null) dailyClockHandle = setInterval(tickDailyClock, 1000);
+  }
+
+  function stopDailyClock() {
+    if (dailyClockHandle !== null) clearInterval(dailyClockHandle);
+    dailyClockHandle = null;
+  }
+
+  function tickDailyClock() {
+    var left = dailyClockTarget - Date.now();
+    dailyClockTimeEl.textContent = formatCountdown(left);
+    if (left > 0 || dailyClockFired) return;
+    dailyClockFired = true;
+    // showIdleOverlay re-enters setOverlayState, which re-targets the clock
+    // at the following midnight.
+    var state = overlay.getAttribute("data-state");
+    if (state === "idle") showIdleOverlay();
+    else {
+      ensureDailySeedAsync();
+      syncDailyButtons();
+      startDailyClock();
+    }
   }
 
   function setOverlayText(main, sub) {

@@ -29,6 +29,8 @@ export interface HomeOptions {
   onOpen(session: Session): void;
   /** A page's gallery: everyone's versions of it. */
   onGallery(slug: string): void;
+  /** The countdown on today's page reached zero: the day rolled over. */
+  onNewDay(): void;
 }
 
 const TABS: Array<{ tab: HomeTab; label: string; icon: keyof typeof ICONS }> = [
@@ -60,17 +62,23 @@ export async function mountHome(root: HTMLElement, o: HomeOptions): Promise<() =
 
   const art = await loadArtIndex(o.catalog.pages);
   const painted = new Map(art.map((e) => [e.slug, e]));
-  if (o.tab === 'discover') await discoverTab(o, main, painted);
+  if (o.tab === 'discover') stopTab = await discoverTab(o, main, painted);
   else if (o.tab === 'mine') await mineTab(o, main, art);
   else stopTab = mountFeed(main, { catalog: o.catalog, onGallery: o.onGallery });
 
   return () => { stopTab(); stopSplashes(); window.removeEventListener('scroll', onScroll); };
 }
 
-async function discoverTab(o: HomeOptions, main: HTMLElement, painted: Map<string, ArtEntry>) {
+/** Resolves to a stop function for today's page's countdown. */
+async function discoverTab(o: HomeOptions, main: HTMLElement, painted: Map<string, ArtEntry>): Promise<() => void> {
+  let stop = () => {};
   const bySlug = new Map(o.catalog.pages.map((p) => [p.slug, p]));
   const today = o.todaySlug ? bySlug.get(o.todaySlug) : undefined;
-  if (TODAYS_PAGE && today) main.append(await todayCard(o, today));
+  if (TODAYS_PAGE && today) {
+    const card = await todayCard(o, today);
+    stop = card.stop;
+    main.append(card.card);
+  }
   for (const cat of o.catalog.categories) {
     const pages = o.catalog.pages.filter((p) => p.category === cat.id);
     if (!pages.length) continue;
@@ -78,6 +86,7 @@ async function discoverTab(o: HomeOptions, main: HTMLElement, painted: Map<strin
     for (const page of pages) row.list.append(libraryTile(o, page, painted.get(page.slug)));
     main.append(row.section);
   }
+  return stop;
 }
 
 /** Every library page the player has painted: in progress, then finished. */
@@ -117,7 +126,7 @@ async function mineTab(o: HomeOptions, main: HTMLElement, art: ArtEntry[]) {
   if (ADD_PICTURES) main.append(await mineShelf(o));
 }
 
-async function todayCard(o: HomeOptions, page: PageEntry): Promise<HTMLElement> {
+async function todayCard(o: HomeOptions, page: PageEntry): Promise<{ card: HTMLElement; stop: () => void }> {
   const session: Session = { key: `day-${o.day}`, slug: page.slug, day: o.day };
   const card = el('section', 'today');
   card.setAttribute('aria-label', 'Today’s page');
@@ -130,7 +139,7 @@ async function todayCard(o: HomeOptions, page: PageEntry): Promise<HTMLElement> 
   const info = el('div', 'today-info');
   const kicker = el('div', 'kicker', 'Today’s page');
   const title = el('h2', '', page.title);
-  const meta = el('div', 'muted', `${page.regions} areas · new page in ${untilNext(o)}`);
+  const meta = el('div', 'muted', `${page.regions} areas`);
   const go = button('primary-btn', 'Color it', () => o.onOpen(session));
   info.append(kicker, title, meta, el('div', 'grow'), go);
   top.append(pic, info);
@@ -141,7 +150,7 @@ async function todayCard(o: HomeOptions, page: PageEntry): Promise<HTMLElement> 
   const done = filled === page.regions;
   if (filled) {
     go.textContent = done ? (progress.posted ? 'See it' : 'Post it') : 'Keep going';
-    meta.textContent = done ? (progress.posted ? 'Finished and posted' : 'Finished · not posted yet') : `${filled} of ${page.regions} areas · new page in ${untilNext(o)}`;
+    meta.textContent = done ? (progress.posted ? 'Finished and posted' : 'Finished · not posted yet') : `${filled} of ${page.regions} areas`;
     void loadArt(page.slug, 'thumb').then((art) => {
       const c = composite(art, progress.fills, 300);
       c.setAttribute('aria-label', page.title);
@@ -165,14 +174,31 @@ async function todayCard(o: HomeOptions, page: PageEntry): Promise<HTMLElement> 
     gallery.addEventListener('click', () => o.onOpen(session));
   }
   card.append(gallery);
-  return card;
+
+  // Ticks every second on the server clock; at zero, the day rolls over once.
+  const nextIn = () => msUntilNextDay(o.catalog, serverNow());
+  const clock = el('p', 'today-clock');
+  const time = el('b', 'today-clock-time', countdown(nextIn()));
+  clock.append(done ? 'Next page in ' : 'New page in ', time);
+  card.append(clock);
+  const timer = window.setInterval(() => {
+    // Replaced without a stop (home re-rendered while this one was loading).
+    if (!clock.isConnected) { window.clearInterval(timer); return; }
+    const left = nextIn();
+    time.textContent = countdown(left);
+    if (left <= 0) {
+      window.clearInterval(timer);
+      o.onNewDay();
+    }
+  }, 1000);
+  return { card, stop: () => window.clearInterval(timer) };
 }
 
-function untilNext(o: HomeOptions): string {
-  const ms = msUntilNextDay(o.catalog, serverNow());
-  const h = Math.floor(ms / 3_600_000);
-  const m = Math.floor((ms % 3_600_000) / 60_000);
-  return h ? `${h}h ${m}m` : `${m}m`;
+/** `05:12:33` until the next page. */
+function countdown(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
 /** A row that scrolls sideways, or a two-column grid of bigger tiles. */
