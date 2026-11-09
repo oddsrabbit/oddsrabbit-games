@@ -204,6 +204,22 @@ button.tchip::after { inset: -7px -3px; }
 }
 .tchip .time { font-family: var(--pixel); font-size: 12px; }
 .tchip.ready { background: #eaf5e2; }
+/* Short stages (short phones, the desktop column): the whole room shows with
+   soil either side (main.ts layoutStage), and the pills and cards sit in that
+   soil as icons over a short number (42m, 3, 1/4), clear of the arch. */
+.tchip .mini, .card-mini { display: none; }
+.stage.rails .float-chips { left: 2px; top: 6px; gap: 5px; max-width: none; }
+.stage.rails .float-chips .tchip { flex-direction: column; justify-content: center; gap: 3px; width: 42px; min-height: 44px; padding: 4px 0 3px; }
+.stage.rails .tchip .lbl { display: none; }
+.stage.rails .tchip .mini { display: block; font: 10px/1.2 var(--pixel); letter-spacing: 0; }
+.stage.rails .float-cards { right: 2px; top: 6px; gap: 14px; max-width: none; }
+.stage.rails .gift-btn, .stage.rails .event-card { position: relative; justify-content: center; width: 42px; height: 44px; min-height: 0; padding: 0; margin: 0; }
+.stage.rails .gift-btn .lbl, .stage.rails .event-card-text { display: none; }
+.stage.rails .card-mini {
+  display: block; position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%);
+  padding: 2px 3px; background: #fff; color: var(--ink); border: 2px solid var(--ink); border-radius: 6px;
+  font: 10px/1 var(--pixel); letter-spacing: 0; white-space: nowrap;
+}
 .gift-btn {
   display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 12px 6px 8px;
   background: var(--sun); color: var(--ink); border: 2px solid var(--ink); border-radius: 8px;

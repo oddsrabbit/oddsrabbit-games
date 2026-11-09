@@ -768,7 +768,7 @@ function buildBurrowScreen(): void {
   // small status pills on the left (what's going on), and on the right the
   // big cards for things to do (the daily gift, events, Getting started).
   const chips = h('div', { class: 'float-chips' });
-  const gift = h('button', { class: 'gift-btn', type: 'button', hidden: true }, img(itemSprite('gift'), 3), 'Daily gift');
+  const gift = h('button', { class: 'gift-btn', type: 'button', 'aria-label': 'Daily gift', hidden: true }, img(itemSprite('gift'), 3), h('span', { class: 'lbl', text: 'Daily gift' }));
   const cards = h('div', { class: 'float-cards' }, gift);
   // the rooms she has, once there's more than one (render keeps it up to date)
   const roomNav = h('nav', { class: 'room-nav', 'aria-label': 'Rooms', hidden: true });
@@ -1039,29 +1039,38 @@ function toScene(e: { clientX: number; clientY: number }): { x: number; y: numbe
   return scene ? scene.toRoom(x, y) : { x, y };
 }
 
+/** How wide the soil beside the room has to be (CSS px) to hold the icon rails. */
+const RAIL_MIN_PX = 44;
+
 /**
- * Sized so the room's walls meet the stage's edges, the soil beside them
- * cropped off, and its floor sits on the stage's bottom edge. On a short
- * screen the ceiling is cropped rather than shrinking everything: at most
- * ~40% of the room's height goes above the fold.
+ * The whole room, arch and all, its floor on the stage's bottom edge. Where
+ * the stage is too short for the room at full width (short phones, the
+ * desktop column) there's soil either side of it, and once that's wide
+ * enough the pills and cards go into it as icons (`.stage.rails`), clear of
+ * the arch.
  */
 function layoutStage(): void {
-  if (scene && ui.stage.isConnected) scale = fitScene(ui.stage, ui.canvas, scene, decorating);
+  if (!scene || !ui.stage.isConnected) return;
+  scale = fitScene(ui.stage, ui.canvas, scene);
+  const soil = (ui.stage.clientWidth - (SCENE_W - 2 * WALL_INSET) * scale) / 2;
+  ui.stage.classList.toggle('rails', soil >= RAIL_MIN_PX);
 }
 
 /**
  * Size a scene's canvas to fill a stage element (the burrow, or a friend's). Returns the scale.
- * `whole` (arranging) fits the room's full height, ceiling and all, so every
- * piece can be reached, even with the storage panel taking room below.
+ * The whole room shows: its walls meet the stage's edges, or on a short stage
+ * its ceiling meets the top with soil either side. `crop` (the Friends tab's
+ * strip, the garden) fills the width instead and lets up to ~40% of the
+ * height go above the top.
  */
-function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene, whole = false): number {
+function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene, crop = false): number {
   const w = stageEl.clientWidth, hgt = stageEl.clientHeight;
   // Not a whole number: a whole-number scale either cut the walls off or left
   // a wide band of dirt either side. At these sizes the odd pixel that's one
   // screen pixel wider than its neighbours doesn't show.
-  const scale = whole
-    ? Math.max(1, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / SCENE_H) || 1)
-    : Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2);
+  const scale = crop
+    ? Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2)
+    : Math.max(1, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / SCENE_H) || 1);
   // The surface covers the whole stage in scene pixels; the room sits in it.
   const sw = Math.ceil(w / scale - 1e-6), sh = Math.ceil(hgt / scale - 1e-6);
   const offX = Math.round((sw - SCENE_W) / 2);
@@ -1183,6 +1192,28 @@ function gardenNeeds(n: number): { ripe: number; empty: number } {
 }
 
 /** "2 ready to pick", "1 bed empty", "2 ready · 1 empty": the Home chip's words. */
+/**
+ * A pill's words, and what it says as an icon in the soil beside the room
+ * (`.stage.rails`): a short number, or nothing. Its aria-label says it all either way.
+ */
+function chipText(label: string, mini = ''): Node[] {
+  return [h('span', { class: 'lbl', text: label }), ...(mini ? [h('span', { class: 'mini', text: mini })] : [])];
+}
+
+/** A count that fits under an icon: 43, 999, 1.2k, 12k. */
+function shortCount(n: number): string {
+  if (n < 1000) return String(n);
+  const k = n / 1000;
+  return k < 10 ? `${Math.floor(k * 10) / 10}k` : `${Math.floor(k)}k`;
+}
+
+/** A countdown that fits under an icon: 42m, 3h, or <1m in the last minute. */
+function fmtShortWait(ms: number): string {
+  const m = Math.ceil(Math.max(0, ms) / 60e3);
+  if (m < 1) return '<1m';
+  return m < 60 ? `${m}m` : `${Math.round(m / 60)}h`;
+}
+
 function gardenChipText({ ripe, empty }: { ripe: number; empty: number }): string {
   if (ripe && empty) return `${ripe} ready · ${empty} empty`;
   if (ripe) return `${ripe} ready to pick`;
@@ -1388,7 +1419,7 @@ function porchStage(): HTMLElement {
   const stage = h('button', { class: 'stage porch', type: 'button', 'aria-label': `Go to ${pet.name}'s burrow` }, canvas);
   const sc = new Scene(canvas);
   stage.addEventListener('click', () => { goTab('burrow'); if (burrowRoom !== 'main') goRoom('main'); });
-  new ResizeObserver(() => { if (stage.isConnected) fitScene(stage, canvas, sc); }).observe(stage);
+  new ResizeObserver(() => { if (stage.isConnected) fitScene(stage, canvas, sc, true); }).observe(stage);
   porch = { stage, scene: sc };
   return stage;
 }
@@ -1715,19 +1746,19 @@ function render(): void {
     const chips: Node[] = [];
     if (napping) {
       const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': `Resting until her energy is full. About sleep` },
-        img(itemSprite('moon'), 2), 'Resting', h('span', { class: 'time' }));
+        img(itemSprite('moon'), 2), h('span', { class: 'lbl' }, 'Resting ', h('span', { class: 'time' })), h('span', { class: 'mini time-mini' }));
       chip.addEventListener('click', () => openSleep());
       chips.push(chip);
     }
     if (out) {
       const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': 'Out foraging. About her trip' },
-        img(itemSprite('basket'), 2), 'Foraging', h('span', { class: 'time' }));
+        img(itemSprite('basket'), 2), h('span', { class: 'lbl' }, 'Foraging ', h('span', { class: 'time' })), h('span', { class: 'mini time-mini' }));
       chip.addEventListener('click', () => openForage());
       chips.push(chip);
     }
     if (bake) {
       const chip = h('button', { class: 'tchip', type: 'button', 'aria-label': 'A treat is baking. When it will be ready' },
-        img(itemSprite('treat'), 2), 'Baking', h('span', { class: 'time' }));
+        img(itemSprite('treat'), 2), h('span', { class: 'lbl' }, 'Baking ', h('span', { class: 'time' })), h('span', { class: 'mini time-mini' }));
       chip.addEventListener('click', () => {
         const b = timer(pet, 'bake');
         if (b) toast(`Your treat will be ready in ${fmtLong(b.endsAtMs - now())}. It goes in the pantry, under Feed.`);
@@ -1736,7 +1767,7 @@ function render(): void {
     }
     if (!bake && pet.treats > 0) {
       const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready. Feed her` },
-        img(itemSprite('treat'), 2), `${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready`);
+        img(itemSprite('treat'), 2), ...chipText(`${pet.treats} ${pet.treats === 1 ? 'treat' : 'treats'} ready`, shortCount(pet.treats)));
       // through the Feed button, so it explains itself when she can't eat
       chip.addEventListener('click', () => ui.acts.feed.click());
       chips.push(chip);
@@ -1745,6 +1776,10 @@ function render(): void {
   }
   timersBox.querySelectorAll('.time').forEach((el, i) => {
     const text = fmtCountdown(times[i]! - n);
+    if (el.textContent !== text) el.textContent = text;
+  });
+  timersBox.querySelectorAll('.time-mini').forEach((el, i) => {
+    const text = fmtShortWait(times[i]! - n);
     if (el.textContent !== text) el.textContent = text;
   });
   const inYard = Math.floor(stored(pet, n));
@@ -1760,12 +1795,12 @@ function render(): void {
       // someone just hopped in: a little wave to say so
       const fresh = guests.some((g) => n - g.fromMs < 2 * 60e3);
       const chip = h('button', { class: `tchip event${fresh ? ' fresh' : ''}`, type: 'button', 'aria-label': `${k} ${k === 1 ? 'friend is' : 'friends are'} visiting` },
-        img(itemSprite('heart'), 2), k === 1 ? `${guests[0]!.data.name} is visiting` : `${k} visiting`);
+        img(itemSprite('heart'), 2), ...chipText(k === 1 ? `${guests[0]!.data.name} is visiting` : `${k} visiting`, String(k)));
       chip.addEventListener('click', () => goTab('friends'));
       chips.push(chip);
     }
     if (thrives) {
-      const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('shine'), 2), 'Thriving');
+      const chip = h('button', { class: 'tchip thriving', type: 'button', 'aria-label': 'Thriving. What that brings' }, img(itemSprite('shine'), 2), ...chipText('Thriving'));
       chip.addEventListener('click', () => openThriving());
       chips.push(chip);
     }
@@ -1773,13 +1808,13 @@ function render(): void {
       // the veg patch: what's ripe and what's empty, a tap away
       const text = gardenChipText(beds);
       const chip = h('button', { class: `tchip${beds.ripe ? ' ready' : ''}`, type: 'button', 'aria-label': `Garden: ${text}. Go to the veg patch` },
-        img(itemSprite(beds.ripe ? 'strawberry' : 'sprout'), 2), text);
+        img(itemSprite(beds.ripe ? 'strawberry' : 'sprout'), 2), ...chipText(text, shortCount(beds.ripe || beds.empty)));
       chip.addEventListener('click', () => { goTab('garden'); goArea('patch'); });
       chips.push(chip);
     }
     if (inYard >= 1) {
       // collected in the yard itself; this just says it's there and walks you over
-      const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `${inYard} clover waiting in the yard. Go to the yard` }, img(itemSprite('clover'), 2), `${inYard} in the yard`);
+      const chip = h('button', { class: 'tchip ready', type: 'button', 'aria-label': `${inYard} clover waiting in the yard. Go to the yard` }, img(itemSprite('clover'), 2), ...chipText(`${inYard} in the yard`, shortCount(inYard)));
       chip.addEventListener('click', () => { goTab('garden'); goArea('yard'); });
       chips.push(chip);
     }
@@ -1807,7 +1842,8 @@ function render(): void {
       const sub = e.raffle && !prizeWon(pet, e) ? `Raffle open · ${when}` : when;
       const card = h('button', { class: `event-card ev-${e.id}`, type: 'button', 'aria-label': `${e.name}, ${sub.toLowerCase()}. ${e.blurb}` },
         img(itemSprite(EVENT_ART[e.id] ?? 'sparkle'), 2),
-        h('span', { class: 'event-card-text' }, h('span', { class: 'event-card-name', text: e.name }), h('span', { class: 'event-card-sub', text: sub })));
+        h('span', { class: 'event-card-text' }, h('span', { class: 'event-card-name', text: e.name }), h('span', { class: 'event-card-sub', text: sub })),
+        h('span', { class: 'card-mini', text: `${left}d` }));
       card.addEventListener('click', () => openEvent(e.id));
       return card;
     });
@@ -1831,7 +1867,8 @@ function render(): void {
         h('span', { class: 'event-card-name', text: ready ? `Step ${step} done!` : wait ? `Step ${step} opens ${whenOpens(wait)}` : 'Getting started' }),
         ready
           ? h('span', { class: 'event-card-sub', text: `Claim +${clover} clover` })
-          : h('span', { class: 'event-card-sub' }, wait ? 'Worth ' : `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))));
+          : h('span', { class: 'event-card-sub' }, wait ? 'Worth ' : `${done}/${all} done · `, h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(clover)))),
+      !ready && !wait ? h('span', { class: 'card-mini', text: `${done}/${all}` }) : null);
       card.addEventListener('click', () => openStarter());
       cards.push(card);
     }
@@ -1849,7 +1886,9 @@ function render(): void {
         h('span', { class: 'event-card-name', text: ready ? (laterReady.length === 1 ? 'Goal done!' : `${laterReady.length} goals done!`) : 'Next goal' }),
         ready
           ? h('span', { class: 'event-card-sub', text: `Claim +${sum} clover` })
-          : h('span', { class: 'event-card-sub' }, need > 1 ? `${Math.min(have, need)}/${need} · ` : '', h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(next.clover)))));
+          : h('span', { class: 'event-card-sub' }, need > 1 ? `${Math.min(have, need)}/${need} · ` : '', h('span', { class: 'prize' }, img(itemSprite('clover'), 1), String(next.clover)))),
+      // under the icon: 3/5, or for a big count (clover to earn) how far along
+      !ready && need > 1 ? h('span', { class: 'card-mini', text: need > 99 ? `${Math.floor((Math.min(have, need) / need) * 100)}%` : `${Math.min(have, need)}/${need}` }) : null);
       card.addEventListener('click', () => openLaterGoals());
       cards.push(card);
     }
@@ -3466,7 +3505,7 @@ function layoutGarden(): void {
 let gardenScale = 1;
 /** fitScene for a garden: its canvas has a spare column on the right for the sub-pixel nudge. */
 function fitGarden(stageEl: HTMLElement, el: HTMLCanvasElement, gs: GardenScene): number {
-  const scale = fitScene(stageEl, el, gs as unknown as Scene);
+  const scale = fitScene(stageEl, el, gs as unknown as Scene, true);
   el.style.width = `${el.width * scale}px`;
   return scale;
 }

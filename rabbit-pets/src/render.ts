@@ -166,6 +166,8 @@ interface Particle { art: ItemArt; x: number; y: number; vy: number; born: numbe
 const WALK_MIN = 28;
 const WALK_MAX = 60;
 const STAND_Y = 106;
+/** Pieces whose moving parts give their own light, so they aren't darkened at night. */
+const STAYS_BRIGHT = new Set(['fireplace', 'fireflies']);
 // Follows the setting live, not just as it was at load.
 const motionQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
 let reduceMotion = !!motionQuery?.matches;
@@ -173,7 +175,12 @@ motionQuery?.addEventListener?.('change', (e) => { reduceMotion = e.matches; });
 
 export class Scene {
   readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
+  /** The canvas's own context. */
+  private readonly screen: CanvasRenderingContext2D;
+  /** Where drawing goes: the screen, or at night the layer that's darkened before it goes on (see `flushNight`). */
+  private ctx: CanvasRenderingContext2D;
+  /** Night only: the layer the room's contents are drawn into, and the mask that darkens them. */
+  private nightLayer: { layer: HTMLCanvasElement; ctx: CanvasRenderingContext2D; mask: HTMLCanvasElement; maskCtx: CanvasRenderingContext2D; light: CanvasGradient | null } | null = null;
   private readonly bgs = new Map<string, Sprite>();
   private readonly items = new Map<string, Sprite>();
   private readonly glow: Sprite;
@@ -203,7 +210,7 @@ export class Scene {
     this.soil = makeSoilTile();
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2D canvas unavailable');
-    this.ctx = ctx;
+    this.ctx = this.screen = ctx;
     ctx.imageSmoothingEnabled = false;
     this.glow = toSprite(drawGlow());
   }
@@ -419,7 +426,7 @@ export class Scene {
    */
   resize(w: number, h: number, offsetX: number, offsetY: number): void {
     resizeCanvas(this.canvas, w, h, offsetX - this.offsetX, offsetY - this.offsetY);
-    this.ctx.imageSmoothingEnabled = false;
+    this.screen.imageSmoothingEnabled = false;
     this.offsetX = offsetX;
     this.offsetY = offsetY;
   }
@@ -430,7 +437,7 @@ export class Scene {
   }
 
   draw(m: SceneModel, now: number): void {
-    const ctx = this.ctx;
+    const ctx = (this.ctx = this.screen);
     this.season = m.season ?? 'summer';
     this.time = m.time;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -441,55 +448,16 @@ export class Scene {
     ctx.drawImage(this.room(style, m.night).canvas, 0, 0);
     this.drawWindow(m, now);
 
-    const placed = m.burrow.items
-      .filter((i) => i.placed)
-      .map((item) => ({ item, def: byId(item.id) }))
-      .filter((p): p is { item: PlacedItem; def: DecorDef } => !!p.def);
-
-    // rugs lie under everything
-    for (const p of placed.filter((p) => p.def.zone === 'rug')) this.drawPiece(p.item, p.def);
-
     const asleep = m.mood === 'asleep';
-    // she sleeps on the best bed in the room
-    const beds = ['hayloft', 'patchcushion', 'cushion'];
-    const cushion = placed.filter((p) => p.def.bed).sort((a, b) => beds.indexOf(a.def.id) - beds.indexOf(b.def.id))[0]?.item;
-    const bed = asleep && cushion ? cushion : undefined;
-    this.updateRabbit(m, now, placed, bed);
-    // at a spot she stands where it puts her (up on the window seat, in front of the fire)
-    const perch = this.idle?.kind === 'spot' && this.arrived() ? this.idle : null;
-    const standY = bed ? bed.y - 3 : perch ? perch.standY : STAND_Y;
-    // floor pieces and the rabbit, back to front; asleep, she lies on her bed
-    const depthOfRabbit = bed ? bed.y + 0.5 : perch ? perch.depth : standY;
-    const floor = placed.filter((p) => p.def.zone === 'floor').sort((a, b) => a.item.y - b.item.y);
-    let drewRabbit = false;
-    for (const p of floor) {
-      if (!drewRabbit && p.item.y > depthOfRabbit) { if (!m.absent) this.drawRabbit(m, now, standY); drewRabbit = true; }
-      this.drawPiece(p.item, p.def);
-      this.animatePiece(p.item, p.def, now);
-    }
-    if (!drewRabbit && !m.absent) this.drawRabbit(m, now, standY);
-    this.drawGuests(m, now, placed);
-    this.drawCritter(m, now);
-
-    // hanging decor, on a rope from the ceiling
-    for (const p of placed.filter((p) => p.def.zone === 'hang')) {
-      const top = ceilingY(p.item.x);
-      ctx.fillStyle = '#5E3B26';
-      if (p.item.y > top) ctx.fillRect(Math.round(p.item.x), top, 1, p.item.y - top);
-      this.drawPiece(p.item, p.def);
-      this.animatePiece(p.item, p.def, now);
-    }
-
     if (m.night) {
-      // Darken the whole room at once (no canvas filters: Safari lacks them),
-      // then put the starry window back and add warm lantern light on top.
-      // Awake, the lamps are on: a warm pool of light in the middle of the room
-      // fading to cool blue in the corners, so it reads as night rather than a
-      // browner room, and she keeps her own coat colour in the light.
-      // Asleep, lights out.
+      // Darken the room (no canvas filters: Safari lacks them), then put the
+      // starry window back. Awake, the lamps are on: a warm pool of light in
+      // the middle of the room fading to cool blue in the corners, so it reads
+      // as night rather than a browner room, and she keeps her own coat colour
+      // in the light. Asleep, lights out.
       ctx.save();
       ctx.globalCompositeOperation = 'multiply';
-      ctx.fillStyle = asleep ? '#62608E' : (this.lamplight ??= nightLight(ctx));
+      ctx.fillStyle = this.darkness(asleep, ctx);
       ctx.fillRect(-this.offsetX, -this.offsetY, this.canvas.width, this.canvas.height);
       ctx.globalCompositeOperation = 'source-over';
       ctx.beginPath();
@@ -499,6 +467,55 @@ export class Scene {
       ctx.drawImage(this.room(style, true).canvas, 0, 0);
       this.drawWindow(m, now);
       ctx.restore();
+      // everything in the room is drawn on a layer and darkened the same way
+      // as it's laid on, so what stays bright (the flames) can sit behind her
+      this.beginNight(asleep);
+    }
+
+    const placed = m.burrow.items
+      .filter((i) => i.placed)
+      .map((item) => ({ item, def: byId(item.id) }))
+      .filter((p): p is { item: PlacedItem; def: DecorDef } => !!p.def);
+
+    // rugs lie under everything
+    for (const p of placed.filter((p) => p.def.zone === 'rug')) this.drawPiece(p.item, p.def);
+
+    // she sleeps on the best bed in the room
+    const beds = ['hayloft', 'patchcushion', 'cushion'];
+    const cushion = placed.filter((p) => p.def.bed).sort((a, b) => beds.indexOf(a.def.id) - beds.indexOf(b.def.id))[0]?.item;
+    const bed = asleep && cushion ? cushion : undefined;
+    this.updateRabbit(m, now, placed, bed);
+    this.updateGuests(m, now, placed);
+    // at a spot she stands where it puts her (up on the window seat, in front of the fire)
+    const perch = this.idle?.kind === 'spot' && this.arrived() ? this.idle : null;
+    const standY = bed ? bed.y - 3 : perch ? perch.standY : STAND_Y;
+    // Floor pieces, her and her guests, back to front by where each stands
+    // (a piece by its foot, a rabbit by her feet; asleep, she lies on her bed).
+    // At a tie the rabbit is in front, and her guests in front of her.
+    const depthOfRabbit = bed ? bed.y + 0.5 : perch ? perch.depth : standY;
+    const layers: { y: number; rank: number; draw: () => void }[] = placed
+      .filter((p) => p.def.zone === 'floor')
+      .map((p) => ({ y: p.item.y, rank: 0, draw: () => { this.drawPiece(p.item, p.def); this.drawMoving(p.item, p.def, now); } }));
+    if (!m.absent) layers.push({ y: depthOfRabbit, rank: 1, draw: () => this.drawRabbit(m, now, standY) });
+    (m.guests ?? []).forEach((g, i) => {
+      const w = this.guestWalks.get(g.id);
+      if (w) layers.push({ y: w.y, rank: 2, draw: () => this.drawGuest(m, g, i, w, now) });
+    });
+    for (const l of layers.sort((a, b) => a.y - b.y || a.rank - b.rank)) l.draw();
+    this.drawCritter(m, now);
+
+    // hanging decor, on a rope from the ceiling
+    for (const p of placed.filter((p) => p.def.zone === 'hang')) {
+      const top = ceilingY(p.item.x);
+      this.ctx.fillStyle = '#5E3B26';
+      if (p.item.y > top) this.ctx.fillRect(Math.round(p.item.x), top, 1, p.item.y - top);
+      this.drawPiece(p.item, p.def);
+      this.drawMoving(p.item, p.def, now);
+    }
+
+    if (m.night) {
+      this.flushNight();
+      this.ctx = ctx;
       ctx.save();
       // lamplight stays in the room: it doesn't shine through the dirt around it
       const { cx, cy, rx, ry } = ROOM_ARCH;
@@ -514,8 +531,6 @@ export class Scene {
         ctx.drawImage(this.glow.canvas, Math.round(p.item.x - this.glow.w / 2), Math.round(cy - this.glow.h / 2));
       }
       ctx.restore();
-      // flames stay bright at night
-      for (const p of placed.filter((p) => p.def.id === 'fireplace' || p.def.id === 'fireflies')) this.animatePiece(p.item, p.def, now);
     }
 
     if (!m.absent) this.drawSleepAndThoughts(m, now);
@@ -528,6 +543,91 @@ export class Scene {
       const sel = m.burrow.items.find((i) => i.uid === m.selected && i.placed);
       const b = sel ? this.itemBox(sel) : null;
       if (b) this.dashedBox(b, now);
+    }
+  }
+
+  /** The night's darkening: the lamplight (warm in the middle, blue in the corners), or lights out. */
+  private darkness(asleep: boolean, ctx: CanvasRenderingContext2D): string | CanvasGradient {
+    if (asleep) return '#62608E';
+    if (ctx === this.screen) return (this.lamplight ??= nightLight(ctx));
+    const n = this.nightLayer!;
+    return (n.light ??= nightLight(n.maskCtx));
+  }
+
+  private nightAsleep = false;
+
+  /** From here on, draw on the night layer (the canvas's size, the same room transform). */
+  private beginNight(asleep: boolean): void {
+    const fresh = () => {
+      const c = document.createElement('canvas');
+      const x = c.getContext('2d');
+      if (!x) throw new Error('2D canvas unavailable');
+      return [c, x] as const;
+    };
+    if (!this.nightLayer) {
+      const [layer, ctx] = fresh(), [mask, maskCtx] = fresh();
+      this.nightLayer = { layer, ctx, mask, maskCtx, light: null };
+    }
+    const n = this.nightLayer;
+    const { width: w, height: h } = this.canvas;
+    for (const [c, x] of [[n.layer, n.ctx], [n.mask, n.maskCtx]] as const) {
+      // resizing clears a canvas and resets its settings
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      x.imageSmoothingEnabled = false;
+      x.globalCompositeOperation = 'source-over';
+      x.setTransform(1, 0, 0, 1, 0, 0);
+      x.clearRect(0, 0, w, h);
+    }
+    n.ctx.setTransform(1, 0, 0, 1, this.offsetX, this.offsetY);
+    this.nightAsleep = asleep;
+    this.ctx = n.ctx;
+  }
+
+  /**
+   * Night: darken what's on the layer so far, just as the room was, and lay
+   * it on the screen. The layer is then clear for whatever stands in front.
+   */
+  private flushNight(): void {
+    const n = this.nightLayer;
+    if (!n || this.ctx !== n.ctx) return;
+    const { width: w, height: h } = this.canvas;
+    const mk = n.maskCtx;
+    // the darkness, in the shape of what's drawn: multiplied in, it leaves the empty pixels empty
+    mk.setTransform(1, 0, 0, 1, 0, 0);
+    mk.globalCompositeOperation = 'source-over';
+    mk.clearRect(0, 0, w, h);
+    mk.drawImage(n.layer, 0, 0);
+    mk.globalCompositeOperation = 'source-in';
+    mk.setTransform(1, 0, 0, 1, this.offsetX, this.offsetY);
+    mk.fillStyle = this.darkness(this.nightAsleep, mk);
+    mk.fillRect(-this.offsetX, -this.offsetY, w, h);
+    const lc = n.ctx;
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.globalCompositeOperation = 'multiply';
+    lc.drawImage(n.mask, 0, 0);
+    lc.globalCompositeOperation = 'source-over';
+    const s = this.screen;
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    s.drawImage(n.layer, 0, 0);
+    s.setTransform(1, 0, 0, 1, this.offsetX, this.offsetY);
+    lc.clearRect(0, 0, w, h);
+    lc.setTransform(1, 0, 0, 1, this.offsetX, this.offsetY);
+  }
+
+  /**
+   * A piece's moving parts. At night the fire's flames and the fireflies stay
+   * bright: what's behind them is laid on first, they go straight on the
+   * screen, and whatever stands in front is drawn over them afterwards.
+   */
+  private drawMoving(item: PlacedItem, def: DecorDef, now: number): void {
+    const n = this.nightLayer;
+    if (n && this.ctx === n.ctx && STAYS_BRIGHT.has(def.id)) {
+      this.flushNight();
+      this.ctx = this.screen;
+      this.animatePiece(item, def, now);
+      this.ctx = n.ctx;
+    } else {
+      this.animatePiece(item, def, now);
     }
   }
 
@@ -559,8 +659,7 @@ export class Scene {
    * free spots on the floor (beside a piece, never in front of one, and not on
    * top of her or each other), bobs and blinks, and dozes while she sleeps.
    */
-  private drawGuests(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[]): void {
-    const ctx = this.ctx;
+  private updateGuests(m: SceneModel, now: number, placed: { item: PlacedItem; def: DecorDef }[]): void {
     const guests = m.guests ?? [];
     const lively = !!m.lively && !reduceMotion;
     this.guestOrder = guests.map((g) => g.id);
@@ -612,28 +711,31 @@ export class Scene {
         if (!lively) w.facing = this.x > w.x ? -1 : 1;
       }
     });
-    // back rows first, so the front row stands in front
-    const order = guests.map((g, i) => ({ g, i, w: this.guestWalks.get(g.id)! })).sort((a, b) => a.w.y - b.w.y);
-    for (const { g, i, w } of order) {
-      const binkyT = (now - w.binkyAt) / BINKY_LEAP_MS;
-      const binky = binkyT >= 0 && binkyT < 1;
-      const face: Face = asleep ? 'asleep' : w.happyUntil > now || binky ? 'happy' : 'content';
-      const frame: Frame = asleep ? (!reduceMotion && Math.floor(now / 1500 + i) % 2 ? 1 : 0)
-        : !reduceMotion && w.hopPhase === 0 && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
-      const sp = this.rabbit(g.coat, face, frame, g.dress);
-      const hop = binky ? Math.round(Math.sin(binkyT * Math.PI) * 8) : w.hopPhase ? Math.round(Math.sin(w.hopPhase * Math.PI) * (lively ? 4 : 3)) : 0;
-      const left = Math.round(w.x - RABBIT_W / 2), top = w.y - RABBIT_GROUND - hop;
-      ctx.save();
-      if (w.facing === 1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
-      ctx.drawImage(sp.canvas, left, top);
-      ctx.restore();
-      // a gift brought along: a parcel at their feet, in front, that bobs to be noticed
-      if (g.parcel) {
-        const p = this.item('gift');
-        const bob = !reduceMotion && Math.floor(now / 700 + i) % 3 === 0 ? 1 : 0;
-        const px = Math.round(w.x + (w.facing === 1 ? 7 : -7) - p.w / 2);
-        ctx.drawImage(p.canvas, px, w.y - p.h - bob + 1);
-      }
+  }
+
+  /** One guest, where `updateGuests` has them; `draw` puts them in among the furniture by their row. */
+  private drawGuest(m: SceneModel, g: NonNullable<SceneModel['guests']>[number], i: number, w: GuestWalk, now: number): void {
+    const ctx = this.ctx;
+    const lively = !!m.lively && !reduceMotion;
+    const asleep = m.mood === 'asleep' && !m.lively;
+    const binkyT = (now - w.binkyAt) / BINKY_LEAP_MS;
+    const binky = binkyT >= 0 && binkyT < 1;
+    const face: Face = asleep ? 'asleep' : w.happyUntil > now || binky ? 'happy' : 'content';
+    const frame: Frame = asleep ? (!reduceMotion && Math.floor(now / 1500 + i) % 2 ? 1 : 0)
+      : !reduceMotion && w.hopPhase === 0 && Math.floor(now / 1100 + i * 2) % 4 === 1 ? 1 : 0;
+    const sp = this.rabbit(g.coat, face, frame, g.dress);
+    const hop = binky ? Math.round(Math.sin(binkyT * Math.PI) * 8) : w.hopPhase ? Math.round(Math.sin(w.hopPhase * Math.PI) * (lively ? 4 : 3)) : 0;
+    const left = Math.round(w.x - RABBIT_W / 2), top = w.y - RABBIT_GROUND - hop;
+    ctx.save();
+    if (w.facing === 1) { ctx.translate(left * 2 + RABBIT_W, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(sp.canvas, left, top);
+    ctx.restore();
+    // a gift brought along: a parcel at their feet, in front, that bobs to be noticed
+    if (g.parcel) {
+      const p = this.item('gift');
+      const bob = !reduceMotion && Math.floor(now / 700 + i) % 3 === 0 ? 1 : 0;
+      const px = Math.round(w.x + (w.facing === 1 ? 7 : -7) - p.w / 2);
+      ctx.drawImage(p.canvas, px, w.y - p.h - bob + 1);
     }
   }
 
