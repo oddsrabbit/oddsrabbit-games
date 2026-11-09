@@ -10,7 +10,7 @@
 //   (cd .. && npm run build) && npm run build && npm run serve
 //   open http://localhost:8770/dev/harness.html
 // Params:
-//   day=N        play puzzle-N (default 6, a Monday). Moves the server clock (time.now) to that day.
+//   day=N        play puzzle-N (default 7, a Monday). Moves the server clock (time.now) to that day.
 //   user=0       signed out: home asks you to sign in
 //   fresh=1      forget saved progress (help shows again)
 //   friends=0    no friends have solved today's Daily
@@ -28,9 +28,9 @@ const frame = document.getElementById('g');
 frame.src = '../dist/rabbit-sudoku/index.html';
 
 // EPOCH in src/puzzle.ts.
-const EPOCH_MS = Date.UTC(2026, 11, 1);
+const EPOCH_MS = Date.UTC(2026, 10, 9);
 const DAY = 86400000;
-const TODAY = Number(q.get('day') ?? 6);
+const TODAY = Number(q.get('day') ?? 7);
 const startReal = Date.now();
 const serverNow = () => EPOCH_MS + TODAY * DAY + Math.min(startReal % DAY, DAY - 3600e3) + (Date.now() - startReal);
 

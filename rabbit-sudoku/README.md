@@ -5,7 +5,7 @@ day for signed-in players, with no clock and no ranking. Friends see who solved
 it, you keep a streak, and hints explain the next step. The plan is
 [../docs/proposals/rabbit-sudoku.md](../docs/proposals/rabbit-sudoku.md).
 
-**Status:** the engine, the puzzles file and a first client are built.
+**Status:** launched 2026-11-09. The engine, the puzzles file, the client and the server side are built.
 The client has two screens:
 - **Home:** today's puzzle, streak, the week tinted by difficulty, friends who
   solved it, and a countdown to the next puzzle.
@@ -25,7 +25,7 @@ purpose, and doesn't follow the host's dark theme.
 The icon (`icon/`) is a tilted sudoku box wearing rabbit ears, on the rust of
 the Play button. `icon.svg` is the source; `icon-512.png` ships with the build
 and `icon-1024.png` is for stores. The digits use Bricolage Grotesque, so
-render the PNGs from a page that loads that font. The server side isn't started.
+render the PNGs from a page that loads that font.
 
 Because `package.json` now has a `build` script, `scripts/release.mjs` ships
 this folder on the next push to `main`. It lands at
@@ -44,7 +44,7 @@ npm run serve              # then open http://localhost:8770/dev/harness.html
 file, keeps your saves in this browser, and fakes five friends. Parameters
 (listed at the top of the file):
 
-- `day=N`: the day to play (default 6, a Monday).
+- `day=N`: the day to play (default 7, a Monday).
 - `user=0`: signed out.
 - `fresh=1`: start over.
 - `friends=0`: no friends have solved it.
@@ -99,9 +99,13 @@ same file. The 400-day run from 2026-11-08 gave:
 | Hard | 24–34 | XY-Wing (502), X-Wing (8), triples (4) |
 | Expert | 24–32 | Skyscraper (138), 2-String Kite (125), simple colouring (87), XYZ-Wing (77), Swordfish (30) |
 
-`EPOCH` is a placeholder (`2026-12-01`). The weekday plan depends on it, so
-when the launch day is picked, set it here, regenerate, and match it in the
-backend's `DailyGameRegistry`.
+`EPOCH` is the launch day, `2026-11-09` (a Monday). It must match the
+`rabbit-sudoku` entry in the web repo's `DailyGameRegistry` and the `epoch` in
+the puzzles file, and it must never move on a live game: it would renumber
+every day and its scores. The server serves days from a copy of the puzzles
+file at `tools/data/rabbit-sudoku-puzzles.json` in the web repo
+(`RabbitSudokuProvider`); when the runway gets low, generate more days here and
+copy the file over.
 
 ## Tests
 

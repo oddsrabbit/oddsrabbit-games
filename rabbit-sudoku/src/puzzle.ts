@@ -4,14 +4,14 @@
 // The epoch lives in three places that must agree: EPOCH below, `epoch` in
 // data/rabbit-sudoku-puzzles.json (written by tools/gen-puzzles.ts from this
 // constant), and the `rabbit-sudoku` entry in the backend's DailyGameRegistry.
-// EPOCH is a placeholder until the launch day is picked; the weekday plan
-// depends on it, so regenerate the file when it changes.
+// Launched 2026-11-09, a Monday. The weekday plan depends on it, so never
+// change it on a live game: it would renumber every day and their scores.
 
 import { TIERS, type Tier } from './grade';
 import { duplicateCells, parseGrid } from './sudoku';
 
-/** `puzzle-0` is this UTC day; it shows as #1. Placeholder until launch. */
-export const EPOCH = '2026-12-01';
+/** `puzzle-0` is this UTC day (launch day); it shows as #1. */
+export const EPOCH = '2026-11-09';
 export const EPOCH_MS = Date.parse(`${EPOCH}T00:00:00Z`);
 export const DAY_MS = 86_400_000;
 
