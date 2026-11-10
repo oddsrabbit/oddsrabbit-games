@@ -8,6 +8,11 @@ import { button, el } from './ui';
 
 export type PlayState = 'new' | 'progress' | 'solved';
 
+export interface Solvers {
+  friends: string[] | null;
+  total: number | null;
+}
+
 export interface HomeData {
   index: number;
   /** e.g. "Thursday". */
@@ -23,8 +28,14 @@ export interface HomeData {
   best: number;
   /** Monday to Sunday of this week. */
   week: { label: string; tier: Tier; solved: boolean; today: boolean; future: boolean }[];
-  /** Usernames of friends who solved today's; null when there's no friends list here. */
-  friends: Promise<string[]> | null;
+  /**
+   * Who has solved today's: friends' names (null with no friends list here)
+   * and how many players in all (null when the host can't say). Null when
+   * there's neither.
+   */
+  solvers: Promise<Solvers> | null;
+  /** Opens the board of who solved it; null when this host has none. */
+  board: (() => void) | null;
   /** Milliseconds until the next puzzle. */
   nextIn: () => number;
 }
@@ -81,11 +92,18 @@ const EARS_SVG = (() => {
   return `<svg class="brand-ears" viewBox="0 0 104 64" aria-hidden="true">${ear(34, -12)}${ear(70, 12)}</svg>`;
 })();
 
-function friendsLine(names: string[]): string {
+/** Up to three names in full; past that, the first two and a count. */
+export function friendsLine(names: string[]): string {
   if (!names.length) return 'None of your friends has solved it yet.';
   if (names.length === 1) return `${names[0]} solved it.`;
-  if (names.length === 2) return `${names[0]} and ${names[1]} solved it.`;
-  return `${names[0]}, ${names[1]} and ${names.length - 2} more solved it.`;
+  if (names.length <= 3) return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} solved it.`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} more friends solved it.`;
+}
+
+/** "1 player has solved it today." / "42 players have…"; "Nobody…" at none. */
+export function totalLine(total: number): string {
+  if (total <= 0) return 'Nobody has solved it yet. Be the first.';
+  return total === 1 ? '1 player has solved it today.' : `${total.toLocaleString('en-US')} players have solved it today.`;
 }
 
 /** `05:12:33` until the next puzzle. */
@@ -184,10 +202,28 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
     week.appendChild(mark);
   }
   sheet.appendChild(week);
-  if (d.friends) {
-    const friends = el('p', 'notice', ' ');
-    sheet.appendChild(friends);
-    void d.friends.then((names) => (friends.textContent = friendsLine(names)));
+  if (d.solvers) {
+    // A card: friends first (the names you know), then the whole field. Tap
+    // for the full list.
+    const card = d.board ? button('notice solvers', '', d.board) : el('div', 'notice solvers');
+    const lines = el('span', 'solvers-lines');
+    const first = el('span', 'solvers-main', ' ');
+    const second = el('span', 'solvers-sub muted');
+    lines.append(first, second);
+    card.appendChild(lines);
+    if (d.board) {
+      card.setAttribute('aria-label', 'See who solved it');
+      card.appendChild(el('span', 'solvers-more', 'See all ›'));
+    }
+    sheet.appendChild(card);
+    void d.solvers.then(({ friends, total }) => {
+      if (friends) {
+        first.textContent = friendsLine(friends);
+        if (total !== null && total > 0) second.textContent = totalLine(total);
+      } else if (total !== null) first.textContent = totalLine(total);
+      else card.remove();
+      if (d.board) card.setAttribute('aria-label', `${first.textContent} ${second.textContent} See who solved it.`.trim());
+    });
   }
   sheet.appendChild(el('p', 'foot muted', 'A new puzzle every day at midnight UTC: easy on Monday, hardest on Saturday.'));
 

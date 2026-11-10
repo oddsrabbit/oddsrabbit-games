@@ -1,5 +1,17 @@
 // Player settings, saved under `settings`.
 
+/** The game's colours. `auto` follows the app's light or dark mode. */
+export type ThemeChoice = 'auto' | 'light' | 'paper' | 'dark';
+/** What `data-theme` on <html> ends up as, once `auto` is resolved. */
+export type Theme = Exclude<ThemeChoice, 'auto'>;
+
+export const THEME_LABELS: Record<ThemeChoice, string> = {
+  auto: 'Match app',
+  light: 'Light',
+  paper: 'Paper',
+  dark: 'Dark',
+};
+
 export interface Settings {
   /** Mark a digit that repeats in its row, column or box. A rule, not the answer. */
   flagRepeats: boolean;
@@ -11,7 +23,11 @@ export interface Settings {
   autoNotes: boolean;
   /** Haptics. Shown on touch devices only, as in solitaire. */
   vibration: boolean;
+  theme: ThemeChoice;
 }
+
+/** The on/off settings, shown as switches. */
+export type Toggle = Exclude<keyof Settings, 'theme'>;
 
 export const DEFAULT_SETTINGS: Settings = {
   flagRepeats: true,
@@ -19,9 +35,10 @@ export const DEFAULT_SETTINGS: Settings = {
   digitFirst: false,
   autoNotes: true,
   vibration: true,
+  theme: 'auto',
 };
 
-export const SETTING_LABELS: Record<keyof Settings, string> = {
+export const SETTING_LABELS: Record<Toggle, string> = {
   flagRepeats: 'Flag repeated digits',
   showMistakes: 'Show mistakes',
   digitFirst: 'Pick the digit first',
@@ -32,10 +49,18 @@ export const SETTING_LABELS: Record<keyof Settings, string> = {
 export function parseSettings(raw: unknown): Settings {
   const s = { ...DEFAULT_SETTINGS };
   if (raw && typeof raw === 'object') {
-    for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-      const v = (raw as Record<string, unknown>)[key];
+    const r = raw as Record<string, unknown>;
+    for (const key of Object.keys(SETTING_LABELS) as Toggle[]) {
+      const v = r[key];
       if (typeof v === 'boolean') s[key] = v;
     }
+    if (typeof r.theme === 'string' && Object.prototype.hasOwnProperty.call(THEME_LABELS, r.theme)) s.theme = r.theme as ThemeChoice;
   }
   return s;
+}
+
+/** `auto` takes the app's scheme; an older app that doesn't say gets light. */
+export function resolveTheme(choice: ThemeChoice, appScheme: string | null | undefined): Theme {
+  if (choice !== 'auto') return choice;
+  return appScheme === 'dark' ? 'dark' : 'light';
 }

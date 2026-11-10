@@ -2,10 +2,11 @@
 // the puzzle, sends the solve, and owns help, settings and the day rolling over.
 
 import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, withArchivePlayed } from './archive';
-import { renderHome, TIER_NAME, type PlayState } from './home';
+import { friendsRows, hasBoard, showSolvers } from './board';
+import { renderHome, TIER_NAME, type PlayState, type Solvers } from './home';
 import { mountPlay, type PlayScreen, type SavedPlay } from './play';
 import { DAY_MS, EPOCH_MS, dailyTierFor, parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
-import { DEFAULT_SETTINGS, parseSettings, SETTING_LABELS, type Settings } from './settings';
+import { DEFAULT_SETTINGS, parseSettings, resolveTheme, SETTING_LABELS, THEME_LABELS, type Settings, type ThemeChoice, type Toggle } from './settings';
 import { bestStreak, parseStats, streakOf, withDailySolved, type Stats } from './stats';
 import { button, el, openSheet, OR, readJson, readJsonForMerge, serverNow, setVibration, SHARE_URL, syncClock, writeJson } from './ui';
 
@@ -24,6 +25,28 @@ let settings: Settings = DEFAULT_SETTINGS;
 let stats: Stats = { solvedDays: [] };
 let playing: PlayScreen | null = null;
 let stopHome = (): void => undefined;
+
+// ---------- colours ----------
+
+/** This device's last theme, so a return visit doesn't open on the wrong colours. */
+const THEME_CACHE = 'rabbit-sudoku:theme';
+
+function applyTheme(choice: ThemeChoice): void {
+  const theme = resolveTheme(choice, OR()?.colorScheme);
+  document.documentElement.dataset.theme = theme;
+  try {
+    localStorage.setItem(THEME_CACHE, theme);
+  } catch {
+    /* private window: the colours just come a moment later next time */
+  }
+}
+
+try {
+  const cached = localStorage.getItem(THEME_CACHE);
+  if (cached === 'light' || cached === 'paper' || cached === 'dark') document.documentElement.dataset.theme = cached;
+} catch {
+  /* no storage: light until the settings load */
+}
 
 const stateOf = (s: SavedPlay | null): PlayState => (!s ? 'new' : s.solved ? 'solved' : 'progress');
 
@@ -68,6 +91,30 @@ async function sendSolve(): Promise<void> {
   }
 }
 
+// ---------- who solved it ----------
+
+/** Friends who solved day `n`, and how many players did; null with neither verb. */
+function loadSolvers(n: number, signedIn: boolean): Promise<Solvers> | null {
+  const caps = OR().capabilities;
+  const key = roundKey(n);
+  const hasFriends = signedIn && caps.has('scores.friends');
+  const hasTotal = caps.has('scores.distribution');
+  if (!hasFriends && !hasTotal) return null;
+  const friends = hasFriends
+    ? OR()
+        .scores.friends({ roundKey: key })
+        .then((rows) => friendsRows(rows).filter((r) => !r.isSelf).map((r) => r.username))
+        .catch(() => [])
+    : Promise.resolve(null);
+  const total = hasTotal
+    ? OR()
+        .scores.distribution({ roundKey: key })
+        .then((rows) => rows.reduce((sum, r) => sum + r.count, 0))
+        .catch(() => null)
+    : Promise.resolve(null);
+  return Promise.all([friends, total]).then(([f, t]) => ({ friends: f, total: t }));
+}
+
 // ---------- screens ----------
 
 async function showHome(): Promise<void> {
@@ -80,13 +127,8 @@ async function showHome(): Promise<void> {
   const date = new Date(EPOCH_MS + index * DAY_MS);
   const monday = index - ((date.getUTCDay() + 6) % 7);
   const solved = new Set(stats.solvedDays);
-  const friends =
-    signedIn && OR().capabilities.has('scores.friends')
-      ? OR()
-          .scores.friends({ roundKey: roundKey(index) })
-          .then((rows) => rows.filter((r) => !r.isSelf).map((r) => r.username))
-          .catch(() => [])
-      : null;
+  const canSignIn = OR().capabilities.has('actions.requestSignIn');
+  const solvers = loadSolvers(index, signedIn);
 
   // The status bar sits on home's rust band (styles.css).
   document.documentElement.dataset.screen = 'home';
@@ -98,7 +140,7 @@ async function showHome(): Promise<void> {
       tier: day.tier,
       givens: day.givens,
       signedIn,
-      canSignIn: OR().capabilities.has('actions.requestSignIn'),
+      canSignIn,
       state: stateOf(today),
       streak: streakOf(stats.solvedDays, index),
       best: bestStreak(stats.solvedDays),
@@ -109,7 +151,8 @@ async function showHome(): Promise<void> {
         today: monday + i === index,
         future: monday + i > index,
       })),
-      friends,
+      solvers,
+      board: hasBoard(canSignIn) ? () => showSolvers(index, canSignIn) : null,
       nextIn: () => EPOCH_MS + (index + 1) * DAY_MS - serverNow(),
     },
     {
@@ -241,10 +284,30 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
 }
 
 function showSettings(): void {
-  const body = el('div', 'settings');
+  const body = el('div');
+  // Colours: four swatches, applied the moment one is tapped.
+  const themes = el('div', 'themes');
+  themes.setAttribute('role', 'radiogroup');
+  themes.setAttribute('aria-label', 'Colours');
+  const swatches = (Object.keys(THEME_LABELS) as ThemeChoice[]).map((choice) => {
+    const b = button(`theme theme-${choice}`, '', () => {
+      settings = { ...settings, theme: choice };
+      applyTheme(choice);
+      writeJson('settings', settings);
+      mark();
+    });
+    b.setAttribute('role', 'radio');
+    b.append(el('span', 'theme-swatch'), el('span', 'theme-name', THEME_LABELS[choice]));
+    return b;
+  });
+  const mark = (): void => swatches.forEach((b, i) => b.setAttribute('aria-checked', String(Object.keys(THEME_LABELS)[i] === settings.theme)));
+  mark();
+  themes.append(...swatches);
+
+  const toggles = el('div', 'settings');
   // Nothing buzzes on a desktop, so no switch there (solitaire does the same).
   const touch = window.matchMedia('(pointer: coarse)').matches;
-  for (const key of Object.keys(SETTING_LABELS) as (keyof Settings)[]) {
+  for (const key of Object.keys(SETTING_LABELS) as Toggle[]) {
     if (key === 'vibration' && !touch) continue;
     const row = el('label', 'toggle');
     const input = el('input');
@@ -256,8 +319,9 @@ function showSettings(): void {
       writeJson('settings', settings);
     });
     row.append(el('span', '', SETTING_LABELS[key]), input);
-    body.appendChild(row);
+    toggles.appendChild(row);
   }
+  body.append(el('h3', 'group-title', 'Colours'), themes, el('h3', 'group-title', 'Play'), toggles);
   openSheet('Settings', body);
 }
 
@@ -333,6 +397,7 @@ async function bootstrap(): Promise<void> {
   ]);
   settings = parseSettings(rawSettings);
   setVibration(settings.vibration);
+  applyTheme(settings.theme);
   stats = parseStats(rawStats);
   await startDay();
   // A past day's archive page opens straight into that day; anything else

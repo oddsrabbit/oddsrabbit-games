@@ -2,7 +2,7 @@
 // apps.oddsrabbit.com/rabbit-sudoku/ next to the SDK's own dist.
 //
 // The game loads the shared SDK from the host (`../sdk-v1.js`), so it isn't
-// bundled. It's read from the repo root so its cache-bust stamp is the same
+// bundled; nor is the leaderboard's stylesheet (`../leaderboard-v1.css`). It's read from the repo root so its cache-bust stamp is the same
 // content hash the root build stamps into its own games, and copied into
 // dist/ so dev/harness.html runs locally; that copy is for local use only.
 // Run `npm run build` at the repo root first.
@@ -24,6 +24,15 @@ if (!sdk) console.warn(`${SDK_DIST}/sdk-v1.js not found; run npm run build at th
 const SDK_VERSION = sdk ? createHash('sha256').update(sdk).digest('hex').slice(0, 12) : BUILD_ID;
 if (sdk) await writeFile('dist/sdk-v1.js', sdk);
 
+// The shared leaderboard's stylesheet loads from the host too
+// (`../leaderboard-v1.css`). Same stamp the root build gives __UI_VERSION__:
+// the leaderboard JS and CSS hashed together (build.config.mjs). Copied into
+// dist/ for the harness only.
+const uiJs = await readFile(`${SDK_DIST}/leaderboard-v1.js`).catch(() => null);
+const uiCss = await readFile(`${SDK_DIST}/leaderboard-v1.css`).catch(() => null);
+const UI_VERSION = uiJs && uiCss ? createHash('sha256').update(uiJs).update(uiCss).digest('hex').slice(0, 12) : BUILD_ID;
+if (uiCss) await writeFile('dist/leaderboard-v1.css', uiCss);
+
 const buildOpts = {
   entryPoints: ['src/main.ts'],
   outfile: `${OUT}/main.js`,
@@ -40,7 +49,7 @@ const buildOpts = {
 async function copyAssets() {
   const html = await readFile('index.html', 'utf8');
   await Promise.all([
-    writeFile(`${OUT}/index.html`, html.replaceAll('__BUILD_ID__', BUILD_ID).replaceAll('__SDK_VERSION__', SDK_VERSION)),
+    writeFile(`${OUT}/index.html`, html.replaceAll('__BUILD_ID__', BUILD_ID).replaceAll('__SDK_VERSION__', SDK_VERSION).replaceAll('__UI_VERSION__', UI_VERSION)),
     copyFile('styles.css', `${OUT}/styles.css`),
     // The platform manifest points at <slug>/icon-512.png (as Word Battle's
     // build notes), so the icon ships with the bundle.

@@ -14,16 +14,21 @@
 //   user=0       signed out: home asks you to sign in
 //   fresh=1      forget saved progress (help shows again)
 //   friends=0    no friends have solved today's Daily
+//   others=N     how many strangers solved each day (default 14), for the Everyone board
 //   sendfail=N   the first N Daily submissions fail as if offline
 //   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
 //   help=0       skip the first-run help
 //   open=1       open straight into the puzzle, for screenshots
 //   archive=N    open as the archive page's Play button does: initialState for puzzle-N
+//   scheme=dark  the app is in dark mode (what "Match app" follows)
+//   theme=T      start with the Colours setting on T: auto, light, paper or dark
+//   select=N     with open=1, tap cell N (0-80) once the puzzle is up
 const q = new URLSearchParams(location.search);
 const STORE_KEY = 'rs-harness-store';
 if (q.get('fresh')) localStorage.removeItem(STORE_KEY);
 const store = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
 if (q.get('help') === '0') store.seen_help = 'true';
+if (q.has('theme')) store.settings = JSON.stringify({ ...JSON.parse(store.settings || '{}'), theme: q.get('theme') });
 const persist = () => localStorage.setItem(STORE_KEY, JSON.stringify(store));
 const frame = document.getElementById('g');
 frame.src = '../dist/rabbit-sudoku/index.html';
@@ -42,16 +47,31 @@ const ME = { uuid: '11111111-1111-4111-8111-111111111111', username: 'tester', a
 const FRIENDS = ['pip_fan', 'mochi.mama', 'bun.bun', 'maple_leaf', 'thumper'].map((username, i) => ({
   uuid: `2222222${i}-2222-4222-8222-222222222222`, username, avatar: null,
 }));
+const OTHERS = Array.from({ length: Number(q.get('others') ?? 14) }, (_, i) => ({
+  uuid: `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`, username: `solver_${i + 1}`, avatar: null,
+}));
 const rnd = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
 const mine = {}; // roundKey → my row
 
 const caps = ['storage.get', 'storage.set', 'storage.delete', 'content.daily', 'actions.share', 'actions.haptic',
-  'actions.requestSignIn', 'scores.submit', 'scores.friends', 'time.now'];
+  'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'scores.rank', 'scores.distribution', 'time.now'];
 const signedIn = q.get('user') !== '0';
 
+/** Everyone who solved a day, earliest first: some friends, the strangers, then me. */
+function field(roundKey) {
+  const day = Date.parse('2026-11-09T00:00:00Z');
+  const friends = q.get('friends') === '0' ? [] : FRIENDS.filter((f) => rnd(f.username + roundKey) < 0.55);
+  const rows = [...friends, ...OTHERS].map((u) => ({
+    ...u, score: 1, metadata: { hints: Math.floor(rnd(u.uuid + roundKey) * 4) },
+    createdAt: new Date(day + rnd(u.username + roundKey) * 8 * 3600e3).toISOString(),
+  }));
+  rows.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  if (mine[roundKey]) rows.push(mine[roundKey]);
+  return rows.map(({ isSelf, ...r }) => r);
+}
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
-  send({ type: 'init', user: signedIn ? ME : null, sessionToken: signedIn ? 'x' : null, expiresAt: null, colorScheme: 'light', capabilities: caps,
+  send({ type: 'init', user: signedIn ? ME : null, sessionToken: signedIn ? 'x' : null, expiresAt: null, colorScheme: q.get('scheme') === 'dark' ? 'dark' : 'light', capabilities: caps,
     ...(q.has('archive') ? { initialState: { target: 'play', roundKey: `puzzle-${q.get('archive')}` } } : {}) });
 }
 let initSent = false;
@@ -69,8 +89,10 @@ frame.addEventListener('load', () => {
   const tryOpen = () => {
     const doc = frame.contentDocument;
     const target = doc.querySelector('.spotlight .primary');
-    if (target) target.click();
-    else if (tries++ < 30) setTimeout(tryOpen, 200);
+    if (target) {
+      target.click();
+      if (q.has('select')) setTimeout(() => doc.querySelectorAll('.cell')[Number(q.get('select'))]?.click(), 100);
+    } else if (tries++ < 30) setTimeout(tryOpen, 200);
   };
   if (open) setTimeout(tryOpen, 300);
 });
@@ -102,11 +124,15 @@ window.addEventListener('message', async (e) => {
       return ok({ submittedAt: new Date().toISOString() });
     }
     case 'scores.friends': {
-      const solved = q.get('friends') === '0' ? [] : FRIENDS.filter((f) => rnd(f.username + p.roundKey) < 0.55);
-      const rows = solved.map((f) => ({ ...f, score: 1, metadata: null, createdAt: new Date().toISOString(), isSelf: false }));
-      if (mine[p.roundKey]) rows.push(mine[p.roundKey]);
-      return ok(rows);
+      const mates = new Set(FRIENDS.map((f) => f.uuid));
+      return ok(field(p.roundKey).filter((r) => mates.has(r.uuid) || r.uuid === ME.uuid).map((r) => ({ ...r, isSelf: r.uuid === ME.uuid })));
     }
+    case 'scores.top': return ok(field(p.roundKey).slice(0, p.limit ?? 20));
+    case 'scores.rank': {
+      const l = field(p.roundKey); const i = l.findIndex((r) => r.uuid === ME.uuid);
+      return ok(i < 0 ? null : { rank: i + 1, total: l.length, entry: { ...l[i], isSelf: true } });
+    }
+    case 'scores.distribution': { const n = field(p.roundKey).length; return ok(n ? [{ score: 1, count: n }] : []); }
     case 'actions.share': console.log('share\n' + p.text); return ok(undefined);
     case 'actions.requestSignIn': alert('The host would show its sign-in prompt here. Reload without user=0 to play signed in.'); return ok(undefined);
     default: return ok(undefined);
