@@ -13,7 +13,7 @@
 //   day=N        play puzzle-N (default 7, a Monday). Moves the server clock (time.now) to that day.
 //   user=0       signed out: home asks you to sign in
 //   fresh=1      forget saved progress (help shows again)
-//   friends=0    no friends have solved today's Daily
+//   friends=0    no friends have played today's Daily
 //   others=N     how many strangers solved each day (default 14), for the Everyone board
 //   sendfail=N   the first N Daily submissions fail as if offline
 //   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
@@ -57,16 +57,23 @@ const caps = ['storage.get', 'storage.set', 'storage.delete', 'content.daily', '
   'actions.requestSignIn', 'scores.submit', 'scores.friends', 'scores.top', 'scores.rank', 'scores.distribution', 'time.now'];
 const signedIn = q.get('user') !== '0';
 
-/** Everyone who solved a day, earliest first: some friends, the strangers, then me. */
+/**
+ * Everyone who played a day, as the server orders it: score down, then who got
+ * on first. A solve is 100 less its hints; about one in four is still at it (0).
+ */
 function field(roundKey) {
   const day = Date.parse('2026-11-09T00:00:00Z');
   const friends = q.get('friends') === '0' ? [] : FRIENDS.filter((f) => rnd(f.username + roundKey) < 0.55);
-  const rows = [...friends, ...OTHERS].map((u) => ({
-    ...u, score: 1, metadata: { hints: Math.floor(rnd(u.uuid + roundKey) * 4) },
-    createdAt: new Date(day + rnd(u.username + roundKey) * 8 * 3600e3).toISOString(),
-  }));
-  rows.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const rows = [...friends, ...OTHERS].map((u) => {
+    const hints = Math.floor(rnd(u.uuid + roundKey) * 4);
+    const solved = rnd('s' + u.username + roundKey) > 0.25;
+    return {
+      ...u, score: solved ? 100 - hints : 0, metadata: { solved, hints },
+      createdAt: new Date(day + rnd(u.username + roundKey) * 8 * 3600e3).toISOString(),
+    };
+  });
   if (mine[roundKey]) rows.push(mine[roundKey]);
+  rows.sort((a, b) => b.score - a.score || Date.parse(a.createdAt) - Date.parse(b.createdAt));
   return rows.map(({ isSelf, ...r }) => r);
 }
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
@@ -119,8 +126,11 @@ window.addEventListener('message', async (e) => {
       if (!signedIn) return fail('scores/unauthorized');
       console.log('submit', p.roundKey, p.score, JSON.stringify(p.metadata));
       if (sendFails > 0) { sendFails--; return fail('network/offline'); }
-      if (mine[p.roundKey]) return fail('scores/already-submitted');
-      mine[p.roundKey] = { ...ME, score: p.score, metadata: p.metadata ?? null, createdAt: new Date().toISOString(), isSelf: true };
+      const had = mine[p.roundKey];
+      if (had && !p.keepBest) return fail('scores/already-submitted');
+      // keepBest: the higher score stays, with its metadata; created_at never moves.
+      if (!had) mine[p.roundKey] = { ...ME, score: p.score, metadata: p.metadata ?? null, createdAt: new Date().toISOString(), isSelf: true };
+      else if (p.score > had.score) Object.assign(had, { score: p.score, metadata: p.metadata ?? null });
       return ok({ submittedAt: new Date().toISOString() });
     }
     case 'scores.friends': {
@@ -130,9 +140,13 @@ window.addEventListener('message', async (e) => {
     case 'scores.top': return ok(field(p.roundKey).slice(0, p.limit ?? 20));
     case 'scores.rank': {
       const l = field(p.roundKey); const i = l.findIndex((r) => r.uuid === ME.uuid);
-      return ok(i < 0 ? null : { rank: i + 1, total: l.length, entry: { ...l[i], isSelf: true } });
+      return ok(i < 0 ? null : { rank: l.filter((r) => r.score > l[i].score).length + 1, total: l.length, entry: { ...l[i], isSelf: true } });
     }
-    case 'scores.distribution': { const n = field(p.roundKey).length; return ok(n ? [{ score: 1, count: n }] : []); }
+    case 'scores.distribution': {
+      const counts = new Map();
+      for (const r of field(p.roundKey)) counts.set(r.score, (counts.get(r.score) ?? 0) + 1);
+      return ok([...counts].map(([score, count]) => ({ score, count })));
+    }
     case 'actions.share': console.log('share\n' + p.text); return ok(undefined);
     case 'actions.requestSignIn': alert('The host would show its sign-in prompt here. Reload without user=0 to play signed in.'); return ok(undefined);
     default: return ok(undefined);

@@ -1,14 +1,16 @@
 # Rabbit Sudoku
 
-A daily 9×9 sudoku for OddsRabbit. Calm, not competitive: one shared puzzle a
-day for signed-in players, with no clock and no ranking. Friends see who solved
-it, you keep a streak, and hints explain the next step. The plan is
+A daily 9×9 sudoku for OddsRabbit. Calm, gently ranked: one shared puzzle a
+day, with no clock. The day's board ranks solves by hints, with equal scores
+sharing a place, and lists who started but hasn't solved it yet. You keep a
+streak, and hints explain the next step. The plan is
 [../docs/proposals/rabbit-sudoku.md](../docs/proposals/rabbit-sudoku.md).
 
 **Status:** launched 2026-11-09. The engine, the puzzles file, the client and the server side are built.
 The client has two screens:
 - **Home:** today's puzzle, streak, the week tinted by difficulty, friends who
-  solved it, and a countdown to the next puzzle.
+  solved it, and a countdown to the next puzzle. The friends card opens the day's
+  board, as does *See how everyone did* on the solved sheet.
 - **Play:** the grid, Undo, Erase, Notes and Hint, and a row-of-nine pad.
 
 It also has settings (vibration on touch devices only), help and the solved

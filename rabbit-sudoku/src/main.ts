@@ -2,12 +2,13 @@
 // the puzzle, sends the solve, and owns help, settings and the day rolling over.
 
 import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, withArchivePlayed } from './archive';
-import { friendsRows, hasBoard, showSolvers } from './board';
+import { friendsRows, hasBoard, isSolvedRow, showSolvers, solveScore, UNSOLVED_SCORE } from './board';
 import { renderHome, TIER_NAME, type PlayState, type Solvers } from './home';
 import { mountPlay, type PlayScreen, type SavedPlay } from './play';
 import { DAY_MS, EPOCH_MS, dailyTierFor, parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
 import { DEFAULT_SETTINGS, parseSettings, resolveTheme, SETTING_LABELS, THEME_LABELS, type Settings, type ThemeChoice, type Toggle } from './settings';
 import { bestStreak, parseStats, streakOf, withDailySolved, type Stats } from './stats';
+import { formatGrid, parseGrid } from './sudoku';
 import { button, el, openSheet, OR, readJson, readJsonForMerge, serverNow, setVibration, SHARE_URL, syncClock, writeJson } from './ui';
 
 const app = document.getElementById('app')!;
@@ -17,6 +18,8 @@ interface DailySave extends SavedPlay {
   index: number;
   /** The solve hasn't reached the server yet. */
   pending: boolean;
+  /** The day's row is on the server: the "not solved yet" one, or the solve. */
+  started?: boolean;
 }
 
 let index = 0;
@@ -71,6 +74,10 @@ async function loadDay(n: number): Promise<DayContent | null> {
 let pending = false;
 let sending = false;
 
+// Both rows go with `keepBest`: the server keeps the higher score, so the
+// solve always replaces the "not solved yet" row whichever lands first, and a
+// resend is a no-op rather than a 409.
+
 async function sendSolve(): Promise<void> {
   const saved = await readJson<DailySave | null>('daily', null);
   if (saved?.pending) pending = true;
@@ -78,16 +85,74 @@ async function sendSolve(): Promise<void> {
   sending = true;
   const done = (): void => {
     pending = false;
-    writeJson('daily', { ...saved, pending: false });
+    writeJson('daily', { ...saved, pending: false, started: true });
   };
   try {
-    await OR().scores.submit({ roundKey: roundKey(saved.index), score: 1, metadata: { hints: saved.hints } });
+    await OR().scores.submit({
+      roundKey: roundKey(saved.index),
+      score: solveScore(saved.hints),
+      metadata: { solved: true, hints: saved.hints },
+      keepBest: true,
+    });
     done();
   } catch (error) {
     if ((error as { code?: string } | null)?.code === 'scores/already-submitted') done();
     // Anything else: try again on resume, back online, or the next open.
   } finally {
     sending = false;
+  }
+}
+
+/**
+ * The day's "not solved yet" row, sent on the first digit, note or hint, so
+ * the board shows who's had a go. Signed in only, as with the solve. Tried
+ * again on the next move until it lands.
+ */
+let started = false;
+let starting = false;
+
+async function sendStart(n: number, s: SavedPlay): Promise<void> {
+  if (started || starting || s.solved || !OR().user || !OR().capabilities.has('scores.submit')) return;
+  starting = true;
+  try {
+    await OR().scores.submit({ roundKey: roundKey(n), score: UNSOLVED_SCORE, metadata: { solved: false, hints: s.hints }, keepBest: true });
+    started = true;
+    const saved = await readJson<DailySave | null>('daily', null);
+    if (saved?.index === n) writeJson('daily', { ...saved, started: true });
+  } catch {
+    // Offline or a host hiccup: the next move tries again.
+  } finally {
+    starting = false;
+  }
+}
+
+/** Whether the player has done anything to the puzzle: a digit, a note or a hint. */
+const touched = (s: SavedPlay, givens: string): boolean => s.hints > 0 || s.values !== givens || s.notes.some((m) => m !== 0);
+
+/**
+ * Launch-day solves (Daily #1 and #2) went up as a score of 1 whatever their
+ * hints, which now ranks as 99 of them. Raise this player's row to its real
+ * score, once a session. `keepBest` only ever raises it, and asking the server
+ * first means a solve made as a guest, which has no row, still never gets one.
+ * Dead once Daily #2 closes to scores; remove it then.
+ */
+let upgradeTried = false;
+
+async function upgradeLaunchRow(): Promise<void> {
+  const caps = OR().capabilities;
+  if (upgradeTried || !OR().user || !caps.has('scores.rank') || !caps.has('scores.submit')) return;
+  const saved = await readJson<DailySave | null>('daily', null);
+  if (!saved?.solved || saved.pending || saved.index > 1) return;
+  upgradeTried = true;
+  const key = roundKey(saved.index);
+  const score = solveScore(saved.hints);
+  try {
+    const mine = await OR().scores.rank({ roundKey: key, order: 'top' });
+    if (mine && mine.entry.score === 1 && score > 1) {
+      await OR().scores.submit({ roundKey: key, score, metadata: { solved: true, hints: saved.hints }, keepBest: true });
+    }
+  } catch {
+    // The day closed, or offline: launch day keeps its 1s.
   }
 }
 
@@ -103,13 +168,13 @@ function loadSolvers(n: number, signedIn: boolean): Promise<Solvers> | null {
   const friends = hasFriends
     ? OR()
         .scores.friends({ roundKey: key })
-        .then((rows) => friendsRows(rows).filter((r) => !r.isSelf).map((r) => r.username))
+        .then((rows) => friendsRows(rows).filter((r) => !r.isSelf && isSolvedRow(r)).map((r) => r.username))
         .catch(() => [])
     : Promise.resolve(null);
   const total = hasTotal
     ? OR()
         .scores.distribution({ roundKey: key })
-        .then((rows) => rows.reduce((sum, r) => sum + r.count, 0))
+        .then((rows) => rows.filter(isSolvedRow).reduce((sum, r) => sum + r.count, 0))
         .catch(() => null)
     : Promise.resolve(null);
   return Promise.all([friends, total]).then(([f, t]) => ({ friends: f, total: t }));
@@ -177,20 +242,26 @@ async function play(): Promise<void> {
   const mine = saved?.index === index ? saved : null;
   const n = index;
   const tier = day.tier;
+  // As the play screen saves it, so an untouched grid compares equal.
+  const givens = formatGrid(parseGrid(day.givens)!);
+  started = mine?.started ?? false;
   playing = mountPlay(app, {
     title: `Daily #${n + 1}`,
     tier: TIER_NAME[tier],
     givens: day.givens,
     saved: mine,
     settings,
-    save: (s) => writeJson('daily', { ...s, index: n, pending }),
+    save: (s) => {
+      writeJson('daily', { ...s, index: n, pending, started });
+      if (touched(s, givens)) void sendStart(n, s);
+    },
     solved: (s) => {
       stats = withDailySolved(stats, n);
       writeJson('stats', stats);
       // A guest's solve is never sent, now or after they sign in: it would
       // land on the friends board as if they'd been signed in to solve it.
       pending = OR().user !== null;
-      writeJson('daily', { ...s, index: n, pending });
+      writeJson('daily', { ...s, index: n, pending, started });
       void sendSolve();
       showSolved(s, n, tier);
     },
@@ -257,6 +328,12 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
   // The sign-up pitch is about the streak, which an archive solve doesn't touch.
   if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
     body.appendChild(el('p', 'solved-guest', 'Your streak is saved on this device. Sign up to keep it everywhere and see which friends solved today.'));
+  }
+  // Today's board, on its own row so it doesn't crowd the actions. The modal
+  // opens over this sheet and hands back to it on close.
+  const canSignIn = OR().capabilities.has('actions.requestSignIn');
+  if (!archive && hasBoard(canSignIn)) {
+    body.appendChild(button('subtle solved-board', 'See how everyone did ›', () => showSolvers(n, canSignIn)));
   }
   const actions = el('div', 'sheet-actions');
   if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
@@ -416,6 +493,7 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('online', onResume);
   window.setInterval(refreshIfStale, 30_000);
   void sendSolve();
+  void upgradeLaunchRow();
   OR().ready();
 }
 

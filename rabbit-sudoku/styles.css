@@ -667,6 +667,7 @@ button.solvers:active { background: var(--peer); }
 .solved-line { margin: 0; font-weight: 600; color: var(--muted); }
 .solved-streak { margin: 6px 0 0; font-weight: 700; }
 .solved-guest { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+.solved-board { display: block; width: 100%; margin-top: 16px; padding: 13px 16px; font-size: 16px; }
 
 @media (prefers-reduced-motion: reduce) {
   .cell.sweep, .cell.done, .sheet { animation: none; }

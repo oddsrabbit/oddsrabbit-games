@@ -21,8 +21,10 @@ with home and play screens and a dev harness. The engine includes:
   Nikoli trademark in Japan only, so anything Japanese-localized says *Number
   Place* (ナンプレ) instead.
 - **9×9.**
-- **The Daily isn't timed or ranked.** It's one shared puzzle a day: friends see
-  who solved it, and you keep a streak and a calendar.
+- **The Daily isn't timed, and it's ranked gently, by hints** (2026-11-10, see
+  §5). It's one shared puzzle a day: the board ranks solves by hints with ties
+  sharing a place and lists who has started, and you keep a streak and a
+  calendar.
 - **Guests can't play the Daily.**
 - **No Casual: just the one daily puzzle.** It has no clock, and anything below
   that still mentions Casual is superseded. The content shape became
@@ -272,17 +274,33 @@ Notes are 81 × 9 bits, packed. Undo history stays in memory.
 
 ## 5. Rows on the server
 
-- **A Daily solve** writes one row on `puzzle-N`: `score: 1`, metadata
-  `{ hints }`. It's sent once and retried on resume, on coming back online, from
-  the done screen and on the next open. A retry stops when the row lands or
-  `scores/already-submitted` comes back.
-- **What the rows are for**: `scores.friends` ("solved today"), and the
-  platform's notion of who played, which the end-of-day nudge uses.
+- **Ranked by hints, from 2026-11-10.** At launch every solve was `score: 1` and
+  the board went by who finished first, which made it a race to play just after
+  midnight UTC. Now each day has one row on `puzzle-N`, always sent with
+  `keepBest`:
+  - **Started**: on the first digit, note or hint, `score: 0`, metadata
+    `{ solved: false, hints }`. Shown as "Not solved yet", with no place. Tried
+    again on the next move until it lands.
+  - **Solved**: `score: 100 - min(hints, 99)`, metadata `{ solved: true, hints }`.
+    Retried on resume, on coming back online and on the next open. `keepBest`
+    means it always replaces the started row, and a resend is a no-op.
+  - **Equal scores share a place** (`rankTies`), so every hint-free solve is first
+    together: tiers, not a race. A medal shows only where one player holds the
+    place.
+  - **Launch-day rows** (`puzzle-0`, `puzzle-1`) were a flat 1. While the day is
+    open, the client raises the player's own row to its real score
+    (`upgradeLaunchRow`, main.ts), after `scores.rank` confirms the row exists,
+    so a guest's solve still never gets one.
+  - **Time is never ranked.** A clock that pauses is easy to game (screenshot,
+    solve elsewhere, type it in), which is why Solitaire moved to moves.
+- **What the rows are for**: the day's board (Everyone and Friends), "friends who
+  solved it" on home (solves only), and the platform's notion of who played,
+  which the end-of-day nudge uses.
 - **Casual writes nothing in v1.**
-- **No season board** (`seasonMetric: null`) and **not on Top today**
-  (`topToday: false`), as with Rabbit Draw: a `1` ranks nothing. The streak and
-  calendar come from the player's own storage.
-- **Bounds**: `AppScoreBounds` `'rabbit-sudoku' => ['default' => [0, 1]]`.
+- **No season board** (`seasonMetric: null`), **not on Top today**
+  (`topToday: false`) and no end-of-day results push: the ranking stays on the
+  game's own board. The streak and calendar come from the player's own storage.
+- **Bounds**: `AppScoreBounds` `'rabbit-sudoku' => ['default' => [0, 100]]`.
 
 ## 6. Code layout
 
