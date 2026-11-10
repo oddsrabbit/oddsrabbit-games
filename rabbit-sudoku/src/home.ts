@@ -16,6 +16,8 @@ export interface HomeData {
   /** Today's puzzle, for the thumbnail. */
   givens: string;
   signedIn: boolean;
+  /** The host can raise its sign-in prompt (web; the app has no guests). */
+  canSignIn: boolean;
   state: PlayState;
   streak: number;
   best: number;
@@ -139,18 +141,19 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   spot.append(spotHead, thumbnail(d.givens));
 
   let stop = (): void => undefined;
-  if (!d.signedIn) {
-    spot.append(
-      el('p', 'spot-note', 'Sign in to play the daily puzzle, keep a streak and see which friends solved it.'),
-      button('primary big', 'Sign in to play', a.signIn)
-    );
-  } else {
-    const scores = el('div', 'spot-scores');
-    const thisWeek = d.week.filter((w) => w.solved).length;
-    scores.append(scoreCell('Streak', String(d.streak)), scoreCell('Best', String(Math.max(d.best, d.streak))), scoreCell('This week', `${thisWeek}/7`, true));
-    spot.appendChild(scores);
-    const label = d.state === 'solved' ? 'See your solve' : d.state === 'progress' ? 'Continue' : 'Play';
-    spot.appendChild(button(`primary big${d.state === 'solved' ? ' is-done' : ''}`, label, a.play));
+  // Guests get the same daily and streak, kept in this browser; the note asks
+  // them to sign up so the streak follows them (main.ts, play()).
+  const scores = el('div', 'spot-scores');
+  const thisWeek = d.week.filter((w) => w.solved).length;
+  scores.append(scoreCell('Streak', String(d.streak)), scoreCell('Best', String(Math.max(d.best, d.streak))), scoreCell('This week', `${thisWeek}/7`, true));
+  spot.appendChild(scores);
+  const label = d.state === 'solved' ? 'See your solve' : d.state === 'progress' ? 'Continue' : 'Play';
+  spot.appendChild(button(`primary big${d.state === 'solved' ? ' is-done' : ''}`, label, a.play));
+  if (!d.signedIn && d.canSignIn) {
+    const note = el('p', 'spot-note spot-guest', 'Playing as a guest: your streak is saved on this device only. ');
+    const link = button('link-button', 'Sign up to keep it', a.signIn);
+    note.appendChild(link);
+    spot.appendChild(note);
   }
 
   // Ticks every second, signed in or not.
@@ -172,21 +175,19 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   sheet.append(spot);
 
   // ----- the week and friends -----
-  if (d.signedIn) {
-    sheet.appendChild(el('h2', 'group-title', 'This week'));
-    const week = el('div', 'week');
-    for (const day of d.week) {
-      const mark = el('div', `day tier-${day.tier}${day.solved ? ' is-solved' : ''}${day.today ? ' is-today' : ''}${day.future ? ' is-future' : ''}`);
-      mark.setAttribute('aria-label', `${day.label}, ${TIER_NAME[day.tier]}${day.solved ? ', solved' : ''}`);
-      mark.append(el('span', 'day-label', day.label), el('span', 'day-mark', day.solved ? '✓' : ''));
-      week.appendChild(mark);
-    }
-    sheet.appendChild(week);
-    if (d.friends) {
-      const friends = el('p', 'notice', ' ');
-      sheet.appendChild(friends);
-      void d.friends.then((names) => (friends.textContent = friendsLine(names)));
-    }
+  sheet.appendChild(el('h2', 'group-title', 'This week'));
+  const week = el('div', 'week');
+  for (const day of d.week) {
+    const mark = el('div', `day tier-${day.tier}${day.solved ? ' is-solved' : ''}${day.today ? ' is-today' : ''}${day.future ? ' is-future' : ''}`);
+    mark.setAttribute('aria-label', `${day.label}, ${TIER_NAME[day.tier]}${day.solved ? ', solved' : ''}`);
+    mark.append(el('span', 'day-label', day.label), el('span', 'day-mark', day.solved ? '✓' : ''));
+    week.appendChild(mark);
+  }
+  sheet.appendChild(week);
+  if (d.friends) {
+    const friends = el('p', 'notice', ' ');
+    sheet.appendChild(friends);
+    void d.friends.then((names) => (friends.textContent = friendsLine(names)));
   }
   sheet.appendChild(el('p', 'foot muted', 'A new puzzle every day at midnight UTC: easy on Monday, hardest on Saturday.'));
 

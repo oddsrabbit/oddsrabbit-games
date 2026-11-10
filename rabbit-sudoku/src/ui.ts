@@ -119,3 +119,18 @@ export async function readJson<T>(key: string, fallback: T): Promise<T> {
     return fallback;
   }
 }
+
+/**
+ * For read-merge-write: a failed read rejects, where readJson would hand back a
+ * fallback that the write then puts over the real value. Unset or unparseable
+ * is null.
+ */
+export async function readJsonForMerge(key: string): Promise<unknown> {
+  const raw = writes.get(key)?.latest ?? (await OR().storage.get(key));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}

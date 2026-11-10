@@ -177,6 +177,15 @@ header h1 {
   font-size: 0.85rem; cursor: pointer;
 }
 
+/* Archive play: a past day, labelled so nobody mistakes it for today's. */
+.archive-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap; margin: 0 0 12px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.archive-banner p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+.archive-banner .view-back { margin-top: 0; }
+
 .clue { margin: 0; }
 .clue-frame { position: relative; }
 /* `contain`, not `cover`: the whole frame is the clue, and cropping its edges

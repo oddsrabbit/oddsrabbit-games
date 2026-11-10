@@ -94,10 +94,10 @@
   //
   // Guests are excluded, and that exclusion is NOT deferred: the endpoint needs
   // a signed-in user, and while `user` is null the host serves storage.* from
-  // this origin's localStorage rather than the per-user server store. A
-  // "submitted" marker written as a guest would sit in a namespace the
-  // signed-in session never reads — dead weight rather than a score credited
-  // later.
+  // this origin's localStorage rather than the per-user server store. The host
+  // carries those saves over to the account a guest signs up with
+  // (src/host/guest-carryover.ts), so a marker written as a guest would be
+  // sent later as if they had been signed in to score it.
   function canSubmitScores() {
     if (!OR.user || !OR.scores || typeof OR.scores.submit !== "function") return false;
     try {

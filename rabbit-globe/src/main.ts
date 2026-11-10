@@ -12,6 +12,12 @@ import {
 } from '../../src/ui/leaderboard';
 import { createSeasonTab, currentPeriod, formatPeriod } from '../../src/ui/season';
 import * as L from 'leaflet';
+import {
+  ARCHIVE_PLAYED_KEY,
+  archiveStateKey,
+  mergeArchivePlayed,
+  parseArchiveIntent,
+} from './archive';
 
 declare global {
   interface Window {
@@ -98,9 +104,16 @@ interface State {
   current: number; // round index in view
   status: 'in_progress' | 'complete';
   // Set once the server has this day's score (accepted, or already held it), so
-  // reopening a finished day doesn't resubmit. Absent for guests, which is what
-  // lets a guest who signs in later still have the day counted.
+  // reopening a finished day doesn't resubmit.
   submitted?: boolean;
+  // Finished as a guest. The host carries a guest's saves over to the account
+  // they sign up with, and this keeps that day off the boards for good: a
+  // result played signed out can't be told from one replayed in a private
+  // window until it came out right. Stats and streak still count it.
+  guest?: true;
+  // A past day replayed from the archive. Kept under its own key, scored
+  // locally, and never touches today's save, stats, streak or the boards.
+  archive?: true;
 }
 
 interface Stats {
@@ -123,9 +136,10 @@ const DEFAULT_STREAK: Streak = { current: 0, max: 0, lastPlayedPuzzleIndex: null
 
 // Null while today's game is unavailable (no stored game, no server content).
 let currentState: State | null = null;
-// Why it's unavailable: no content yet, or content this host can't play (its
-// answers are withheld and the host has no `content.reveal`).
-let unavailableReason: 'missing' | 'update' = 'missing';
+// Why it's unavailable: no content yet, content this host can't play (its
+// answers are withheld and the host has no `content.reveal`), or an archived
+// day that couldn't be loaded.
+let unavailableReason: 'missing' | 'update' | 'archive' = 'missing';
 let currentStats: Stats = DEFAULT_STATS;
 let currentStreak: Streak = DEFAULT_STREAK;
 let currentFriends: FriendScore[] | undefined;
@@ -286,9 +300,9 @@ async function loadDailyLocations(puzzleIndex: number): Promise<GeoLocation[] | 
   return parseLocations(daily?.content?.['locations']);
 }
 
-function freshState(locations: GeoLocation[]): State {
+function freshState(locations: GeoLocation[], puzzleIndex = todayPuzzleIndex()): State {
   return {
-    puzzleIndex: todayPuzzleIndex(),
+    puzzleIndex,
     locations,
     guesses: Array.from({ length: ROUNDS_PER_DAY }, () => null),
     current: 0,
@@ -336,6 +350,51 @@ async function loadState(): Promise<State | null> {
   if (stored) return stored;
   const locations = await loadDailyLocations(todayPuzzleIndex());
   return locations ? freshState(locations) : null;
+}
+
+/**
+ * Where a state is saved. Derived from the state itself so a write that lands
+ * after the player has switched days still goes to that day's own key.
+ */
+function storageKeyFor(state: State): string {
+  return state.archive ? archiveStateKey(state.puzzleIndex) : 'today';
+}
+
+/**
+ * An archived day's game: its saved progress, or a fresh one from
+ * `content.daily`. Null when the day can't be loaded, or when its answers are
+ * withheld: archive guesses are scored locally because `content.reveal` would
+ * lock in the pin on the server, where it counts towards that day's score.
+ */
+async function loadArchiveState(puzzleIndex: number): Promise<State | null> {
+  try {
+    const raw = await window.OddsRabbit.storage.get(archiveStateKey(puzzleIndex));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (isValidState(parsed) && parsed.archive && parsed.puzzleIndex === puzzleIndex) return parsed;
+  } catch {
+    /* fall through to a fresh game */
+  }
+  let locations: GeoLocation[] | null;
+  try {
+    locations = await loadDailyLocations(puzzleIndex);
+  } catch {
+    return null;
+  }
+  if (!locations || locations.some((loc) => !answerOf(loc))) return null;
+  return { ...freshState(locations, puzzleIndex), archive: true };
+}
+
+/** Add a finished archive day to `archive-played` (read, merge, write). */
+async function markArchivePlayed(puzzleIndex: number): Promise<void> {
+  try {
+    const raw = await window.OddsRabbit.storage.get(ARCHIVE_PLAYED_KEY);
+    await window.OddsRabbit.storage.set(
+      ARCHIVE_PLAYED_KEY,
+      JSON.stringify(mergeArchivePlayed(raw, puzzleIndex))
+    );
+  } catch {
+    /* best-effort */
+  }
 }
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -408,7 +467,7 @@ function guessesForServer(state: State): ([number, number] | null)[] {
  * haversineKm() and scoreForKm() in step with that class.
  */
 async function submitScoreToServer(state: State): Promise<void> {
-  if (!window.OddsRabbit.user) return;
+  if (!window.OddsRabbit.user || state.archive || state.guest) return;
   if (state.status !== 'complete' || state.submitted) return;
   const kmTotal = state.guesses.reduce((s, g) => s + (g ? g.km : 0), 0);
   try {
@@ -500,6 +559,7 @@ function render(): void {
   teardownMap();
   root.innerHTML = '';
   root.appendChild(renderHeader(state));
+  if (state.archive) root.appendChild(renderArchiveBanner());
 
   if (state.status === 'in_progress') {
     const guess = state.guesses[state.current] ?? null;
@@ -530,15 +590,16 @@ function renderHeader(state: State): HTMLElement {
   meta.className = 'puzzle-meta';
   meta.innerHTML = `
     <span class="puzzle-number">Puzzle #${state.puzzleIndex + 1}</span>
-    <span class="puzzle-date">${escapeHtml(formatPuzzleDate(state.puzzleIndex))}</span>
+    <span class="puzzle-date">${escapeHtml(formatPuzzleDate(state.puzzleIndex))}${state.archive ? ' · Archive' : ''}</span>
   `;
 
   const actions = document.createElement('div');
   actions.className = 'puzzle-header-actions';
 
   // Yesterday's leaderboard — hidden on day 0. Today's scores are held back to
-  // the end screen since they shift as the day's plays land.
-  if (state.puzzleIndex > 0) {
+  // the end screen since they shift as the day's plays land. Not on an
+  // archived day, where "yesterday" would be relative to the wrong day.
+  if (state.puzzleIndex > 0 && !state.archive) {
     const lb = document.createElement('button');
     lb.type = 'button';
     lb.className = 'header-icon-btn leaderboard-btn';
@@ -559,6 +620,28 @@ function renderHeader(state: State): HTMLElement {
   wrap.appendChild(meta);
   wrap.appendChild(actions);
   return wrap;
+}
+
+/** Says an archived day doesn't count, with the way back to today's puzzle. */
+function renderArchiveBanner(): HTMLElement {
+  const banner = document.createElement('div');
+  banner.className = 'archive-banner';
+  const note = document.createElement('p');
+  note.textContent = "Past puzzles don't count toward your stats or the boards.";
+  banner.append(note, renderPlayTodayButton());
+  return banner;
+}
+
+function renderPlayTodayButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'view-back archive-today-btn';
+  btn.textContent = "Play today's puzzle →";
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    void startDay();
+  });
+  return btn;
 }
 
 /** Switch the visible pane without re-rendering (keeps the Leaflet map mounted). */
@@ -985,11 +1068,31 @@ function renderEndGame(
   summary.id = 'summary-map';
   wrap.appendChild(summary);
 
+  // An archived day ends here: the boards, stats and share card all describe
+  // results that count, and this one doesn't.
+  if (state.archive) {
+    const playToday = renderPlayTodayButton();
+    playToday.className = 'share-btn';
+    wrap.appendChild(playToday);
+    return wrap;
+  }
+
+  // Signed in now, but this day was finished as a guest (see State.guest).
+  if (state.guest && window.OddsRabbit.user) {
+    const banner = document.createElement('div');
+    banner.className = 'archive-banner';
+    const note = document.createElement('p');
+    note.textContent = "Played as a guest, so this one isn't on today's board.";
+    banner.appendChild(note);
+    wrap.appendChild(banner);
+  }
+
   if (community) {
     wrap.appendChild(renderCommunityDistribution(community, total));
   }
   wrap.appendChild(
-    renderLeaderboardPanel(endGamePanelSlot, state.puzzleIndex, friends, { total })
+    // Not slotted in among friends' results when it never went to the board.
+    renderLeaderboardPanel(endGamePanelSlot, state.puzzleIndex, friends, state.guest ? null : { total })
   );
 
   // Personal stats.
@@ -1484,6 +1587,9 @@ async function submitGuess(): Promise<void> {
   const pin = (aimTarget ?? mapInstance.getCenter()).wrap();
   let guess = { lat: pin.lat, lng: pin.lng };
   let answer = answerOf(location);
+  // Archived days are only loaded with their answers inline, so this never
+  // reaches content.reveal, whose lock-in would count towards that day.
+  if (!answer && state.archive) return;
 
   if (!answer) {
     const button = document.getElementById('guess-btn') as HTMLButtonElement | null;
@@ -1529,7 +1635,7 @@ async function submitGuess(): Promise<void> {
     score: scoreForKm(km),
   };
   void window.OddsRabbit.actions.haptic('success');
-  await writeJson('today', state);
+  await writeJson(storageKeyFor(state), state);
   render();
 }
 
@@ -1545,13 +1651,20 @@ async function advanceRound(fromRound: number): Promise<void> {
   if (!state.guesses[fromRound]) return;
   if (state.current < ROUNDS_PER_DAY - 1) {
     state.current += 1;
-    await writeJson('today', state);
+    await writeJson(storageKeyFor(state), state);
     render();
     return;
   }
   // Last round done — finalize the day.
   state.status = 'complete';
-  await writeJson('today', state);
+  if (!state.archive && !window.OddsRabbit.user) state.guest = true;
+  await writeJson(storageKeyFor(state), state);
+  if (state.archive) {
+    // Recorded for the archive pages only: no stats, streak or score.
+    await markArchivePlayed(state.puzzleIndex);
+    if (currentState === state) render();
+    return;
+  }
 
   const total = totalScore(state);
   const [stats, streak] = await Promise.all([
@@ -2041,6 +2154,13 @@ function renderUnavailable(): void {
   const verdict = document.createElement('p');
   verdict.className = 'verdict';
   const sub = document.createElement('p');
+  if (unavailableReason === 'archive') {
+    verdict.textContent = "That past puzzle couldn't be loaded.";
+    sub.textContent = "Try again later, or play today's puzzle.";
+    wrap.append(verdict, sub, renderPlayTodayButton());
+    root.appendChild(wrap);
+    return;
+  }
   if (unavailableReason === 'update') {
     verdict.textContent = 'Update to play today\'s puzzle.';
     sub.textContent = 'This version of the app can\'t check guesses. Update it or restart it, or play on the web.';
@@ -2106,6 +2226,21 @@ function startDay(): Promise<void> {
 }
 
 /**
+ * Load an archived day and render it, or the "couldn't load" screen that
+ * offers today's puzzle instead. Today's state is never read or written here.
+ */
+async function startArchive(puzzleIndex: number): Promise<void> {
+  const state = await loadArchiveState(puzzleIndex);
+  currentState = state;
+  unavailableReason = state ? 'missing' : 'archive';
+  currentFriends = undefined;
+  currentCommunity = null;
+  // Re-mark a finished day in case the first write didn't land.
+  if (state?.status === 'complete') await markArchivePlayed(puzzleIndex);
+  render();
+}
+
+/**
  * Reload when what's on screen is out of date: the holding screen (today's
  * content may have landed), or a finished game from a previous day. A game
  * still in progress is left alone even across midnight — the player finishes
@@ -2113,6 +2248,8 @@ function startDay(): Promise<void> {
  */
 async function refreshIfStale(): Promise<void> {
   const state = currentState;
+  // An archived day is a past day on purpose; midnight doesn't make it stale.
+  if (state?.archive) return;
   const rolledOver = state?.status === 'complete' && state.puzzleIndex !== todayPuzzleIndex();
   if (!state || rolledOver) await startDay();
 }
@@ -2120,13 +2257,16 @@ async function refreshIfStale(): Promise<void> {
 async function bootstrap(): Promise<void> {
   await window.OddsRabbit.whenReady();
 
+  // Archive deep link from the website's per-day pages. Today, a future day or
+  // a malformed intent is a normal launch.
+  const archiveIndex = parseArchiveIntent(window.OddsRabbit.initialState, todayPuzzleIndex());
   const [, seenIntro] = await Promise.all([
-    startDay(),
+    archiveIndex !== null ? startArchive(archiveIndex) : startDay(),
     readJson<boolean>('seen_intro', false),
   ]);
 
   window.OddsRabbit.lifecycle.on('pause', () => {
-    if (currentState) void writeJson('today', currentState);
+    if (currentState) void writeJson(storageKeyFor(currentState), currentState);
   });
   window.OddsRabbit.lifecycle.on('resume', () => void refreshIfStale());
 

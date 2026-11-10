@@ -12,6 +12,12 @@ import {
 } from '../../src/ui/leaderboard';
 import { createSeasonTab, currentPeriod, formatPeriod } from '../../src/ui/season';
 import { isValidGuess } from './words';
+import {
+  ARCHIVE_PLAYED_KEY,
+  archiveStateKey,
+  mergeArchivePlayed,
+  parseArchiveIntent,
+} from './archive';
 
 declare global {
   interface Window {
@@ -33,9 +39,16 @@ interface State {
   guesses: string[];
   status: 'in_progress' | 'won' | 'lost';
   // Set once the server has this day's score (accepted, or already held it), so
-  // reopening a finished day doesn't resubmit. Absent for guests, which is what
-  // lets a guest who signs in later still have the day counted.
+  // reopening a finished day doesn't resubmit.
   submitted?: boolean;
+  // Finished as a guest. The host carries a guest's saves over to the account
+  // they sign up with, and this keeps that day off the boards for good: a
+  // result played signed out can't be told from one replayed in a private
+  // window until it came out right. Stats and streak still count it.
+  guest?: boolean;
+  // A past day replayed from the archive. It never scores, never touches stats
+  // or the streak, and saves under its own `archive-N` key, never `today`.
+  archive?: boolean;
 }
 
 interface Stats {
@@ -121,6 +134,11 @@ function buildShareGrid(state: State): string {
   return state.guesses
     .map((g) => scoreGuess(g, state.answer).map(emojiForColor).join(''))
     .join('\n');
+}
+
+/** Where a game is saved: today's under `today`, an archive day under its own key. */
+function stateKey(state: State): string {
+  return state.archive ? archiveStateKey(state.puzzleIndex) : 'today';
 }
 
 function freshState(answer: string): State {
@@ -280,9 +298,12 @@ function render(): void {
   }
   root.innerHTML = '';
   root.appendChild(renderPuzzleHeader(state));
+  if (state.archive) root.appendChild(renderArchiveNote());
   root.appendChild(renderBoard(state));
   if (state.status === 'in_progress') {
     root.appendChild(renderKeyboard(state));
+  } else if (state.archive) {
+    root.appendChild(renderArchiveEndGame(state, currentCommunity));
   } else {
     root.appendChild(
       renderEndGame(
@@ -294,7 +315,9 @@ function render(): void {
       )
     );
   }
-  root.appendChild(renderResetTime());
+  // Archive days get a way back instead of the countdown: the countdown's
+  // midnight rollover would otherwise swap today's puzzle in under the player.
+  root.appendChild(state.archive ? renderPlayTodayButton() : renderResetTime());
 
   // Animations are one-shot. Clear the flags AFTER rendering so they apply
   // to this paint exactly once and aren't re-applied on the next render.
@@ -310,7 +333,7 @@ function renderPuzzleHeader(state: State): HTMLElement {
   meta.className = 'puzzle-meta';
   meta.innerHTML = `
     <span class="puzzle-number">Puzzle #${state.puzzleIndex + 1}</span>
-    <span class="puzzle-date">${escapeHtml(formatPuzzleDate(state.puzzleIndex))}</span>
+    <span class="puzzle-date">${escapeHtml(formatPuzzleDate(state.puzzleIndex))}${state.archive ? ' · Archive' : ''}</span>
   `;
 
   const actions = document.createElement('div');
@@ -318,8 +341,9 @@ function renderPuzzleHeader(state: State): HTMLElement {
 
   // Yesterday's leaderboard — hidden on day 0 since there's nothing to show.
   // This header button is for *past* settled rounds only; today's distribution
-  // appears on the end-of-round screen once the player finishes.
-  if (state.puzzleIndex > 0) {
+  // appears on the end-of-round screen once the player finishes. Not on an
+  // archive day: "yesterday" there is relative to today, not the day on screen.
+  if (state.puzzleIndex > 0 && !state.archive) {
     const leaderboard = document.createElement('button');
     leaderboard.type = 'button';
     leaderboard.className = 'header-icon-btn leaderboard-btn';
@@ -494,6 +518,13 @@ function renderEndGame(
     verdict.innerHTML = `Out of guesses. Word was <strong>${escapeHtml(state.answer)}</strong>.`;
   }
   wrap.appendChild(verdict);
+  // Signed in now, but this day was finished as a guest (see State.guest).
+  if (state.guest && window.OddsRabbit.user) {
+    const note = document.createElement('p');
+    note.className = 'archive-note';
+    note.textContent = "Played as a guest, so this one isn't on today's board.";
+    wrap.appendChild(note);
+  }
 
   // Today's community distribution + "you did better than X%" headline. Omitted
   // until the bridge read lands (community === null), since it shifts as the
@@ -511,7 +542,8 @@ function renderEndGame(
       slot: endGamePanelSlot,
       puzzleIndex: state.puzzleIndex,
       friends,
-      viewerResult: viewerResultFromState(state),
+      // Not slotted in among friends' results when it never went to the board.
+      viewerResult: state.guest ? null : viewerResultFromState(state),
       lead: 'season',
     })
   );
@@ -574,6 +606,59 @@ function renderEndGame(
   wrap.appendChild(share);
 
   return wrap;
+}
+
+function renderArchiveNote(): HTMLElement {
+  const note = document.createElement('p');
+  note.className = 'archive-note';
+  note.textContent = "Past puzzles don't count toward your stats or the boards.";
+  return note;
+}
+
+/**
+ * End screen for an archive day. Only what doesn't imply the result counted:
+ * the verdict, how everyone did that day, and sharing. No friends board (it
+ * would slot the viewer's replay in among real results), no stats or streak,
+ * and no "you did better than" headline or "You" bar on the distribution.
+ */
+function renderArchiveEndGame(state: State, community: CommunityData | null): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'end-game';
+  wrap.setAttribute('role', 'status');
+
+  const verdict = document.createElement('p');
+  verdict.className = 'verdict';
+  if (state.status === 'won') {
+    verdict.textContent = `Solved in ${state.guesses.length}/6.`;
+  } else {
+    verdict.innerHTML = `Out of guesses. Word was <strong>${escapeHtml(state.answer)}</strong>.`;
+  }
+  wrap.appendChild(verdict);
+
+  if (community) {
+    wrap.appendChild(renderCommunityDistribution(community, null, 'How everyone did'));
+  }
+
+  const share = document.createElement('button');
+  share.type = 'button';
+  share.className = 'share-btn';
+  share.textContent = 'Share result';
+  share.addEventListener('click', () => void shareResult(state));
+  wrap.appendChild(share);
+
+  return wrap;
+}
+
+function renderPlayTodayButton(): HTMLElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'share-action archive-today-btn';
+  btn.textContent = "Play today's puzzle";
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    void startDay();
+  });
+  return btn;
 }
 
 function renderCommunityDistribution(
@@ -1210,10 +1295,17 @@ async function submitGuess(state: State, raw: string): Promise<void> {
   const isLoss = !isWin && state.guesses.length >= ROW_COUNT;
   if (isWin) state.status = 'won';
   else if (isLoss) state.status = 'lost';
+  if (state.status !== 'in_progress' && !state.archive && !window.OddsRabbit.user) state.guest = true;
 
-  await writeJson('today', state);
+  await writeJson(stateKey(state), state);
 
-  if (state.status !== 'in_progress') {
+  if (state.status !== 'in_progress' && state.archive) {
+    // Archive days stop here: no score, stats or streak. Recording the day is
+    // all a finish does; the end screen shows that day's distribution.
+    await recordArchivePlayed(state.puzzleIndex);
+    void window.OddsRabbit.actions.haptic(state.status === 'won' ? 'success' : 'error');
+    currentCommunity = await loadCommunityData(state.puzzleIndex);
+  } else if (state.status !== 'in_progress') {
     // Persist stats/streak and submit the score together; the await barrier
     // guarantees the score row lands before the friends + distribution reads
     // below, which are both derived from that same row (see loadCommunityData),
@@ -1263,11 +1355,13 @@ async function finalizeStreak(state: State): Promise<Streak> {
  *    reopening a finished day doesn't resubmit.
  *  - Network / 5xx errors leave the friends panel empty and the day
  *    unflagged, so the next open retries; the local game state is unaffected.
- *  - Skipped entirely for anonymous users (the bridge would 401 anyway).
+ *  - Skipped entirely for anonymous users (the bridge would 401 anyway), and
+ *    for a day finished as one, even once they've signed in (`State.guest`).
  */
 async function submitScoreToServer(state: State): Promise<void> {
   if (!window.OddsRabbit.user) return;
-  if (state.status === 'in_progress' || state.submitted) return;
+  // Belt and braces: archive days must never write a score.
+  if (state.archive || state.guest || state.status === 'in_progress' || state.submitted) return;
   const won = state.status === 'won';
   const guessCount = state.guesses.length;
   try {
@@ -1389,7 +1483,7 @@ async function runInviteShare(): Promise<void> {
 
 function buildShareTitle(state: State): string {
   const score = state.status === 'won' ? `${state.guesses.length}/6` : 'X/6';
-  return `RabbitWords #${state.puzzleIndex + 1} ${score}`;
+  return `RabbitWords #${state.puzzleIndex + 1} ${score}${state.archive ? ' (archive)' : ''}`;
 }
 
 function buildShareText(state: State): string {
@@ -1595,7 +1689,11 @@ async function buildShareImage(state: State): Promise<Blob> {
   const score = state.status === 'won' ? `${state.guesses.length}/6` : 'X/6';
   ctx.fillStyle = '#666666';
   ctx.font = '500 40px system-ui, -apple-system, "Segoe UI", sans-serif';
-  ctx.fillText(`Puzzle #${state.puzzleIndex + 1} · ${score}`, SIZE / 2, 210);
+  ctx.fillText(
+    `Puzzle #${state.puzzleIndex + 1} · ${score}${state.archive ? ' · Archive' : ''}`,
+    SIZE / 2,
+    210
+  );
 
   // Tile grid — only render guessed rows (matches emoji-text convention).
   const rows = state.guesses.length;
@@ -1930,6 +2028,91 @@ function startDay(): Promise<void> {
 }
 
 /**
+ * A past day's game: its own `archive-N` save if there is one (mid-game resume,
+ * or reopening a finished day), else a fresh game from that day's answer. Null
+ * when the server can't serve the day.
+ */
+async function loadArchiveState(puzzleIndex: number): Promise<State | null> {
+  try {
+    const raw = await window.OddsRabbit.storage.get(archiveStateKey(puzzleIndex));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (isValidState(parsed) && parsed.puzzleIndex === puzzleIndex) {
+      return { ...parsed, archive: true };
+    }
+  } catch {
+    /* corrupt or unreadable save: start the day fresh */
+  }
+  let answer: string | null = null;
+  try {
+    answer = await loadDailyAnswer(puzzleIndex);
+  } catch {
+    answer = null;
+  }
+  return answer
+    ? { puzzleIndex, answer, guesses: [], status: 'in_progress', archive: true }
+    : null;
+}
+
+/**
+ * Add a finished archive day to `archive-played`, which the website reads to
+ * mark played days. Read-merge-write; a failed READ skips the write rather
+ * than overwrite the list with just this day (reopening the day retries).
+ */
+async function recordArchivePlayed(puzzleIndex: number): Promise<void> {
+  let raw: string | null;
+  try {
+    raw = await window.OddsRabbit.storage.get(ARCHIVE_PLAYED_KEY);
+  } catch {
+    return;
+  }
+  await writeJson(ARCHIVE_PLAYED_KEY, mergeArchivePlayed(raw, puzzleIndex));
+}
+
+/** Load and render a past day from the archive (the `target: 'play'` deep link). */
+async function startArchive(puzzleIndex: number): Promise<void> {
+  const state = await loadArchiveState(puzzleIndex);
+  currentState = state;
+  currentInput = '';
+  currentFriends = undefined;
+  currentCommunity = null;
+  if (!state) {
+    renderArchiveUnavailable(puzzleIndex);
+    return;
+  }
+  if (state.status !== 'in_progress') {
+    // Re-record on reopen in case the write at the finish was lost.
+    await recordArchivePlayed(puzzleIndex);
+    currentCommunity = await loadCommunityData(puzzleIndex);
+  }
+  render();
+}
+
+function renderArchiveUnavailable(puzzleIndex: number): void {
+  root.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'end-game';
+  wrap.setAttribute('role', 'status');
+  const verdict = document.createElement('p');
+  verdict.className = 'verdict';
+  verdict.textContent = `Puzzle #${puzzleIndex + 1} isn't available right now.`;
+  const sub = document.createElement('p');
+  sub.textContent = "Check your connection and try again, or play today's puzzle instead.";
+  const today = renderPlayTodayButton();
+  today.className = 'retry-btn';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.className = 'share-action';
+  retry.textContent = 'Try again';
+  retry.addEventListener('click', () => {
+    retry.disabled = true;
+    retry.textContent = 'Checking…';
+    void startArchive(puzzleIndex);
+  });
+  wrap.append(verdict, sub, today, retry);
+  root.appendChild(wrap);
+}
+
+/**
  * Reload when what's on screen is out of date: the holding screen (today's
  * answer may have landed), or a finished game from a previous day. A game
  * still in progress is left alone even across midnight — the player finishes
@@ -1937,6 +2120,8 @@ function startDay(): Promise<void> {
  */
 async function refreshIfStale(): Promise<void> {
   const state = currentState;
+  // An archive day is never stale; leaving it is the player's call.
+  if (state?.archive) return;
   const rolledOver = state !== null && state.status !== 'in_progress' &&
     state.puzzleIndex !== todayPuzzleIndex();
   if (!state || rolledOver) await startDay();
@@ -1945,15 +2130,22 @@ async function refreshIfStale(): Promise<void> {
 async function bootstrap(): Promise<void> {
   await window.OddsRabbit.whenReady();
 
+  // A `target: 'play'` deep link to a past day opens that day from the archive;
+  // today's key, a future day or a malformed one is a normal launch.
+  const archiveIndex = parseArchiveIntent(
+    window.OddsRabbit.initialState,
+    todayPuzzleIndex()
+  );
+
   const [, seenIntro] = await Promise.all([
-    startDay(),
+    archiveIndex !== null ? startArchive(archiveIndex) : startDay(),
     readJson<boolean>('seen_intro', false),
   ]);
 
   // Save whatever game is current at pause time, not the one from boot — a
   // day rollover may have swapped it since.
   window.OddsRabbit.lifecycle.on('pause', () => {
-    if (currentState) void writeJson('today', currentState);
+    if (currentState) void writeJson(stateKey(currentState), currentState);
   });
   window.OddsRabbit.lifecycle.on('resume', () => void refreshIfStale());
 

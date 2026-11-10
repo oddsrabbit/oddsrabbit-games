@@ -21,6 +21,8 @@ export interface PlayOptions {
   title: string;
   /** The difficulty, for the chip beside the title, e.g. "Medium". */
   tier: string;
+  /** A line over the board, e.g. which past day this is. */
+  note?: string;
   givens: string;
   saved: SavedPlay | null;
   settings: Settings;
@@ -107,6 +109,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     pad.appendChild(k);
   }
 
+  if (o.note) main.appendChild(el('p', 'play-note', o.note));
   main.append(board, hintBox, tools, pad);
   root.append(bar, main);
 

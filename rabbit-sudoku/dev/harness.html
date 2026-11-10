@@ -18,6 +18,7 @@
 //   chrome=app   fake the app's edge insets (status bar, chrome row, home indicator)
 //   help=0       skip the first-run help
 //   open=1       open straight into the puzzle, for screenshots
+//   archive=N    open as the archive page's Play button does: initialState for puzzle-N
 const q = new URLSearchParams(location.search);
 const STORE_KEY = 'rs-harness-store';
 if (q.get('fresh')) localStorage.removeItem(STORE_KEY);
@@ -50,7 +51,8 @@ const signedIn = q.get('user') !== '0';
 
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
-  send({ type: 'init', user: signedIn ? ME : null, sessionToken: signedIn ? 'x' : null, expiresAt: null, colorScheme: 'light', capabilities: caps });
+  send({ type: 'init', user: signedIn ? ME : null, sessionToken: signedIn ? 'x' : null, expiresAt: null, colorScheme: 'light', capabilities: caps,
+    ...(q.has('archive') ? { initialState: { target: 'play', roundKey: `puzzle-${q.get('archive')}` } } : {}) });
 }
 let initSent = false;
 frame.addEventListener('load', () => {

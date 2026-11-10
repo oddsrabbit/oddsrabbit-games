@@ -819,3 +819,15 @@ header h1 {
 .share-button-reddit   { background: #ff4500; }
 .share-button-whatsapp { background: #25d366; }
 .share-button-facebook { background: #1877f2; }
+
+/* Archive day (a past puzzle replayed from the website archive) */
+.archive-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.archive-today-btn {
+  margin-top: 0;
+}

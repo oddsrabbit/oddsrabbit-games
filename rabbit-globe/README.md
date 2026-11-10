@@ -37,6 +37,10 @@ implementation. It mirrors the RabbitWords skeleton and adds a map.
 - `actions.requestSignIn` — sign-in CTA in the Friends panel for guests.
 - `initialState` — `{ target: 'leaderboard', roundKey: 'puzzle-N' }` deep-link from a
   push tap; opens the past-day leaderboard modal (🏆 header button, prev/next 7 days).
+  `{ target: 'play', roundKey: 'puzzle-N' }` from the website's archive pages replays
+  a past day: saved under `archive-N`, scored locally, never submitted, and added to
+  `archive-played` (sorted day indexes) when finished. Only days whose answers ship
+  inline can be replayed, because `content.reveal` would lock the pin in for that day.
 - `lifecycle.on('pause' | 'resume')` — save on pause; on resume (and on the minute
   tick) reload a finished game once midnight UTC has passed, or retry the
   "unavailable" screen. An in-progress game is never swapped out mid-day.

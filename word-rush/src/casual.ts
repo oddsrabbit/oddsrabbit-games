@@ -6,6 +6,7 @@
 // boards can be played from an archive (fetched with `content.daily`, which
 // serves any day that has opened); they don't count toward the stats.
 
+import { ARCHIVE_PLAYED_KEY, withArchivePlayed } from './archive';
 import { findPath, startTiles, type Board } from './board';
 import {
   applyWord,
@@ -109,11 +110,39 @@ function saveProgress(index: number): Promise<void> {
   return pushProgress(index);
 }
 
+/** One at a time, so two records in quick succession can't each write a list missing the other. */
+let recording: Promise<void> = Promise.resolve();
+
+/**
+ * Add a cleared past board to `archive-played`, which the website's archive
+ * pages read. Skipped when storage can't be read, so a blip can't replace the
+ * list with just this day.
+ */
+function recordArchivePlayed(index: number): Promise<void> {
+  recording = recording.then(async () => {
+    let stored: unknown;
+    try {
+      stored = await readStored(ARCHIVE_PLAYED_KEY);
+    } catch {
+      return;
+    }
+    if (Array.isArray(stored) && stored.includes(index)) return;
+    await writeJson(ARCHIVE_PLAYED_KEY, withArchivePlayed(stored, index));
+  });
+  return recording;
+}
+
 /**
  * The Casual tab: today's board, the archive of past boards, and a past board
  * being played. Switches between them in place.
  */
-export async function mountCasualPane(pane: HTMLElement, today: number, todayContent: CasualContent): Promise<CasualMode> {
+export async function mountCasualPane(
+  pane: HTMLElement,
+  today: number,
+  todayContent: CasualContent,
+  /** A past day to open first (the website's archive deep link); today's board if it can't load. */
+  startAt?: number
+): Promise<CasualMode> {
   let live: CasualMode | null = null;
   /** Bumped by each open, so a slow one tapped past (today, then a past board) doesn't land over the newer one. */
   let opening = 0;
@@ -131,13 +160,14 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
     if (view) show(view);
   };
 
-  const openPast = async (index: number): Promise<void> => {
+  /** False when the board couldn't load. */
+  const openPast = async (index: number): Promise<boolean> => {
     const ticket = ++opening;
     const day = await OR().content.daily({ roundKey: roundKey(index) }).then((d) => parseDay(d?.content)).catch(() => null);
-    if (ticket !== opening) return;
+    if (ticket !== opening) return true;
     if (!day) {
       showToast("Couldn't load that board");
-      return;
+      return false;
     }
     const view = await mountCasual(
       pane,
@@ -147,6 +177,7 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
       () => ticket !== opening
     );
     if (view) show(view);
+    return true;
   };
 
   async function showArchive(): Promise<void> {
@@ -188,7 +219,7 @@ export async function mountCasualPane(pane: HTMLElement, today: number, todayCon
     window.scrollTo({ top: 0 });
   }
 
-  await openToday();
+  if (startAt === undefined || !(await openPast(startAt))) await openToday();
   return {
     tracer: () => live?.tracer() ?? null,
     flush: () => live?.flush(),
@@ -281,6 +312,8 @@ async function mountCasual(
       })
     );
     root.appendChild(card);
+    // A deep-linked past board lands here, so the way back to today shows before Start too.
+    if (opts.onToday) root.appendChild(button('link-btn', '← Back to today’s board', opts.onToday));
     root.appendChild(navLinks());
     if (opts.today) root.appendChild(resetTimeLine());
   }
@@ -412,6 +445,9 @@ async function mountCasual(
           perfect: stats.perfect + (progress.revealed.length === 0 ? 1 : 0),
         };
         void writeJson('casual-stats', stats);
+      } else {
+        // A past board's "finished" moment, for the website's archive pages.
+        void recordArchivePlayed(index);
       }
     }
 
@@ -779,6 +815,8 @@ async function mountCasual(
   const hasPlay = (): boolean => !!progress.started || listed(progress) > 0 || progress.bonus.length > 0;
   if (hasPlay()) renderPlay();
   else renderReady();
+  // Cleared before `archive-played` existed, or on another device: catch the list up.
+  if (!opts.today && progress.counted.cleared) void recordArchivePlayed(index);
   void submitNow();
   void restoreFromRow();
 

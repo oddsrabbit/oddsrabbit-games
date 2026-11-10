@@ -416,12 +416,10 @@ async function boot(): Promise<void> {
   // only when saving has kept failing for a while (store.ts QUIET_FAILURES): a blip as the app wakes retries quietly
   saver = new Saver(OR, () => toast("Having trouble saving. Keep the game open and we'll keep trying."), othersHaventWritten);
 
-  if (!OR.user && !PREVIEW) {
-    renderSignIn();
-    OR.ready();
-    return;
-  }
-
+  // Guests adopt too. Her saves are `storage`, which the host keeps in this
+  // browser for a guest and carries over to the account they sign up with;
+  // everything social (visits, gifts, the showcase, reminders) already waits
+  // for OR.user.
   await loadAndStart();
   OR.ready();
 }
@@ -538,33 +536,17 @@ function setScreen(screen: 'paper' | 'burrow'): void {
   document.body.dataset.screen = screen;
 }
 
-// ------------------------------------------------------------------ sign-in (web only)
-
-function renderSignIn(): void {
-  const canAsk = OR.capabilities.has('actions.requestSignIn');
-  const pen = h('div', { class: 'pen' });
-  pen.append(img(rabbitSprite('snow', 'asleep'), 4, 'A sleeping rabbit'));
-  const button = canAsk
-    ? h('button', { class: 'btn primary', type: 'button', text: 'Sign in to adopt' })
-    : null;
-  button?.addEventListener('click', () => void OR.actions.requestSignIn('Sign in to adopt your rabbit.'));
-  setScreen('paper');
-  app.replaceChildren(
-    h('div', { class: 'screen' },
-      h('div', { class: 'inner' },
-        h('div', { class: 'intro' },
-          h('h1', { text: 'Rabbit Pets' }),
-          h('p', { text: 'Adopt a rabbit who lives in her burrow in real time. Sign in so she can find you again on any device.' })),
-        pen,
-        button ?? h('p', { class: 'intro', text: 'Sign in to OddsRabbit to adopt your rabbit.' })
-      )
-    )
-  );
-}
-
 // ------------------------------------------------------------------ adopt
 
 const RABBIT_NAMES = ['Mochi', 'Hazel', 'Pip', 'Juniper', 'Biscuit', 'Maple', 'Thistle', 'Nutmeg', 'Poppy', 'Willow', 'Fern', 'Bramble', 'Dumpling', 'Honey'];
+
+/** A guest's line on the adopt screen: where she'll live until they sign up. */
+function guestAdoptNote(): HTMLElement[] {
+  if (OR.user || PREVIEW || !OR.capabilities.has('actions.requestSignIn')) return [];
+  return [h('p', { class: 'quiet' },
+    'Playing as a guest: she lives in this browser until you sign up. ',
+    button('Sign up', 'btn small', () => void OR.actions.requestSignIn(`Sign up so your rabbit can find you on any device`).catch(() => undefined)))];
+}
 
 function renderAdopt(): void {
   let coat: Coat = 'snow';
@@ -610,7 +592,8 @@ function renderAdopt(): void {
   const form = h('form', { class: 'inner' },
     h('div', { class: 'intro' },
       h('h1', { text: 'Adopt your rabbit' }),
-      h('p', { text: "She'll live in her burrow in real time, and she'll always be happy to see you." })),
+      h('p', { text: "She'll live in her burrow in real time, and she'll always be happy to see you." }),
+      ...guestAdoptNote()),
     h('div', { class: 'pen' }, preview),
     h('fieldset', { style: 'margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:10px' }, legend, label, h('div', { class: 'coats' }, ...coatBtns)),
     h('fieldset', { style: 'margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:10px' }, earLegend, earLabel, h('div', { class: 'coats ears' }, ...earBtns)),

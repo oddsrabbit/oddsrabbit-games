@@ -1,6 +1,7 @@
 // Word Rush's shell: loads the day, switches between the Sprint and the
 // casual board, and owns the header, help and deep links.
 
+import { archivePlayIntent } from './archive';
 import { mountCasualPane, type CasualMode } from './casual';
 import { showSprintLeaderboard } from './leaderboard';
 import { parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
@@ -148,10 +149,13 @@ interface Day {
   active: Tab;
   sprint: SprintMode;
   casual: CasualMode | null;
-  select(tab: Tab): Promise<void>;
+  /** `remember: false` leaves the saved tab alone (a deep link isn't the player's choice). */
+  select(tab: Tab, remember?: boolean): Promise<void>;
 }
 
 let current: Day | null = null;
+/** A past day from the website's archive deep link, opened by the first startDay only. */
+let archiveDay: number | null = null;
 const boardBtn = (): HTMLButtonElement => document.getElementById('btn-board') as HTMLButtonElement;
 
 /**
@@ -167,6 +171,9 @@ function startDay(): Promise<void> {
     previous?.sprint.flush();
     previous?.casual?.flush();
     const index = puzzleIndexAt(now());
+    // Taken once, so a later rollover or retry opens today as usual.
+    const past = archiveDay !== null && archiveDay < index ? archiveDay : null;
+    archiveDay = null;
     const [day, savedTab] = await Promise.all([loadDay(index), readJson<Tab>('tab', previous?.active ?? 'sprint')]);
     previous?.sprint.dispose();
     previous?.casual?.dispose();
@@ -210,19 +217,19 @@ function startDay(): Promise<void> {
     let mountingCasual: Promise<CasualMode> | null = null;
     const d: Day = {
       index,
-      active: savedTab === 'casual' ? 'casual' : 'sprint',
+      active: past !== null || savedTab === 'casual' ? 'casual' : 'sprint',
       sprint: null as unknown as SprintMode,
       casual: null,
-      async select(tab: Tab): Promise<void> {
+      async select(tab: Tab, remember = true): Promise<void> {
         d.active = tab;
-        void writeJson('tab', tab);
+        if (remember) void writeJson('tab', tab);
         for (const t of ['sprint', 'casual'] as const) {
           tabBtns[t].setAttribute('aria-selected', String(t === tab));
           panes[t].hidden = t !== tab;
         }
         // The casual board is built on first visit, so a Sprint-only player never pays for it.
         if (tab === 'casual' && !d.casual) {
-          mountingCasual ??= mountCasualPane(panes.casual, index, day.casual);
+          mountingCasual ??= mountCasualPane(panes.casual, index, day.casual, past ?? undefined);
           d.casual = await mountingCasual;
         }
         window.scrollTo({ top: 0 });
@@ -236,7 +243,7 @@ function startDay(): Promise<void> {
       openCasual: () => void d.select('casual'),
     });
     current = d;
-    await d.select(d.active);
+    await d.select(d.active, past === null);
   })().finally(() => {
     startingDay = null;
   });
@@ -272,6 +279,8 @@ async function bootstrap(): Promise<void> {
     if (current) showSprintLeaderboard(current.index, current.index);
   });
 
+  // A web archive page's Play: a past day's casual board, the way the in-game archive opens one.
+  archiveDay = archivePlayIntent(OR().initialState, puzzleIndexAt(now()));
   const [, seenHelp] = await Promise.all([startDay(), seenHelpBefore()]);
 
   document.addEventListener('keydown', (e) => {

@@ -18,6 +18,7 @@ A daily 5-letter word puzzle in the Wordle tradition. Beyond being a real game, 
 - `lifecycle.on('pause')` — flush in-progress state when backgrounded.
 - `colorScheme` — first paint matches the host theme (see `index.html`).
 - `initialState` — `{ target: 'leaderboard', roundKey: 'puzzle-N' }` deep-link from a push tap.
+- `initialState` — `{ target: 'play', roundKey: 'puzzle-N' }` from the website's archive pages replays a past day: saved under `archive-N`, never scored or counted in stats/streak, and recorded in `archive-played` (sorted int array) when finished.
 - `ready()` — hide the host's loading skeleton.
 
 Reading the source (`src/main.ts`) is the recommended starting point for any third-party developer building against the SDK.

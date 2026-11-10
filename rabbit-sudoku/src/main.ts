@@ -1,12 +1,13 @@
 // Rabbit Sudoku's shell: loads the day's puzzle, switches between home and
 // the puzzle, sends the solve, and owns help, settings and the day rolling over.
 
+import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, withArchivePlayed } from './archive';
 import { renderHome, TIER_NAME, type PlayState } from './home';
 import { mountPlay, type PlayScreen, type SavedPlay } from './play';
 import { DAY_MS, EPOCH_MS, dailyTierFor, parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
 import { DEFAULT_SETTINGS, parseSettings, SETTING_LABELS, type Settings } from './settings';
 import { bestStreak, parseStats, streakOf, withDailySolved, type Stats } from './stats';
-import { button, el, openSheet, OR, readJson, serverNow, setVibration, SHARE_URL, syncClock, writeJson } from './ui';
+import { button, el, openSheet, OR, readJson, readJsonForMerge, serverNow, setVibration, SHARE_URL, syncClock, writeJson } from './ui';
 
 const app = document.getElementById('app')!;
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -97,6 +98,7 @@ async function showHome(): Promise<void> {
       tier: day.tier,
       givens: day.givens,
       signedIn,
+      canSignIn: OR().capabilities.has('actions.requestSignIn'),
       state: stateOf(today),
       streak: streakOf(stats.solvedDays, index),
       best: bestStreak(stats.solvedDays),
@@ -112,7 +114,7 @@ async function showHome(): Promise<void> {
     },
     {
       play: () => void play(),
-      signIn: () => void OR().actions.requestSignIn('Sign in to play the daily puzzle and keep a streak'),
+      signIn: () => void OR().actions.requestSignIn('Sign up to keep your streak and see which friends solved it'),
       settings: showSettings,
       help: () => showHelp(),
       expired: () => void startDay(),
@@ -122,7 +124,10 @@ async function showHome(): Promise<void> {
 }
 
 async function play(): Promise<void> {
-  if (!day || !OR().user) return;
+  // Guests play too: every save here is `storage`, which the host keeps in
+  // this browser for a guest and carries over to the account they sign up
+  // with. Only the solve's score row needs one (see `solved` below).
+  if (!day) return;
   stopHome();
   delete document.documentElement.dataset.screen;
   const saved = await readJson<DailySave | null>('daily', null);
@@ -139,10 +144,51 @@ async function play(): Promise<void> {
     solved: (s) => {
       stats = withDailySolved(stats, n);
       writeJson('stats', stats);
-      pending = true;
-      writeJson('daily', { ...s, index: n, pending: true });
+      // A guest's solve is never sent, now or after they sign in: it would
+      // land on the friends board as if they'd been signed in to solve it.
+      pending = OR().user !== null;
+      writeJson('daily', { ...s, index: n, pending });
       void sendSolve();
       showSolved(s, n, tier);
+    },
+    exit: () => void leave(),
+  });
+}
+
+/**
+ * A past Daily, opened from its archive page. Practice only: no score row,
+ * and today's save, stats and streak are never touched.
+ */
+async function playArchive(n: number): Promise<void> {
+  let past: DayContent | null = null;
+  try {
+    past = parseDay((await OR().content.daily({ roundKey: roundKey(n) }))?.content);
+  } catch {
+    past = null;
+  }
+  if (!past) return showNotice(`Daily #${n + 1} didn't load`, "Check your connection and try again. Here's today's puzzle.");
+  stopHome();
+  delete document.documentElement.dataset.screen;
+  const key = archiveKey(n);
+  const saved = await readJson<SavedPlay | null>(key, null);
+  const tier = past.tier;
+  playing = mountPlay(app, {
+    title: `Daily #${n + 1}`,
+    tier: TIER_NAME[tier],
+    note: `${archiveDate(n)} · Archive`,
+    givens: past.givens,
+    saved,
+    settings,
+    save: (s) => writeJson(key, s),
+    solved: (s) => {
+      writeJson(key, s);
+      // Read, merge, write: the website reads this list server-side. A failed
+      // read skips the write rather than replace the list with just this day.
+      void readJsonForMerge(ARCHIVE_PLAYED_KEY).then(
+        (raw) => writeJson(ARCHIVE_PLAYED_KEY, withArchivePlayed(raw, n)),
+        () => undefined
+      );
+      showSolved(s, n, tier, true);
     },
     exit: () => void leave(),
   });
@@ -154,18 +200,30 @@ async function leave(): Promise<void> {
   await showHome();
 }
 
-function showSolved(s: SavedPlay, n: number, tier: DayContent['tier']): void {
+function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive = false): void {
   const body = el('div', 'solved');
   const streak = streakOf(stats.solvedDays, n);
   const hintLine = s.hints ? `${s.hints} hint${s.hints === 1 ? '' : 's'}` : 'No hints';
   body.append(
     el('p', 'solved-big', 'Solved!'),
     el('p', 'solved-line', `${TIER_NAME[tier]} · ${hintLine}`),
-    el('p', 'solved-streak', streak === 1 ? 'Your streak starts today.' : `${streak} days in a row.`)
+    archive
+      ? el('p', 'solved-guest', "Past puzzles don't count toward your streak.")
+      : el('p', 'solved-streak', streak === 1 ? 'Your streak starts today.' : `${streak} days in a row.`)
   );
+  // The sign-up pitch is about the streak, which an archive solve doesn't touch.
+  if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
+    body.appendChild(el('p', 'solved-guest', 'Your streak is saved on this device. Sign up to keep it everywhere and see which friends solved today.'));
+  }
   const actions = el('div', 'sheet-actions');
+  if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
+    actions.appendChild(
+      button('subtle', 'Sign up', () => void OR().actions.requestSignIn('Sign up to keep your Sudoku streak').catch(() => undefined))
+    );
+  }
   if (OR().capabilities.has('actions.share')) {
-    const text = `Rabbit Sudoku #${n + 1} · ${TIER_NAME[tier]} ✅${s.hints ? ` 💡${s.hints}` : ''} 🔥${streak}\n${SHARE_URL}`;
+    const streakMark = archive ? '' : ` 🔥${streak}`;
+    const text = `Rabbit Sudoku #${n + 1} · ${TIER_NAME[tier]} ✅${s.hints ? ` 💡${s.hints}` : ''}${streakMark}\n${SHARE_URL}`;
     actions.appendChild(button('subtle', 'Share', () => void OR().actions.share({ text }).catch(() => undefined)));
   }
   let close = (): void => undefined;
@@ -178,7 +236,7 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier']): void {
   body.appendChild(actions);
   // Let the last digit and the sweep land first.
   window.setTimeout(() => {
-    close = openSheet("Today's puzzle", body);
+    close = openSheet(archive ? `Daily #${n + 1} · Archive` : "Today's puzzle", body);
   }, 700);
 }
 
@@ -221,6 +279,17 @@ function showHelp(onClose?: () => void): void {
   actions.appendChild(button('primary', 'Got it', () => close()));
   body.appendChild(actions);
   close = openSheet('How to play', body, onClose);
+}
+
+/** A short message over home, with one button to close it. */
+function showNotice(title: string, text: string): void {
+  const body = el('div', 'help');
+  body.appendChild(el('p', '', text));
+  const actions = el('div', 'sheet-actions');
+  let close = (): void => undefined;
+  actions.appendChild(button('primary', 'OK', () => close()));
+  body.appendChild(actions);
+  close = openSheet(title, body);
 }
 
 function renderUnavailable(): void {
@@ -266,6 +335,10 @@ async function bootstrap(): Promise<void> {
   setVibration(settings.vibration);
   stats = parseStats(rawStats);
   await startDay();
+  // A past day's archive page opens straight into that day; anything else
+  // (today, the future, a malformed intent) is a normal launch on home.
+  const past = archiveIntent(OR().initialState, index);
+  if (past !== null) await playArchive(past);
   if (!seenHelp) showHelp(() => writeJson('seen_help', true));
 
   OR().lifecycle.on('pause', () => playing?.flush());
