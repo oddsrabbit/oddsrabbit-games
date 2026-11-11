@@ -23,8 +23,12 @@ export function roundKey(puzzleIndex: number): string {
   return `puzzle-${puzzleIndex}`;
 }
 
-/** The Daily's tier by UTC weekday, Sunday first: Easy on Monday up to Expert on Saturday. */
-export const WEEK: readonly Tier[] = ['hard', 'easy', 'easy', 'medium', 'medium', 'hard', 'expert'];
+/**
+ * The Daily's tier by UTC weekday, Sunday first: Easy on Monday up to Expert
+ * on Saturday, then a Medium Sunday to wind down. Two days in seven need the
+ * advanced patterns, not three.
+ */
+export const WEEK: readonly Tier[] = ['medium', 'easy', 'easy', 'medium', 'medium', 'hard', 'expert'];
 
 export function dailyTierFor(puzzleIndex: number): Tier {
   return WEEK[new Date(EPOCH_MS + puzzleIndex * DAY_MS).getUTCDay()]!;

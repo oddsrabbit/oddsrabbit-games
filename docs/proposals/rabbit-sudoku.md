@@ -135,7 +135,7 @@ opens on Casual, and the Daily tab offers sign-in.
 
 | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 |---|---|---|---|---|---|---|
-| Easy | Easy | Medium | Medium | Hard | Expert | Hard |
+| Easy | Easy | Medium | Medium | Hard | Expert | Medium |
 
 Monday welcomes people in, and Saturday is the big one. The generator writes each
 day's tier into its content, so the client shows it rather than working it out
@@ -156,8 +156,13 @@ day's tier into its content, so the client shows it rather than working it out
 - **Each tier is earned.** From Medium up, a puzzle has to use its tier's
   techniques at least twice. The generator keeps the best of three candidates:
   most steps at the tier, then fewest clues.
-- **Hard is nearly always XY-Wing**: 502 of 514 in the first file, because it
-  sits last in the Hard list. Widening it is a tuning item (§10).
+- **Hard mixes its techniques.** In the first file Hard was nearly always
+  XY-Wing (502 of 514), because it sits last in the Hard list. A Hard puzzle
+  now has to use two different Hard techniques and take at most 3 Hard steps.
+  Moving XY-Wing up to Expert was tried and dropped: puzzles that need an
+  X-Wing but nothing harder are rare, and they play close to Medium.
+- **Rebalanced 2026-11-11.** Sunday went from Hard to Medium, so two days in
+  seven need advanced patterns, not three. Saturday stays the Expert day.
 
 ### 2.4 A Daily, start to finish
 
@@ -384,8 +389,9 @@ Draw has a null metric, and it isn't in `games()`.
 
 1. **Do hints still count toward the Daily streak?** Proposed: yes. It's a calm
    daily, and the hint count shows on the done screen and in the share.
-2. **Should Hard need more than XY-Wing?** For example, require two different
-   Hard techniques, or weight X-Wing and the triples.
+2. ~~**Should Hard need more than XY-Wing?**~~ Settled 2026-11-11: two
+   different Hard techniques, at most 3 Hard steps (§2.3). Revisit with real
+   hint counts per tier.
 3. **Should the end-of-day nudge go out at all?** And to whom: everyone who
    played in the last few days, the way the nudge mode works?
 4. **The launch day**, which sets the epoch.

@@ -4,11 +4,13 @@
 //   2. take clues out in 180°-symmetric pairs, keeping a removal only while
 //      the puzzle has one solution and logic up to the target tier solves it,
 //      and never going under the tier's clue floor;
-//   3. accept the result only if it really needs the target tier.
+//   3. accept the result only if it really needs the target tier, and (for
+//      Hard) mixes its techniques without piling them up.
 //
 // Runs offline (tools/gen-puzzles.ts). Hard and Expert take the most tries.
 
-import { grade, type Grade, type Tier } from './grade';
+import { grade, TIER_OF, type Grade, type Tier } from './grade';
+import type { Technique } from './logic';
 import { shuffle } from './rng';
 import { countSolutions, randomSolution } from './solver';
 import { CELLS, clueCount, formatGrid, type Grid } from './sudoku';
@@ -29,6 +31,32 @@ export interface Puzzle {
  * plays like the tier below, so the harder tiers need their technique twice.
  */
 export const MIN_STEPS_AT_TIER: Record<Tier, number> = { easy: 1, medium: 2, hard: 2, expert: 2 };
+
+/**
+ * Different techniques a puzzle must use at its own tier. Left alone, Hard is
+ * nearly always XY-Wing after XY-Wing, since that's the Hard step random grids
+ * need most; asking for two kinds brings in the X-Wings and triples.
+ */
+export const MIN_KINDS_AT_TIER: Record<Tier, number> = { easy: 1, medium: 1, hard: 2, expert: 1 };
+
+/** Most steps a puzzle may take at its own tier, so Hard stays a step below Expert. */
+export const MAX_STEPS_AT_TIER: Record<Tier, number> = { easy: Infinity, medium: Infinity, hard: 3, expert: Infinity };
+
+/** How many different techniques of its own tier `g` used. */
+export function kindsAtTier(g: Grade): number {
+  return (Object.keys(g.uses) as Technique[]).filter((t) => TIER_OF[t] === g.tier).length;
+}
+
+/** True when a graded puzzle is a fair example of `target`. */
+export function qualifies(g: Grade | null, target: Tier): g is Grade {
+  return (
+    !!g &&
+    g.tier === target &&
+    g.stepsAtTier >= MIN_STEPS_AT_TIER[target] &&
+    g.stepsAtTier <= MAX_STEPS_AT_TIER[target] &&
+    kindsAtTier(g) >= MIN_KINDS_AT_TIER[target]
+  );
+}
 
 export interface GenerateOptions {
   /** Give up after this many complete grids. */
@@ -74,7 +102,7 @@ export function generatePuzzle(rng: () => number, target: Tier, options: Generat
     const solution = randomSolution(rng);
     const puzzle = dig(solution, target, rng);
     const g = grade(puzzle);
-    if (!g || g.tier !== target || g.stepsAtTier < MIN_STEPS_AT_TIER[target]) continue;
+    if (!qualifies(g, target)) continue;
     const p: Puzzle = { tier: target, givens: formatGrid(puzzle), solution: formatGrid(solution), clues: clueCount(puzzle), grade: g };
     found++;
     if (!best || interest(p) > interest(best)) best = p;

@@ -10,11 +10,11 @@ test('calendar', () => {
   assert.equal(puzzleIndexAt(EPOCH_MS + DAY_MS - 1), 0);
   assert.equal(puzzleIndexAt(EPOCH_MS + DAY_MS), 1);
   assert.equal(roundKey(3), 'puzzle-3');
-  // Easy Monday, Expert Saturday, whatever weekday the epoch is.
+  // Easy Monday up to Expert Saturday, then a Medium Sunday, whatever weekday the epoch is.
+  const week = ['medium', 'easy', 'easy', 'medium', 'medium', 'hard', 'expert'];
   for (let i = 0; i < 7; i++) {
     const weekday = new Date(EPOCH_MS + i * DAY_MS).getUTCDay();
-    if (weekday === 1) assert.equal(dailyTierFor(i), 'easy');
-    if (weekday === 6) assert.equal(dailyTierFor(i), 'expert');
+    assert.equal(dailyTierFor(i), week[weekday]);
   }
 });
 

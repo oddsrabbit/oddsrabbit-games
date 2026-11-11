@@ -74,10 +74,13 @@ file, keeps your saves in this browser, and fakes five friends. Parameters
     keeps one solution, stays solvable with the target tier's techniques, and
     stays above the clue floor (`CLUE_FLOOR`).
   - Accepts a puzzle only if it really needs the target tier, at least twice
-    from Medium up (`MIN_STEPS_AT_TIER`). The tool keeps the best of three.
+    from Medium up (`MIN_STEPS_AT_TIER`). Hard must also use two different
+    Hard techniques and take at most 3 Hard steps (`MIN_KINDS_AT_TIER`,
+    `MAX_STEPS_AT_TIER`), so it isn't XY-Wing after XY-Wing. The tool keeps
+    the best of three.
 - `puzzle.ts`: the calendar (`EPOCH`, `puzzleIndexAt`), the week
   (`dailyTierFor`: Easy Monday and Tuesday, Medium Wednesday and Thursday,
-  Hard Friday, Expert Saturday, Hard Sunday), and `parseDay()` for the content
+  Hard Friday, Expert Saturday, Medium Sunday), and `parseDay()` for the content
   blob.
 
 ## Puzzles file
@@ -92,14 +95,15 @@ npm run gen-puzzles -- --preview 2         # print two days, write nothing
 
 Each day is `{ v: 2, tier, givens }`, about 100 bytes, far under the
 backend's 16 KB per content row. Puzzles are seeded from their day and slot, so the same inputs rebuild the
-same file. The 400-day run from 2026-11-08 gave:
+same file. The 400-day run from 2026-11-11 (after the rebalance: Medium
+Sundays, and the Hard mix rule) gave:
 
-| Tier | Clues | Hardest technique needed |
-|---|---|---|
-| Easy | 32–33 | hidden single (483), naked single (32) |
-| Medium | 27–32 | naked pair (196), pointing (143), claiming (89), hidden pair (86) |
-| Hard | 24–34 | XY-Wing (502), X-Wing (8), triples (4) |
-| Expert | 24–32 | Skyscraper (138), 2-String Kite (125), simple colouring (87), XYZ-Wing (77), Swordfish (30) |
+| Tier | Days | Clues | Hardest technique needed |
+|---|---|---|---|
+| Easy | 115 | 32 | hidden single (111), naked single (4) |
+| Medium | 171 | 27–31 | naked pair (63), pointing (46), claiming (34), hidden pair (28) |
+| Hard | 57 | 24–31 | XY-Wing (56), X-Wing (1); X-Wing used in 49, triples in 14; 2–3 Hard steps |
+| Expert | 57 | 24–30 | Skyscraper (24), 2-String Kite (16), XYZ-Wing (10), simple colouring (6), Swordfish (1) |
 
 `EPOCH` is the launch day, `2026-11-09` (a Monday). It must match the
 `rabbit-sudoku` entry in the web repo's `DailyGameRegistry` and the `epoch` in

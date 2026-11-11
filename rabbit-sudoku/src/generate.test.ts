@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CLUE_FLOOR, generatePuzzle, MIN_STEPS_AT_TIER } from './generate';
+import { CLUE_FLOOR, generatePuzzle, qualifies } from './generate';
 import { grade, TIERS } from './grade';
 import { mulberry32 } from './rng';
 import { countSolutions } from './solver';
@@ -15,7 +15,7 @@ for (const tier of TIERS) {
     assert.ok(keepsGivens(givens, parseGrid(p.solution)!));
     const g = grade(givens)!;
     assert.equal(g.tier, tier);
-    assert.ok(g.stepsAtTier >= MIN_STEPS_AT_TIER[tier]);
+    assert.ok(qualifies(g, tier), `${tier} puzzle breaks the tier's rules`);
     assert.ok(p.clues >= CLUE_FLOOR[tier]);
     for (let c = 0; c < 81; c++) assert.equal(givens[c] === 0, givens[80 - c] === 0, `not symmetric at ${c}`);
     // Same seed, same puzzle.
