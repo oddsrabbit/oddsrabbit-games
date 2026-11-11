@@ -16,6 +16,21 @@ The client has two screens:
 It also has settings (vibration on touch devices only), help and the solved
 sheet.
 
+**Race it** (`src/race.ts`, proposal §2.9) is the opt-in race on the same
+puzzle:
+- It's offered under Play to signed-in players who haven't opened the day.
+- The clock runs on real time from a server-timed start row (`race-N`) and
+  doesn't pause.
+- There are no hints and no mistake check. *Leave race* drops you into the
+  calm game.
+- The day's board gets a *Race* tab, led by your place and your friends'
+  times.
+- The web repo's `AppScoreVerifier::verifySudokuRace` times the finish and
+  refuses times under the tier's floor.
+
+*Show my time* in settings turns on a private timer for calm play, shown only
+to you and never ranked.
+
 The look is Word Battle's family, the same as chess: a sheet over a band of
 art (here, a slice of sudoku board in the icon's rust, with the eared title
 card on it), white cards,

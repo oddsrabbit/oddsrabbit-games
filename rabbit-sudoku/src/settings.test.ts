@@ -22,3 +22,9 @@ test('auto follows the app, and light when the app does not say', () => {
   assert.equal(resolveTheme('auto', null), 'light');
   assert.equal(resolveTheme('paper', 'dark'), 'paper');
 });
+
+test('the private timer is off unless asked for', () => {
+  assert.equal(DEFAULT_SETTINGS.showTime, false);
+  assert.equal(parseSettings({ showTime: true }).showTime, true);
+  assert.equal(parseSettings({ showTime: 'yes' }).showTime, false);
+});

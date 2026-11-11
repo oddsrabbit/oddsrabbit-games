@@ -3,6 +3,7 @@
 // (a thumbnail of the grid, the streak, Play). Then the week and friends.
 
 import type { Tier } from './grade';
+import { formatTime } from './race';
 import { parseGrid } from './sudoku';
 import { button, el } from './ui';
 
@@ -12,6 +13,15 @@ export interface Solvers {
   friends: string[] | null;
   total: number | null;
 }
+
+/** Today's race, as home shows it. */
+export type RaceHome =
+  /** Not raced yet, and the grid not seen: *Race it* is on offer. */
+  | { kind: 'open' }
+  /** Under way: the clock runs from `startedAt` (server ms). */
+  | { kind: 'running'; startedAt: number; now(): number }
+  /** Finished in `seconds`; `counted` false when the server refused the time. */
+  | { kind: 'done'; seconds: number; counted: boolean };
 
 export interface HomeData {
   index: number;
@@ -38,10 +48,14 @@ export interface HomeData {
   board: (() => void) | null;
   /** Milliseconds until the next puzzle. */
   nextIn: () => number;
+  /** Today's race; null when racing isn't on offer here (a guest, or no score rows). */
+  race: RaceHome | null;
 }
 
 export interface HomeActions {
   play(): void;
+  /** *Race it*: main.ts explains the rules and starts the race. */
+  race(): void;
   signIn(): void;
   settings(): void;
   help(): void;
@@ -113,12 +127,17 @@ function countdown(ms: number): string {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
-function thumbnail(givens: string): HTMLElement {
-  const board = el('div', 'spot-board');
+/**
+ * Today's grid in miniature. `veiled` shades the given cells without their
+ * digits: while the race is still on offer, a readable preview would let a
+ * racer study the puzzle before starting the clock.
+ */
+function thumbnail(givens: string, veiled = false): HTMLElement {
+  const board = el('div', `spot-board${veiled ? ' is-veiled' : ''}`);
   board.setAttribute('aria-hidden', 'true');
   const grid = parseGrid(givens) ?? [];
   grid.forEach((d, c) => {
-    const cell = el('span', `pv${d ? ' pv-given' : ''}`, d ? String(d) : '');
+    const cell = el('span', `pv${d ? ' pv-given' : ''}`, d && !veiled ? String(d) : '');
     if (c % 9 === 2 || c % 9 === 5) cell.classList.add('pv-br');
     if (Math.floor(c / 9) === 2 || Math.floor(c / 9) === 5) cell.classList.add('pv-bb');
     board.appendChild(cell);
@@ -156,7 +175,8 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   const kicker = d.state === 'solved' ? `Solved · ${d.weekday}` : `Today · ${d.weekday}`;
   titles.append(el('span', `spot-kicker${d.state === 'solved' ? ' is-done' : ''}`, kicker), el('span', 'spot-name', `Daily #${d.index + 1}`));
   spotHead.append(titles, el('span', `tier tier-${d.tier}`, TIER_NAME[d.tier]));
-  spot.append(spotHead, thumbnail(d.givens));
+  const race = d.race;
+  spot.append(spotHead, thumbnail(d.givens, race?.kind === 'open'));
 
   let stop = (): void => undefined;
   // Guests get the same daily and streak, kept in this browser; the note asks
@@ -165,8 +185,28 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   const thisWeek = d.week.filter((w) => w.solved).length;
   scores.append(scoreCell('Streak', String(d.streak)), scoreCell('Best', String(Math.max(d.best, d.streak))), scoreCell('This week', `${thisWeek}/7`, true));
   spot.appendChild(scores);
-  const label = d.state === 'solved' ? 'See your solve' : d.state === 'progress' ? 'Continue' : 'Play';
+  const racing = race?.kind === 'running' && d.state !== 'solved';
+  const label = d.state === 'solved' ? 'See your solve' : racing ? 'Continue race' : d.state === 'progress' ? 'Continue' : 'Play';
   spot.appendChild(button(`primary big${d.state === 'solved' ? ' is-done' : ''}`, label, a.play));
+  // The race: offered under Play, never in its place, so the calm game stays the default.
+  let raceTimer = 0;
+  if (race?.kind === 'open') {
+    const offer = el('div', 'race-offer');
+    offer.append(button('subtle race-button', 'Race it ⏱', a.race), el('span', 'race-rules muted', "No hints, and the clock doesn't stop."));
+    spot.appendChild(offer);
+  } else if (racing) {
+    const line = el('p', 'race-line', '');
+    const time = el('b', 'race-time');
+    const tickRace = (): void => {
+      time.textContent = formatTime((race.now() - race.startedAt) / 1000);
+    };
+    tickRace();
+    line.append('⏱ Racing: ', time, ' and counting');
+    spot.appendChild(line);
+    raceTimer = window.setInterval(tickRace, 1000);
+  } else if (race?.kind === 'done') {
+    spot.appendChild(el('p', 'race-line', race.counted ? `⏱ Raced in ${formatTime(race.seconds)}` : `⏱ Raced in ${formatTime(race.seconds)}. The time didn't count.`));
+  }
   if (!d.signedIn && d.canSignIn) {
     const note = el('p', 'spot-note spot-guest', 'Playing as a guest: your streak is saved on this device only. ');
     const link = button('link-button', 'Sign up to keep it', a.signIn);
@@ -188,7 +228,10 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
       a.expired();
     }
   }, 1000);
-  stop = () => window.clearInterval(timer);
+  stop = () => {
+    window.clearInterval(timer);
+    window.clearInterval(raceTimer);
+  };
 
   sheet.append(spot);
 

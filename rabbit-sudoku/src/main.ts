@@ -1,11 +1,13 @@
 // Rabbit Sudoku's shell: loads the day's puzzle, switches between home and
-// the puzzle, sends the solve, and owns help, settings and the day rolling over.
+// the puzzle, sends the solve, runs the opt-in race (race.ts), and owns help,
+// settings and the day rolling over.
 
 import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, withArchivePlayed } from './archive';
 import { friendsRows, hasBoard, isSolvedRow, showSolvers, solveScore, UNSOLVED_SCORE } from './board';
-import { renderHome, TIER_NAME, type PlayState, type Solvers } from './home';
+import { renderHome, TIER_NAME, type PlayState, type RaceHome, type Solvers } from './home';
 import { mountPlay, type PlayScreen, type SavedPlay } from './play';
 import { DAY_MS, EPOCH_MS, dailyTierFor, parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
+import { formatTime, isFinalRefusal, isRacing, parseRace, RACE_STARTED_SCORE, raceKey, raceScore, type RaceState } from './race';
 import { DEFAULT_SETTINGS, parseSettings, resolveTheme, SETTING_LABELS, THEME_LABELS, type Settings, type ThemeChoice, type Toggle } from './settings';
 import { bestStreak, parseStats, streakOf, withDailySolved, type Stats } from './stats';
 import { formatGrid, parseGrid } from './sudoku';
@@ -20,6 +22,8 @@ interface DailySave extends SavedPlay {
   pending: boolean;
   /** The day's row is on the server: the "not solved yet" one, or the solve. */
   started?: boolean;
+  /** Today's race, when the day was raced (race.ts). */
+  race?: RaceState;
 }
 
 let index = 0;
@@ -27,6 +31,8 @@ let day: DayContent | null = null;
 let settings: Settings = DEFAULT_SETTINGS;
 let stats: Stats = { solvedDays: [] };
 let playing: PlayScreen | null = null;
+/** Today's race as the play screen last knew it; every daily save carries it. */
+let dailyRace: RaceState | null = null;
 let stopHome = (): void => undefined;
 
 // ---------- colours ----------
@@ -156,6 +162,136 @@ async function upgradeLaunchRow(): Promise<void> {
   }
 }
 
+// ---------- the race ----------
+
+/** Racing needs a signed-in player and score rows: the server times it. */
+const canRace = (): boolean => OR().user !== null && OR().capabilities.has('scores.submit');
+
+/** How home shows today's race, from today's save (null when there's none yet). */
+function raceHomeFor(today: DailySave | null): RaceHome | null {
+  const r = parseRace(today?.race);
+  if (r?.finishedSec !== undefined) return { kind: 'done', seconds: r.finishedSec, counted: !r.refused };
+  if (isRacing(r) && !today?.solved) return { kind: 'running', startedAt: r.startedAt, now: serverNow };
+  // Any save at all means the grid has been seen, so the race is off for today.
+  if (today || !canRace()) return null;
+  return { kind: 'open' };
+}
+
+/** The rules, then the start. */
+function offerRace(): void {
+  const body = el('div', 'help');
+  body.append(
+    el('p', '', "The clock starts when the grid appears and runs on real time. It doesn't stop if you leave the app."),
+    el('p', '', 'No hints and no mistake check. Repeated digits are still flagged.'),
+    el('p', '', 'You can leave the race at any time and finish calmly, with hints. Your streak counts either way.')
+  );
+  const actions = el('div', 'sheet-actions');
+  let close = (): void => undefined;
+  actions.append(
+    button('subtle', 'Not now', () => close()),
+    button('primary', 'Start the clock', () => {
+      close();
+      void startRace();
+    })
+  );
+  body.appendChild(actions);
+  close = openSheet("Race today's puzzle", body);
+}
+
+let startingRace = false;
+
+/**
+ * The start row first, then the grid: its server timestamp is the race's
+ * start, so a race can't begin offline. The server refuses it once the day
+ * has been played without racing.
+ */
+async function startRace(): Promise<void> {
+  if (startingRace || !day || !canRace()) return;
+  const n = index;
+  const current = day;
+  const saved = await readJson<DailySave | null>('daily', null);
+  if (saved?.index === n) return showHome();
+  startingRace = true;
+  try {
+    await OR().scores.submit({ roundKey: raceKey(n), score: RACE_STARTED_SCORE, metadata: { finished: false }, keepBest: true });
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === 'scores/race-unavailable') {
+      return showNotice('Racing is off today', "Today's puzzle was already played without the race, so it can't be raced. Tomorrow's can.");
+    }
+    return showNotice("The race didn't start", 'Starting a race needs a connection, so the server can time it. Check yours and try again.');
+  } finally {
+    startingRace = false;
+  }
+  const fresh: DailySave = {
+    values: formatGrid(parseGrid(current.givens)!),
+    notes: new Array<number>(81).fill(0),
+    hints: 0,
+    solved: false,
+    index: n,
+    pending: false,
+    started: false,
+    race: { startedAt: serverNow() },
+  };
+  writeJson('daily', fresh);
+  await play();
+}
+
+/** Leaving keeps the board and drops into the calm game; the time won't count. */
+function confirmLeave(): void {
+  const body = el('div', 'help');
+  body.appendChild(el('p', '', "Your time won't count. You keep your board and can finish calmly, with hints. Your streak still counts."));
+  const actions = el('div', 'sheet-actions');
+  let close = (): void => undefined;
+  actions.append(
+    button('subtle', 'Keep racing', () => close()),
+    button('primary', 'Leave race', () => {
+      close();
+      if (dailyRace) dailyRace = { ...dailyRace, left: true };
+      // dispose() saves the board, with the race marked left, before the calm game reopens it.
+      playing?.dispose();
+      playing = null;
+      void play();
+    })
+  );
+  body.appendChild(actions);
+  close = openSheet('Leave the race?', body);
+}
+
+let sendingRace = false;
+
+/**
+ * The race's finish, until it lands. A refusal that will never change (too
+ * fast, closed) is final: marked, and never resent.
+ */
+async function sendRaceFinish(): Promise<void> {
+  const saved = await readJson<DailySave | null>('daily', null);
+  const r = parseRace(saved?.race);
+  if (sendingRace || !saved || !r?.pending || r.finishedSec === undefined || !canRace()) return;
+  sendingRace = true;
+  const settle = async (patch: Partial<RaceState>): Promise<void> => {
+    const latest = await readJson<DailySave | null>('daily', null);
+    if (latest?.index !== saved.index) return;
+    const next: RaceState = { ...r, ...parseRace(latest.race), pending: false, ...patch };
+    if (latest.index === index) dailyRace = next;
+    writeJson('daily', { ...latest, race: next });
+  };
+  try {
+    await OR().scores.submit({
+      roundKey: raceKey(saved.index),
+      score: raceScore(r.finishedSec),
+      metadata: { finished: true, seconds: r.finishedSec },
+      keepBest: true,
+    });
+    await settle({});
+  } catch (error) {
+    if (isFinalRefusal((error as { code?: string } | null)?.code)) await settle({ refused: true });
+    // Anything else: try again on resume, back online, or the next open.
+  } finally {
+    sendingRace = false;
+  }
+}
+
 // ---------- who solved it ----------
 
 /** Friends who solved day `n`, and how many players did; null with neither verb. */
@@ -219,9 +355,11 @@ async function showHome(): Promise<void> {
       solvers,
       board: hasBoard(canSignIn) ? () => showSolvers(index, canSignIn) : null,
       nextIn: () => EPOCH_MS + (index + 1) * DAY_MS - serverNow(),
+      race: raceHomeFor(today),
     },
     {
       play: () => void play(),
+      race: offerRace,
       signIn: () => void OR().actions.requestSignIn('Sign up to keep your streak and see which friends solved it'),
       settings: showSettings,
       help: () => showHelp(),
@@ -245,14 +383,19 @@ async function play(): Promise<void> {
   // As the play screen saves it, so an untouched grid compares equal.
   const givens = formatGrid(parseGrid(day.givens)!);
   started = mine?.started ?? false;
+  dailyRace = parseRace(mine?.race);
+  const racing = isRacing(dailyRace) && !mine?.solved ? dailyRace : null;
+  // Every daily save carries the race, so nothing here can drop it.
+  const persist = (s: SavedPlay): void => writeJson('daily', { ...s, index: n, pending, started, ...(dailyRace ? { race: dailyRace } : {}) });
   playing = mountPlay(app, {
     title: `Daily #${n + 1}`,
     tier: TIER_NAME[tier],
     givens: day.givens,
     saved: mine,
     settings,
+    ...(racing ? { race: { startedAt: racing.startedAt, now: serverNow, leave: confirmLeave } } : {}),
     save: (s) => {
-      writeJson('daily', { ...s, index: n, pending, started });
+      persist(s);
       if (touched(s, givens)) void sendStart(n, s);
     },
     solved: (s) => {
@@ -261,9 +404,12 @@ async function play(): Promise<void> {
       // A guest's solve is never sent, now or after they sign in: it would
       // land on the friends board as if they'd been signed in to solve it.
       pending = OR().user !== null;
-      writeJson('daily', { ...s, index: n, pending, started });
+      // A race's time is real time from its start, the same clock the play screen showed.
+      if (racing) dailyRace = { ...racing, finishedSec: Math.round((serverNow() - racing.startedAt) / 1000), pending: true };
+      persist(s);
       void sendSolve();
-      showSolved(s, n, tier);
+      void sendRaceFinish();
+      showSolved(s, n, tier, false, dailyRace);
     },
     exit: () => void leave(),
   });
@@ -314,13 +460,16 @@ async function leave(): Promise<void> {
   await showHome();
 }
 
-function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive = false): void {
+function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive = false, race: RaceState | null = null): void {
   const body = el('div', 'solved');
   const streak = streakOf(stats.solvedDays, n);
+  const raced = race?.finishedSec !== undefined && !race.left ? race.finishedSec : null;
   const hintLine = s.hints ? `${s.hints} hint${s.hints === 1 ? '' : 's'}` : 'No hints';
+  // The private timer shows here only when the player turned it on.
+  const myTime = settings.showTime && s.activeMs ? ` · ${formatTime(s.activeMs / 1000)}` : '';
   body.append(
     el('p', 'solved-big', 'Solved!'),
-    el('p', 'solved-line', `${TIER_NAME[tier]} · ${hintLine}`),
+    el('p', 'solved-line', raced !== null ? `${TIER_NAME[tier]} · ⏱ ${formatTime(raced)}` : `${TIER_NAME[tier]} · ${hintLine}${myTime}`),
     archive
       ? el('p', 'solved-guest', "Past puzzles don't count toward your streak.")
       : el('p', 'solved-streak', streak === 1 ? 'Your streak starts today.' : `${streak} days in a row.`)
@@ -333,7 +482,11 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
   // opens over this sheet and hands back to it on close.
   const canSignIn = OR().capabilities.has('actions.requestSignIn');
   if (!archive && hasBoard(canSignIn)) {
-    body.appendChild(button('subtle solved-board', 'See how everyone did ›', () => showSolvers(n, canSignIn)));
+    body.appendChild(
+      raced !== null
+        ? button('subtle solved-board', 'See the race ›', () => showSolvers(n, canSignIn, { tab: 'race' }))
+        : button('subtle solved-board', 'See how everyone did ›', () => showSolvers(n, canSignIn))
+    );
   }
   const actions = el('div', 'sheet-actions');
   if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
@@ -343,7 +496,8 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
   }
   if (OR().capabilities.has('actions.share')) {
     const streakMark = archive ? '' : ` 🔥${streak}`;
-    const text = `Rabbit Sudoku #${n + 1} · ${TIER_NAME[tier]} ✅${s.hints ? ` 💡${s.hints}` : ''}${streakMark}\n${SHARE_URL}`;
+    const result = raced !== null ? `⏱ ${formatTime(raced)} 🏁` : `✅${s.hints ? ` 💡${s.hints}` : ''}`;
+    const text = `Rabbit Sudoku #${n + 1} · ${TIER_NAME[tier]} ${result}${streakMark}\n${SHARE_URL}`;
     actions.appendChild(button('subtle', 'Share', () => void OR().actions.share({ text }).catch(() => undefined)));
   }
   let close = (): void => undefined;
@@ -413,6 +567,7 @@ function showHelp(onClose?: () => void): void {
     p('Fill the grid so every <strong>row</strong>, <strong>column</strong> and <strong>3×3 box</strong> has each digit 1 to 9 once.'),
     p('Tap a cell, then a digit. <strong>Notes</strong> lets you pencil in the digits a cell could be. <strong>Hint</strong> shows where to look, then why.'),
     p('There\'s <strong>one puzzle a day</strong> for everyone: easy on Monday, hardest on Saturday. Solve it each day to keep your streak. No clock, no rush.'),
+    p('Want a race? Pick <strong>Race it</strong> before you open the day\'s puzzle: no hints, and the clock doesn\'t stop. You can leave the race any time.'),
     p('Every puzzle can be solved by logic alone, without guessing.')
   );
   const actions = el('div', 'sheet-actions');
@@ -460,6 +615,7 @@ async function startDay(): Promise<void> {
 /** A day left open past midnight UTC moves on, once the player is back on home. */
 function refreshIfStale(): void {
   void sendSolve();
+  void sendRaceFinish();
   if (playing) return;
   if (!day || puzzleIndexAt(serverNow()) !== index) void startDay();
 }
@@ -493,6 +649,7 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('online', onResume);
   window.setInterval(refreshIfStale, 30_000);
   void sendSolve();
+  void sendRaceFinish();
   void upgradeLaunchRow();
   OR().ready();
 }

@@ -50,7 +50,13 @@ const FRIENDS = ['pip_fan', 'mochi.mama', 'bun.bun', 'maple_leaf', 'thumper'].ma
 const OTHERS = Array.from({ length: Number(q.get('others') ?? 14) }, (_, i) => ({
   uuid: `33333333-3333-4333-8333-${String(i).padStart(12, '0')}`, username: `solver_${i + 1}`, avatar: null,
 }));
-const rnd = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
+// FNV-1a, then a murmur3 finish: without it, seeds differing only at the end (race-5, race-6) land close together.
+const rnd = (s) => {
+  let h = 2166136261;
+  for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+};
 const mine = {}; // roundKey → my row
 
 const caps = ['storage.get', 'storage.set', 'storage.delete', 'content.daily', 'actions.share', 'actions.haptic',
@@ -60,11 +66,24 @@ const signedIn = q.get('user') !== '0';
 /**
  * Everyone who played a day, as the server orders it: score down, then who got
  * on first. A solve is 100 less its hints; about one in four is still at it (0).
+ * On `race-N` (the opt-in race), about half raced: 86400 less their seconds,
+ * 4 to 40 minutes, and a few started without finishing (0).
  */
 function field(roundKey) {
   const day = Date.parse('2026-11-09T00:00:00Z');
   const friends = q.get('friends') === '0' ? [] : FRIENDS.filter((f) => rnd(f.username + roundKey) < 0.55);
-  const rows = [...friends, ...OTHERS].map((u) => {
+  const race = roundKey.startsWith('race-');
+  // Friends race more often than strangers, so the race tab's friends line has something to show.
+  const players = race ? [...friends, ...OTHERS].filter((u) => rnd('r' + u.username + roundKey) < (friends.includes(u) ? 0.9 : 0.5)) : [...friends, ...OTHERS];
+  const rows = players.map((u) => {
+    if (race) {
+      const finished = rnd('f' + u.username + roundKey) > 0.15;
+      const seconds = Math.round(240 + rnd('t' + u.uuid + roundKey) * 2160);
+      return {
+        ...u, score: finished ? 86400 - seconds : 0, metadata: finished ? { finished, seconds } : { finished },
+        createdAt: new Date(day + rnd(u.username + roundKey) * 8 * 3600e3).toISOString(),
+      };
+    }
     const hints = Math.floor(rnd(u.uuid + roundKey) * 4);
     const solved = rnd('s' + u.username + roundKey) > 0.25;
     return {
@@ -128,6 +147,9 @@ window.addEventListener('message', async (e) => {
       if (sendFails > 0) { sendFails--; return fail('network/offline'); }
       const had = mine[p.roundKey];
       if (had && !p.keepBest) return fail('scores/already-submitted');
+      // As the server: a race can't start once the day was played without it.
+      const race = /^race-(\d+)$/.exec(p.roundKey);
+      if (race && p.score === 0 && !had && mine[`puzzle-${race[1]}`]) return fail('scores/race-unavailable');
       // keepBest: the higher score stays, with its metadata; created_at never moves.
       if (!had) mine[p.roundKey] = { ...ME, score: p.score, metadata: p.metadata ?? null, createdAt: new Date().toISOString(), isSelf: true };
       else if (p.score > had.score) Object.assign(had, { score: p.score, metadata: p.metadata ?? null });

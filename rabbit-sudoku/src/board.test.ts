@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { FriendScore } from '@oddsrabbit/apps-sdk';
-import { friendsRows, hintsLabel, isSolvedRow, rowLabel, solveScore, UNSOLVED_SCORE } from './board';
+import { friendsRaceLine, friendsRows, hintsLabel, isSolvedRow, raceHeadline, raceLabel, rowLabel, solveScore, UNSOLVED_SCORE } from './board';
+import { raceScore } from './race';
 import { friendsLine, totalLine } from './home';
 
 const row = (username: string, createdAt: string, isSelf = false, score = 100): FriendScore => ({
@@ -59,4 +60,18 @@ test('friends go fewest hints first, then whoever got on first; just the viewer 
   ]);
   assert.deepEqual(rows.map((r) => r.username), ['early', 'me', 'late', 'hinted', 'trying']);
   assert.deepEqual(friendsRows([row('me', '2026-11-10T05:00:00Z', true)]), []);
+});
+
+test('race rows read as times, and the headline leads with your place', () => {
+  assert.equal(raceLabel({ score: raceScore(754), metadata: { finished: true, seconds: 754 } }), '12:34');
+  assert.equal(raceLabel({ score: 0, metadata: { finished: false } }), '');
+  assert.equal(raceHeadline(754, 4, 11), 'You: 12:34 · faster than 70% of racers');
+  assert.equal(raceHeadline(754, 1, 1), 'You: 12:34');
+});
+
+test('friends on the race: up to three by name, then a count', () => {
+  assert.equal(friendsRaceLine([]), '');
+  assert.equal(friendsRaceLine([{ username: 'pip', seconds: 552 }]), 'Friends: pip 9:12');
+  const four = ['a', 'b', 'c', 'd'].map((username, i) => ({ username, seconds: 600 + i }));
+  assert.equal(friendsRaceLine(four), 'Friends: a 10:00 · b 10:01 · c 10:02 · 1 more');
 });

@@ -23,6 +23,8 @@ export interface Settings {
   autoNotes: boolean;
   /** Haptics. Shown on touch devices only, as in solitaire. */
   vibration: boolean;
+  /** Show the private timer while playing and on the solved sheet. Never ranked. */
+  showTime: boolean;
   theme: ThemeChoice;
 }
 
@@ -35,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   digitFirst: false,
   autoNotes: true,
   vibration: true,
+  showTime: false,
   theme: 'auto',
 };
 
@@ -44,6 +47,7 @@ export const SETTING_LABELS: Record<Toggle, string> = {
   digitFirst: 'Pick the digit first',
   autoNotes: 'Clear notes automatically',
   vibration: 'Vibration',
+  showTime: 'Show my time',
 };
 
 export function parseSettings(raw: unknown): Settings {

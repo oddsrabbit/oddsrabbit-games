@@ -9,11 +9,16 @@
 // a race. There's no clock to rank by, on purpose. Starting the day puts you
 // on the board too, as "Not solved yet" with no place, as Solitaire does, so
 // the board shows who's had a go as well as who got there.
+//
+// The opt-in race (race.ts) has its own tab, on `race-N`: finishers only,
+// fastest first, led by your own place ("faster than 72% of racers") and your
+// friends' times rather than the top of the list, where a cheater would sit.
 
 import type { FriendScore } from '@oddsrabbit/apps-sdk';
 import { openLeaderboardModal, pinnedFromRank, type LeaderboardRow, type LeaderboardTab } from '@oddsrabbit/apps-sdk/ui/leaderboard';
 import { roundKey } from './puzzle';
-import { OR, SHARE_URL } from './ui';
+import { fasterThan, formatTime, isFinishedRace, raceKey, raceSeconds } from './race';
+import { el, OR, SHARE_URL } from './ui';
 
 const BOARD_LIMIT = 100;
 
@@ -64,7 +69,87 @@ export function hasBoard(canSignIn: boolean): boolean {
   return caps.has('scores.top') || (caps.has('scores.friends') && (OR().user !== null || canSignIn));
 }
 
-export function showSolvers(index: number, canSignIn: boolean): void {
+/** A race row's time, e.g. "12:34". */
+export function raceLabel(row: Pick<LeaderboardRow, 'score' | 'metadata'>): string {
+  const s = raceSeconds(row);
+  return s === null ? '' : formatTime(s);
+}
+
+/** "You: 12:34 · faster than 72% of racers"; just the time when you're alone. */
+export function raceHeadline(seconds: number, rank: number, finishers: number): string {
+  const pct = fasterThan(rank, finishers);
+  return `You: ${formatTime(seconds)}${pct === null ? '' : ` · faster than ${pct}% of racers`}`;
+}
+
+/** "Friends: pip 9:12 · bun 14:30 · 2 more"; empty with no friend finishes. */
+export function friendsRaceLine(friends: { username: string; seconds: number }[]): string {
+  if (!friends.length) return '';
+  const shown = friends.slice(0, 3).map((f) => `${f.username} ${formatTime(f.seconds)}`);
+  const more = friends.length - shown.length;
+  return `Friends: ${shown.join(' · ')}${more > 0 ? ` · ${more} more` : ''}`;
+}
+
+/**
+ * The race tab for day `index`. One tab, not two: four tabs don't fit a phone.
+ * Its header leads with you and the people you follow, and they're marked in
+ * the list, so the top of the board isn't the first thing you read.
+ */
+function raceTab(index: number): LeaderboardTab | null {
+  const or = OR();
+  if (!or.capabilities.has('scores.top')) return null;
+  const key = raceKey(index);
+  let headline = '';
+  let friendsLine = '';
+  let friendIds = new Set<string>();
+
+  const loadMine = async (): Promise<void> => {
+    if (!or.user || !or.capabilities.has('scores.rank') || !or.capabilities.has('scores.distribution')) return;
+    const [mine, buckets] = await Promise.all([or.scores.rank({ roundKey: key, order: 'top' }), or.scores.distribution({ roundKey: key })]);
+    const seconds = mine ? raceSeconds(mine.entry) : null;
+    if (!mine || seconds === null) return;
+    const finishers = buckets.filter(isFinishedRace).reduce((sum, b) => sum + b.count, 0);
+    headline = raceHeadline(seconds, mine.rank, finishers);
+  };
+  const loadFriends = async (): Promise<void> => {
+    if (!or.user || !or.capabilities.has('scores.friends')) return;
+    const rows = friendsRows(await or.scores.friends({ roundKey: key })).filter((r) => !r.isSelf && isFinishedRace(r));
+    friendIds = new Set(rows.map((r) => r.uuid));
+    friendsLine = friendsRaceLine(rows.map((r) => ({ username: r.username, seconds: raceSeconds(r) ?? 0 })));
+  };
+
+  return {
+    id: 'race',
+    label: 'Race',
+    emptyText: "Nobody has raced today's puzzle yet.",
+    load: async () => {
+      headline = '';
+      friendsLine = '';
+      // Each side line is extra: a failure leaves it off, never the board.
+      const [rows] = await Promise.all([
+        or.scores.top({ roundKey: key, order: 'top', limit: BOARD_LIMIT }),
+        loadMine().catch(() => undefined),
+        loadFriends().catch(() => undefined),
+      ]);
+      return rows.filter(isFinishedRace);
+    },
+    renderHeader: () => {
+      if (!headline && !friendsLine) return null;
+      const head = el('div', 'race-head');
+      if (headline) head.appendChild(el('p', 'race-headline', headline));
+      if (friendsLine) head.appendChild(el('p', 'race-friends', friendsLine));
+      return head;
+    },
+    badges: (row) => (friendIds.has(row.uuid) ? ['friend'] : null),
+    ...(or.capabilities.has('scores.rank')
+      ? { loadPinned: () => or.scores.rank({ roundKey: key, order: 'top' }).then((r) => (r && isFinishedRace(r.entry) ? { rank: r.rank, row: r.entry } : null)) }
+      : {}),
+    rankTies: true,
+    formatValue: raceLabel,
+  };
+}
+
+/** Today's board. `tab: 'race'` opens on the race, e.g. after racing. */
+export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'race' } = {}): void {
   const or = OR();
   const key = roundKey(index);
   const tabs: LeaderboardTab[] = [];
@@ -110,6 +195,8 @@ export function showSolvers(index: number, canSignIn: boolean): void {
           },
     });
   }
+  const race = raceTab(index);
+  if (race) tabs.push(race);
   if (!tabs.length) return;
 
   // The status bar sits on the scrim while the board is up (styles.css).
@@ -118,7 +205,7 @@ export function showSolvers(index: number, canSignIn: boolean): void {
     title: `Daily #${index + 1}`,
     tabs,
     viewerUuid: or.user?.uuid ?? null,
-    defaultTab: tabs[0]!.id,
+    defaultTab: opts.tab === 'race' && race ? race.id : tabs[0]!.id,
     onClose: () => document.documentElement.removeAttribute('data-board'),
   });
 }

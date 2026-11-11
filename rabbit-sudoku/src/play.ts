@@ -1,7 +1,14 @@
 // The play screen: the grid, the tools and the row-of-nine pad, notes, undo,
-// three-step hints, saving as you go, and the solve. No clock: it's a calm daily.
+// three-step hints, saving as you go, and the solve.
+//
+// Two clocks, neither of them pressing on a calm game:
+//  - the private timer counts active time (paused while the app is hidden)
+//    always, and shows only when the player turns on *Show my time*;
+//  - a race (race.ts) shows real time since its start, which doesn't pause,
+//    and swaps Hint for Leave race and the mistake check for nothing.
 
 import { hintCopy } from './hints';
+import { formatTime } from './race';
 import { nextStep, stateFrom, type Step } from './logic';
 import type { Settings } from './settings';
 import { solve } from './solver';
@@ -14,6 +21,17 @@ export interface SavedPlay {
   notes: number[];
   hints: number;
   solved: boolean;
+  /** Time spent with the puzzle on screen, in ms: the private timer. */
+  activeMs?: number;
+}
+
+/** A race in progress: the clock runs from `startedAt` on server time. */
+export interface RaceMode {
+  startedAt: number;
+  /** Server time now, in ms. */
+  now(): number;
+  /** The player asked to leave the race (main.ts confirms first). */
+  leave(): void;
 }
 
 export interface PlayOptions {
@@ -26,6 +44,8 @@ export interface PlayOptions {
   givens: string;
   saved: SavedPlay | null;
   settings: Settings;
+  /** Present while racing: no hints, no mistake check, and a clock that doesn't stop. */
+  race?: RaceMode;
   save(state: SavedPlay): void;
   solved(state: SavedPlay): void;
   exit(): void;
@@ -47,6 +67,18 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   let notes: number[] = o.saved?.notes?.length === 81 ? o.saved.notes.slice() : new Array<number>(81).fill(0);
   let hints = o.saved?.hints ?? 0;
   let solvedNow = o.saved?.solved ?? false;
+  const race = o.race;
+  // The mistake check reads the answer, so it's a hint: off in a race.
+  const showMistakes = o.settings.showMistakes && !race;
+
+  // The private timer: active time, banked whenever the screen hides.
+  let activeMs = Number.isFinite(o.saved?.activeMs) ? Math.max(0, o.saved!.activeMs!) : 0;
+  let visibleSince: number | null = document.hidden || solvedNow ? null : performance.now();
+  const bank = (): void => {
+    if (visibleSince !== null) activeMs += performance.now() - visibleSince;
+    visibleSince = null;
+  };
+  const activeNow = (): number => activeMs + (visibleSince !== null ? performance.now() - visibleSince : 0);
   let solution: Grid | null = null;
   const answer = (): Grid => (solution ??= solve(givens)!);
 
@@ -56,14 +88,29 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   let hint: Hint | null = null;
   const undo: { values: Grid; notes: number[] }[] = [];
 
-  const state = (): SavedPlay => ({ values: formatGrid(values), notes: notes.slice(), hints, solved: solvedNow });
+  const state = (): SavedPlay => ({ values: formatGrid(values), notes: notes.slice(), hints, solved: solvedNow, activeMs: Math.round(activeNow()) });
   const persist = (): void => o.save(state());
 
   // ---------- DOM ----------
   root.innerHTML = '';
   const bar = el('header', 'bar');
   const tierChip = el('span', `tier tier-${o.tier.toLowerCase()}`, o.tier);
-  bar.append(el('h1', 'title', o.title), tierChip, button('icon-button', '✕', () => o.exit(), 'Back home'));
+  // The race's clock always shows; the private one only when asked for.
+  const clock = el('span', `clock${race ? ' is-race' : ''}`);
+  clock.setAttribute('role', 'timer');
+  clock.setAttribute('aria-label', race ? 'Race time' : 'Your time');
+  const showClock = !!race || o.settings.showTime;
+  const elapsedSec = (): number => (race ? (race.now() - race.startedAt) / 1000 : activeNow() / 1000);
+  const tick = (): void => {
+    clock.textContent = `${race ? '⏱ ' : ''}${formatTime(elapsedSec())}`;
+  };
+  bar.append(el('h1', 'title', o.title), ...(showClock ? [clock] : []), tierChip, button('icon-button', '✕', () => o.exit(), 'Back home'));
+  let ticker = showClock && !solvedNow ? window.setInterval(tick, 1000) : 0;
+  const stopClock = (): void => {
+    window.clearInterval(ticker);
+    ticker = 0;
+  };
+  if (showClock) tick();
 
   const main = el('main', 'play');
   const board = el('div', 'board');
@@ -96,7 +143,8 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     noteMode = !noteMode;
     render();
   });
-  const hintBtn = button('tool', 'Hint', () => startHint());
+  // A race has no hints; its fourth tool is the way out of the race.
+  const hintBtn = race ? button('tool tool-leave', 'Leave race', () => race.leave()) : button('tool', 'Hint', () => startHint());
   tools.append(undoBtn, eraseBtn, notesBtn, hintBtn);
 
   const pad = el('div', 'pad');
@@ -160,6 +208,9 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   function afterMove(): void {
     if (isSolved(values)) {
       solvedNow = true;
+      bank();
+      if (showClock) tick();
+      stopClock();
       selected = -1;
       haptic('success');
       render();
@@ -210,7 +261,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
 
   // ---------- hints ----------
   function startHint(): void {
-    if (solvedNow) return;
+    if (solvedNow || race) return;
     if (hint) {
       advanceHint();
       return;
@@ -270,7 +321,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     const dupes = new Set(o.settings.flagRepeats ? duplicateCells(values) : []);
     const focus = o.settings.digitFirst ? activeDigit : values[selected] ?? 0;
     const peers = new Set(!o.settings.digitFirst && selected >= 0 ? PEERS[selected] : []);
-    const wrong = o.settings.showMistakes ? new Set(values.flatMap((v, i) => (v && !givens[i] && v !== answer()[i] ? [i] : []))) : null;
+    const wrong = showMistakes ? new Set(values.flatMap((v, i) => (v && !givens[i] && v !== answer()[i] ? [i] : []))) : null;
 
     const hintCells = new Set<number>();
     const hintUnit = new Set<number>();
@@ -354,7 +405,13 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
 
   // ---------- keys ----------
   const onVisibility = (): void => {
-    if (document.hidden) persist();
+    if (document.hidden) {
+      bank();
+      persist();
+    } else if (!solvedNow && visibleSince === null) {
+      visibleSince = performance.now();
+      if (showClock) tick();
+    }
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -380,6 +437,8 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     dispose(): void {
       document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('keydown', onKey);
+      stopClock();
+      bank();
       persist();
     },
   };
