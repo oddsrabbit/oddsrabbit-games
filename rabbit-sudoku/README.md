@@ -12,6 +12,13 @@ The client has two screens:
   solved it, and a countdown to the next puzzle. The friends card opens the day's
   board, as does *See how everyone did* on the solved sheet.
 - **Play:** the grid, Undo, Erase, Notes and Hint, and a row-of-nine pad.
+- **Past puzzles** (`src/past.ts`): every earlier Daily, newest first, with
+  its difficulty and status (solved, in progress, not played). It opens from a
+  card on home, and the week strip's earlier days open straight into their
+  puzzle. A past day is practice: no score row, no streak, saved under
+  `archive-N` once touched. A solved one shows *Play again*. A Daily left
+  unfinished when its day ends moves to its `archive-N` save, so it can be
+  finished later.
 
 It also has settings (vibration on touch devices only), help and the solved
 sheet.
@@ -69,6 +76,8 @@ file, keeps your saves in this browser, and fakes five friends. Parameters
 - `chrome=app`: the app's insets.
 - `help=0`: skip the first-run help.
 - `open=1`: open straight into the puzzle.
+- `archive=N`: open day N as the website's archive page does.
+- `past=1`: open the Past puzzles list.
 
 ## Engine (`src/`)
 

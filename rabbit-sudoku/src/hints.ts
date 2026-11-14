@@ -28,9 +28,9 @@ export function hintCopy(step: Step): HintCopy {
     case 'full-house':
       return { look, why: `Only one cell is left empty in ${where}, so it must be the missing ${d}.` };
     case 'hidden-single':
-      return { look: `Look for the ${d} in ${where}.`, why: `In ${where}, ${d} fits in only one cell. Every other empty cell there already sees a ${d}.` };
+      return { look: `Look for the ${d} in ${where}.`, why: `In ${where}, ${d} fits in only one cell. Every other empty cell there is ruled out for ${d}.` };
     case 'naked-single':
-      return { look: 'Look at the highlighted cell.', why: `Every digit but ${d} is already in this cell's row, column or box, so it must be ${d}.` };
+      return { look: 'Look at the highlighted cell.', why: `Every digit but ${d} is ruled out for this cell, so it must be ${d}.` };
     case 'pointing':
       return {
         look: `Look at where ${d} can go in ${unitName(u0 ?? 18)}.`,

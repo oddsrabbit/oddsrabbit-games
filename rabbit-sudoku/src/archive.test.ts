@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { archiveDate, archiveIntent, archiveKey, parseArchivePlayed, withArchivePlayed } from './archive';
+import { archiveDate, archiveIntent, archiveKey, parseArchivePlayed, pastDays, pastStatus, unsolvedPast, withArchivePlayed } from './archive';
 
 test('archiveIntent opens only a past day', () => {
   const play = (roundKey: unknown) => ({ target: 'play', roundKey });
@@ -35,4 +35,27 @@ test('archive keys and dates', () => {
   // puzzle-0 is launch day, Monday 2026-11-09.
   assert.equal(archiveDate(0), 'Monday, Nov 9, 2026');
   assert.equal(archiveDate(6), 'Sunday, Nov 15, 2026');
+});
+
+test('a past day is solved however it was solved, else in progress with a save', () => {
+  assert.equal(pastStatus(2, [2], [], null), 'solved');
+  assert.equal(pastStatus(2, [], [2], null), 'solved');
+  assert.equal(pastStatus(2, [], [], { solved: true }), 'solved');
+  assert.equal(pastStatus(2, [], [], { solved: false }), 'progress');
+  // Played again after solving: in progress until it's solved again.
+  assert.equal(pastStatus(2, [2], [2], { solved: false }), 'progress');
+  assert.equal(pastStatus(2, [1, 3], [0], null), 'new');
+});
+
+test('the past list runs newest first and pages', () => {
+  assert.deepEqual(pastDays(0, 30), []);
+  assert.deepEqual(pastDays(4, 30), [3, 2, 1, 0]);
+  assert.deepEqual(pastDays(100, 3), [99, 98, 97]);
+});
+
+test('unsolved past days count each day once and ignore today and later', () => {
+  assert.equal(unsolvedPast(0, [], []), 0);
+  assert.equal(unsolvedPast(5, [], []), 5);
+  assert.equal(unsolvedPast(5, [0, 1], [1, 2]), 2);
+  assert.equal(unsolvedPast(5, [5, 6], [9]), 5);
 });

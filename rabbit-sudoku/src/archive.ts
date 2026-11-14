@@ -44,3 +44,36 @@ export function archiveDate(n: number): string {
   const d = new Date(EPOCH_MS + n * DAY_MS);
   return `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
 }
+
+// ---------- the in-app list of past puzzles ----------
+
+/** How a past day shows in the list. */
+export type PastStatus = 'solved' | 'progress' | 'new';
+
+/**
+ * A past day's status. Solved on the day (stats), solved from the archive
+ * (`archive-played`) or a solved archive save all count. An unsolved archive
+ * save is in progress: archive saves are only written once the board has been
+ * touched (main.ts). A cleared save (Play again) is stored as null.
+ */
+export function pastStatus(n: number, solvedDays: readonly number[], archivePlayed: readonly number[], save: { solved?: unknown } | null): PastStatus {
+  if (save?.solved === true) return 'solved';
+  if (save) return 'progress';
+  return solvedDays.includes(n) || archivePlayed.includes(n) ? 'solved' : 'new';
+}
+
+/** The list pages in this many days at a time. */
+export const PAST_PAGE = 30;
+
+/** The past days to list, newest first: the `shown` most recent before `today`. */
+export function pastDays(today: number, shown: number): number[] {
+  const days: number[] = [];
+  for (let n = today - 1; n >= 0 && days.length < shown; n--) days.push(n);
+  return days;
+}
+
+/** How many past days were never solved, either on the day or from the archive. */
+export function unsolvedPast(today: number, solvedDays: readonly number[], archivePlayed: readonly number[]): number {
+  const solved = new Set([...solvedDays, ...archivePlayed].filter((n) => n >= 0 && n < today));
+  return Math.max(0, today - solved.size);
+}

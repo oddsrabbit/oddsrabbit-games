@@ -37,7 +37,9 @@ export interface HomeData {
   streak: number;
   best: number;
   /** Monday to Sunday of this week. */
-  week: { label: string; tier: Tier; solved: boolean; today: boolean; future: boolean }[];
+  week: { index: number; label: string; tier: Tier; solved: boolean; today: boolean; future: boolean }[];
+  /** Past days never solved, for the Past puzzles card; null before there are any past days. */
+  pastUnsolved: number | null;
   /**
    * Who has solved today's: friends' names (null with no friends list here)
    * and how many players in all (null when the host can't say). Null when
@@ -61,6 +63,10 @@ export interface HomeActions {
   help(): void;
   /** The countdown reached zero: today's puzzle is over. */
   expired(): void;
+  /** A past day in the week strip: that day, as practice. */
+  openDay(n: number): void;
+  /** The list of every past puzzle. */
+  past(): void;
 }
 
 export const TIER_NAME: Record<Tier, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert' };
@@ -239,8 +245,10 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   sheet.appendChild(el('h2', 'group-title', 'This week'));
   const week = el('div', 'week');
   for (const day of d.week) {
-    const mark = el('div', `day tier-${day.tier}${day.solved ? ' is-solved' : ''}${day.today ? ' is-today' : ''}${day.future ? ' is-future' : ''}`);
-    mark.setAttribute('aria-label', `${day.label}, ${TIER_NAME[day.tier]}${day.solved ? ', solved' : ''}`);
+    const cls = `day tier-${day.tier}${day.solved ? ' is-solved' : ''}${day.today ? ' is-today' : ''}${day.future ? ' is-future' : ''}`;
+    // Today opens like Play; an earlier day opens as practice; the future can't be opened.
+    const mark = day.future || day.index < 0 ? el('div', cls) : button(cls, '', day.today ? a.play : () => a.openDay(day.index));
+    mark.setAttribute('aria-label', `${day.label}, ${TIER_NAME[day.tier]}${day.solved ? ', solved' : ''}${day.today ? ', today' : ''}`);
     mark.append(el('span', 'day-label', day.label), el('span', 'day-mark', day.solved ? '✓' : ''));
     week.appendChild(mark);
   }
@@ -267,6 +275,17 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
       else card.remove();
       if (d.board) card.setAttribute('aria-label', `${first.textContent} ${second.textContent} See who solved it.`.trim());
     });
+  }
+  // Every earlier Daily: below today's friends, since today comes first.
+  if (d.pastUnsolved !== null) {
+    const card = button('notice past-entry', '', a.past);
+    const lines = el('span', 'solvers-lines');
+    lines.append(
+      el('span', 'solvers-main', 'Past puzzles'),
+      el('span', 'solvers-sub muted', d.pastUnsolved ? `${d.pastUnsolved} you haven't solved yet` : "You've solved every one. Play any again.")
+    );
+    card.append(lines, el('span', 'solvers-more', 'See all ›'));
+    sheet.appendChild(card);
   }
   sheet.appendChild(el('p', 'foot muted', 'A new puzzle every day at midnight UTC: easy on Monday, hardest on Saturday.'));
 

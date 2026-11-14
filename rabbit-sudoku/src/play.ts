@@ -9,7 +9,7 @@
 
 import { hintCopy } from './hints';
 import { formatTime } from './race';
-import { nextStep, stateFrom, type Step } from './logic';
+import { nextStep, stateFrom, type LogicState, type Step } from './logic';
 import type { Settings } from './settings';
 import { solve } from './solver';
 import { bit, duplicateCells, formatGrid, isSolved, parseGrid, PEERS, rowOf, colOf, UNITS, unitsOf, type Grid } from './sudoku';
@@ -48,6 +48,8 @@ export interface PlayOptions {
   race?: RaceMode;
   save(state: SavedPlay): void;
   solved(state: SavedPlay): void;
+  /** Offered under a solved board: start the puzzle over (past days only). */
+  replay?: () => void;
   exit(): void;
 }
 
@@ -157,8 +159,11 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     pad.appendChild(k);
   }
 
+  // A solved past day, reopened: one way forward, starting over.
+  const again = o.replay ? button('primary big play-again', 'Play again', o.replay) : null;
+
   if (o.note) main.appendChild(el('p', 'play-note', o.note));
-  main.append(board, hintBox, tools, pad);
+  main.append(board, hintBox, ...(again ? [again] : []), tools, pad);
   root.append(bar, main);
 
   // ---------- moves ----------
@@ -260,6 +265,22 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   }
 
   // ---------- hints ----------
+  /**
+   * The candidates a hint starts from: what the placed digits allow, narrowed
+   * by the player's own notes, so a hint never repeats an elimination they've
+   * already made. A note that has ruled out the cell's real digit is ignored
+   * there, since logic built on it could point the wrong way.
+   */
+  function hintState(): LogicState {
+    const s = stateFrom(values);
+    const sol = answer();
+    for (let c = 0; c < 81; c++) {
+      const n = notes[c]!;
+      if (s.cands[c] && n && n & bit(sol[c]!) && s.cands[c]! & n) s.cands[c] = s.cands[c]! & n;
+    }
+    return s;
+  }
+
   function startHint(): void {
     if (solvedNow || race) return;
     if (hint) {
@@ -271,7 +292,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     if (wrong.length) {
       hint = { kind: 'wrong', cells: wrong, stage: 1 };
     } else {
-      const step = nextStep(stateFrom(values));
+      const step = nextStep(hintState());
       if (!step) return;
       hint = { kind: 'step', step, stage: 1 };
     }
@@ -306,7 +327,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     if (step.eliminate.length) {
       // A player without notes there gets the cell's real candidates first,
       // so the removal shows.
-      const cands = stateFrom(values).cands;
+      const cands = hintState().cands;
       for (const e of step.eliminate) {
         if (!notes[e.cell]) notes[e.cell] = cands[e.cell]!;
         notes[e.cell] = notes[e.cell]! & ~bit(e.digit);
@@ -389,6 +410,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     notesBtn.textContent = noteMode ? 'Notes on' : 'Notes';
     notesBtn.setAttribute('aria-pressed', String(noteMode));
     for (const b of [undoBtn, eraseBtn, notesBtn, hintBtn]) b.disabled = solvedNow;
+    if (again) again.hidden = !solvedNow;
 
     hintBox.hidden = !hint;
     if (hint) {

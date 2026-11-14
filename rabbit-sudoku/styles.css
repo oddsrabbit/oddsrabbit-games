@@ -449,17 +449,50 @@ button { font: inherit; color: inherit; cursor: pointer; -webkit-touch-callout: 
 .day.is-solved .day-mark { background: var(--turn); border-color: var(--turn); }
 .day.is-today .day-mark { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 .day.is-future .day-mark { opacity: 0.55; border-style: dashed; }
+/* Past days in the week open as practice; today opens like Play. */
+button.day { font: inherit; color: inherit; cursor: pointer; }
+button.day:active .day-mark { transform: scale(0.94); }
 /* Who solved it: a card that opens the full board. */
 .solvers { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: inherit; }
 .solvers-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .solvers-sub:empty { display: none; }
 .solvers-sub { font-size: 13px; }
 .solvers-more { flex: none; font-size: 13px; font-weight: 700; color: var(--accent); }
-button.solvers:active { background: var(--peer); }
+button.solvers:active, .past-entry:active { background: var(--peer); }
+/* Home's way into every past puzzle: the same card as who solved it. */
+.past-entry { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: inherit; }
 /* The shared board's modal, in this game's type. */
 .lb-modal { border-radius: 20px; }
 .lb-modal-title { font-family: var(--display); font-weight: 800; }
 .foot { margin: 18px 4px 0; text-align: center; font-size: 13px; }
+
+/* ---------- past puzzles ---------- */
+.past {
+  flex: 1;
+  padding: 4px calc(14px + var(--oddsrabbit-safe-right, 0px)) calc(24px + var(--oddsrabbit-safe-bottom, 0px)) calc(14px + var(--oddsrabbit-safe-left, 0px));
+}
+.past-intro { margin: 0 4px 12px; font-size: 14px; }
+.past-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.past-row {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  text-align: left;
+}
+.past-row:active { background: var(--peer); }
+.past-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.past-name { font-family: var(--display); font-size: 18px; font-weight: 800; }
+.past-date { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.past-status { flex: none; min-width: 76px; text-align: right; font-size: 13px; font-weight: 700; color: var(--accent); }
+.past-status.is-solved { color: var(--turn); }
+.past-status.is-progress { color: var(--ink); }
+.past-more { display: block; width: 100%; margin-top: 12px; padding: 13px 16px; font-size: 16px; }
 
 /* ---------- play ---------- */
 .play {

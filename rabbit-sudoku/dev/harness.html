@@ -20,6 +20,7 @@
 //   help=0       skip the first-run help
 //   open=1       open straight into the puzzle, for screenshots
 //   archive=N    open as the archive page's Play button does: initialState for puzzle-N
+//   past=1       open the Past puzzles list from home, for screenshots
 //   scheme=dark  the app is in dark mode (what "Match app" follows)
 //   theme=T      start with the Colours setting on T: auto, light, paper or dark
 //   select=N     with open=1, tap cell N (0-80) once the puzzle is up
@@ -121,6 +122,12 @@ frame.addEventListener('load', () => {
     } else if (tries++ < 30) setTimeout(tryOpen, 200);
   };
   if (open) setTimeout(tryOpen, 300);
+  const tryPast = () => {
+    const entry = frame.contentDocument.querySelector('.past-entry');
+    if (entry) entry.click();
+    else if (tries++ < 30) setTimeout(tryPast, 200);
+  };
+  if (q.get('past')) setTimeout(tryPast, 300);
 });
 let sendFails = Number(q.get('sendfail') || 0);
 

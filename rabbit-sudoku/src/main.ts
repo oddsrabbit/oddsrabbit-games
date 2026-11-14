@@ -2,9 +2,10 @@
 // the puzzle, sends the solve, runs the opt-in race (race.ts), and owns help,
 // settings and the day rolling over.
 
-import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, withArchivePlayed } from './archive';
+import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, PAST_PAGE, pastDays, pastStatus, parseArchivePlayed, unsolvedPast, withArchivePlayed } from './archive';
 import { friendsRows, hasBoard, isSolvedRow, showSolvers, solveScore, UNSOLVED_SCORE } from './board';
 import { renderHome, TIER_NAME, type PlayState, type RaceHome, type Solvers } from './home';
+import { renderPast } from './past';
 import { mountPlay, type PlayScreen, type SavedPlay } from './play';
 import { DAY_MS, EPOCH_MS, dailyTierFor, parseDay, puzzleIndexAt, roundKey, type DayContent } from './puzzle';
 import { formatTime, isFinalRefusal, isRacing, parseRace, RACE_STARTED_SCORE, raceKey, raceScore, type RaceState } from './race';
@@ -34,6 +35,15 @@ let playing: PlayScreen | null = null;
 /** Today's race as the play screen last knew it; every daily save carries it. */
 let dailyRace: RaceState | null = null;
 let stopHome = (): void => undefined;
+/** On the Past puzzles list: the day rolling over waits until the player leaves it. */
+let onPast = false;
+/** How many past days the list shows; kept while the player dips into one and back. */
+let pastShown = PAST_PAGE;
+/**
+ * Bumped by every screen change. A past day loads over the network, so one
+ * that lands after the player has moved on (or tapped again) is dropped.
+ */
+let navTicket = 0;
 
 // ---------- colours ----------
 
@@ -319,11 +329,13 @@ function loadSolvers(n: number, signedIn: boolean): Promise<Solvers> | null {
 // ---------- screens ----------
 
 async function showHome(): Promise<void> {
+  navTicket++;
   playing = null;
+  onPast = false;
   stopHome();
   if (!day) return renderUnavailable();
   const signedIn = OR().user !== null;
-  const saved = await readJson<DailySave | null>('daily', null);
+  const [saved, archivePlayed] = await Promise.all([readJson<DailySave | null>('daily', null), readJson<unknown>(ARCHIVE_PLAYED_KEY, null)]);
   const today = saved?.index === index ? saved : null;
   const date = new Date(EPOCH_MS + index * DAY_MS);
   const monday = index - ((date.getUTCDay() + 6) % 7);
@@ -346,6 +358,7 @@ async function showHome(): Promise<void> {
       streak: streakOf(stats.solvedDays, index),
       best: bestStreak(stats.solvedDays),
       week: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label, i) => ({
+        index: monday + i,
         label,
         tier: dailyTierFor(monday + i),
         solved: solved.has(monday + i),
@@ -356,6 +369,7 @@ async function showHome(): Promise<void> {
       board: hasBoard(canSignIn) ? () => showSolvers(index, canSignIn) : null,
       nextIn: () => EPOCH_MS + (index + 1) * DAY_MS - serverNow(),
       race: raceHomeFor(today),
+      pastUnsolved: index > 0 ? unsolvedPast(index, stats.solvedDays, parseArchivePlayed(archivePlayed)) : null,
     },
     {
       play: () => void play(),
@@ -364,6 +378,8 @@ async function showHome(): Promise<void> {
       settings: showSettings,
       help: () => showHelp(),
       expired: () => void startDay(),
+      openDay: (n) => void playArchive(n, 'home'),
+      past: () => void showPast(),
     }
   );
   window.scrollTo({ top: 0 });
@@ -374,6 +390,7 @@ async function play(): Promise<void> {
   // this browser for a guest and carries over to the account they sign up
   // with. Only the solve's score row needs one (see `solved` below).
   if (!day) return;
+  navTicket++;
   stopHome();
   delete document.documentElement.dataset.screen;
   const saved = await readJson<DailySave | null>('daily', null);
@@ -415,32 +432,94 @@ async function play(): Promise<void> {
   });
 }
 
-/**
- * A past Daily, opened from its archive page. Practice only: no score row,
- * and today's save, stats and streak are never touched.
- */
-async function playArchive(n: number): Promise<void> {
+/** The Past puzzles list: every earlier day, newest first. */
+async function showPast(): Promise<void> {
+  navTicket++;
+  playing = null;
+  stopHome();
+  onPast = true;
+  delete document.documentElement.dataset.screen;
+  const archivePlayed = parseArchivePlayed(await readJson<unknown>(ARCHIVE_PLAYED_KEY, null));
+  const days = pastDays(index, pastShown);
+  renderPast(
+    app,
+    {
+      days,
+      more: days.length > 0 && days[days.length - 1]! > 0,
+      tierOf: dailyTierFor,
+      statusOf: async (n) => pastStatus(n, stats.solvedDays, archivePlayed, await readJson<SavedPlay | null>(archiveKey(n), null)),
+    },
+    {
+      open: (n) => void playArchive(n, 'past'),
+      back: () => void showHome(),
+      more: () => {
+        pastShown += PAST_PAGE;
+        const y = window.scrollY;
+        void showPast().then(() => window.scrollTo({ top: y }));
+      },
+    }
+  );
+  window.scrollTo({ top: 0 });
+}
+
+/** Past days' puzzles, once loaded this session. */
+const pastContent = new Map<number, DayContent>();
+
+async function loadPast(n: number): Promise<DayContent | null> {
+  const known = pastContent.get(n);
+  if (known) return known;
   let past: DayContent | null = null;
   try {
     past = parseDay((await OR().content.daily({ roundKey: roundKey(n) }))?.content);
   } catch {
     past = null;
   }
-  if (!past) return showNotice(`Daily #${n + 1} didn't load`, "Check your connection and try again. Here's today's puzzle.");
-  stopHome();
-  delete document.documentElement.dataset.screen;
+  if (past) pastContent.set(n, past);
+  return past;
+}
+
+type Origin = 'home' | 'past';
+
+/**
+ * A past Daily: from its archive page on the website, the week strip or the
+ * Past puzzles list. Practice only: no score row, and today's save, stats and
+ * streak are never touched. Leaving goes back where it was opened from.
+ */
+async function playArchive(n: number, from: Origin): Promise<void> {
+  const ticket = ++navTicket;
+  const past = await loadPast(n);
+  if (ticket !== navTicket) return;
+  if (!past) {
+    const back = from === 'past' ? 'the list' : "today's puzzle";
+    return showNotice(`Daily #${n + 1} didn't load`, `Check your connection and try again. Here's ${back}.`);
+  }
   const key = archiveKey(n);
   const saved = await readJson<SavedPlay | null>(key, null);
+  if (ticket !== navTicket) return;
+  // Only now, with nothing left to wait for, does the screen change.
+  stopHome();
+  onPast = false;
+  delete document.documentElement.dataset.screen;
   const tier = past.tier;
+  // As the play screen saves it, so an untouched grid compares equal.
+  const givens = formatGrid(parseGrid(past.givens)!);
+  // Saved only once touched, so opening a day for a look doesn't mark it in progress.
+  let kept = saved !== null;
+  const note = !saved && stats.solvedDays.includes(n) ? `${archiveDate(n)} · You solved it on the day` : `${archiveDate(n)} · Archive`;
   playing = mountPlay(app, {
     title: `Daily #${n + 1}`,
     tier: TIER_NAME[tier],
-    note: `${archiveDate(n)} · Archive`,
+    note,
     givens: past.givens,
     saved,
     settings,
-    save: (s) => writeJson(key, s),
+    save: (s) => {
+      if (!kept && !touched(s, givens)) return;
+      kept = true;
+      writeJson(key, s);
+    },
     solved: (s) => {
+      kept = true;
       writeJson(key, s);
       // Read, merge, write: the website reads this list server-side. A failed
       // read skips the write rather than replace the list with just this day.
@@ -448,19 +527,59 @@ async function playArchive(n: number): Promise<void> {
         (raw) => writeJson(ARCHIVE_PLAYED_KEY, withArchivePlayed(raw, n)),
         () => undefined
       );
-      showSolved(s, n, tier, true);
+      showSolved(s, n, tier, true, null, () => void leave('past'), from);
     },
-    exit: () => void leave(),
+    replay: () => {
+      // Clear the save first: dispose() saves the solved board, and the write after it wins.
+      playing?.dispose();
+      playing = null;
+      writeJson(key, null);
+      void playArchive(n, from);
+    },
+    exit: () => void leave(from),
   });
 }
 
-async function leave(): Promise<void> {
-  playing?.dispose();
-  playing = null;
-  await showHome();
+/**
+ * The Daily left unfinished when its day ended. The `daily` save holds one
+ * day, and today's first save would replace it, so it moves to that day's
+ * archive save, where the Past puzzles list shows it in progress. Only a board
+ * that was played, and never over an archive save already there.
+ */
+async function keepUnfinished(): Promise<void> {
+  const saved = await readJson<DailySave | null>('daily', null);
+  if (!saved || saved.solved || saved.index >= index || saved.index < 0) return;
+  const key = archiveKey(saved.index);
+  try {
+    // Solved from the archive since (perhaps then cleared by Play again): the old board stays gone.
+    if (parseArchivePlayed(await readJsonForMerge(ARCHIVE_PLAYED_KEY)).includes(saved.index)) return;
+    if ((await readJsonForMerge(key)) !== null) return;
+  } catch {
+    return;
+  }
+  const past = await loadPast(saved.index);
+  if (!past || !touched(saved, formatGrid(parseGrid(past.givens)!))) return;
+  const kept: SavedPlay = { values: saved.values, notes: saved.notes, hints: saved.hints, solved: false, ...(saved.activeMs ? { activeMs: saved.activeMs } : {}) };
+  writeJson(key, kept);
 }
 
-function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive = false, race: RaceState | null = null): void {
+async function leave(to: Origin = 'home'): Promise<void> {
+  playing?.dispose();
+  playing = null;
+  await (to === 'past' ? showPast() : showHome());
+}
+
+function showSolved(
+  s: SavedPlay,
+  n: number,
+  tier: DayContent['tier'],
+  archive = false,
+  race: RaceState | null = null,
+  /** A past day's way on to the rest of the list. */
+  more: (() => void) | null = null,
+  /** Where Done goes. */
+  done: Origin = 'home'
+): void {
   const body = el('div', 'solved');
   const streak = streakOf(stats.solvedDays, n);
   const raced = race?.finishedSec !== undefined && !race.left ? race.finishedSec : null;
@@ -488,6 +607,15 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
         : button('subtle solved-board', 'See how everyone did ›', () => showSolvers(n, canSignIn))
     );
   }
+  let close = (): void => undefined;
+  if (more) {
+    body.appendChild(
+      button('subtle solved-board', 'More past puzzles ›', () => {
+        close();
+        more();
+      })
+    );
+  }
   const actions = el('div', 'sheet-actions');
   if (!archive && !OR().user && OR().capabilities.has('actions.requestSignIn')) {
     actions.appendChild(
@@ -500,11 +628,10 @@ function showSolved(s: SavedPlay, n: number, tier: DayContent['tier'], archive =
     const text = `Rabbit Sudoku #${n + 1} · ${TIER_NAME[tier]} ${result}${streakMark}\n${SHARE_URL}`;
     actions.appendChild(button('subtle', 'Share', () => void OR().actions.share({ text }).catch(() => undefined)));
   }
-  let close = (): void => undefined;
   actions.appendChild(
     button('primary', 'Done', () => {
       close();
-      void leave();
+      void leave(done);
     })
   );
   body.appendChild(actions);
@@ -609,6 +736,7 @@ async function startDay(): Promise<void> {
   } catch {
     day = null;
   }
+  void keepUnfinished();
   await showHome();
 }
 
@@ -616,7 +744,7 @@ async function startDay(): Promise<void> {
 function refreshIfStale(): void {
   void sendSolve();
   void sendRaceFinish();
-  if (playing) return;
+  if (playing || onPast) return;
   if (!day || puzzleIndexAt(serverNow()) !== index) void startDay();
 }
 
@@ -636,7 +764,7 @@ async function bootstrap(): Promise<void> {
   // A past day's archive page opens straight into that day; anything else
   // (today, the future, a malformed intent) is a normal launch on home.
   const past = archiveIntent(OR().initialState, index);
-  if (past !== null) await playArchive(past);
+  if (past !== null) await playArchive(past, 'home');
   if (!seenHelp) showHelp(() => writeJson('seen_help', true));
 
   OR().lifecycle.on('pause', () => playing?.flush());
