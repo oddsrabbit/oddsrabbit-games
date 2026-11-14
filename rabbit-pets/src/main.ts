@@ -663,6 +663,8 @@ interface Ui {
   gift: HTMLButtonElement;
   panel: HTMLElement;
   moodline: HTMLElement;
+  /** The mood line with the room switcher beside it: the panel's first row, arranging or not. */
+  moodRow: HTMLElement;
   acts: Record<'feed' | 'pet' | 'play' | 'clean' | 'nap', HTMLButtonElement>;
   feedBadge: HTMLElement;
   sound: HTMLButtonElement;
@@ -753,9 +755,10 @@ function buildBurrowScreen(): void {
   const chips = h('div', { class: 'float-chips' });
   const gift = h('button', { class: 'gift-btn', type: 'button', 'aria-label': 'Daily gift', hidden: true }, img(itemSprite('gift'), 3), h('span', { class: 'lbl', text: 'Daily gift' }));
   const cards = h('div', { class: 'float-cards' }, gift);
-  // the rooms she has, once there's more than one (render keeps it up to date)
+  // the rooms she has, once there's more than one (render keeps it up to date):
+  // beside the mood line, off the floor
   const roomNav = h('nav', { class: 'room-nav', 'aria-label': 'Rooms', hidden: true });
-  const stage = h('main', { class: 'stage' }, canvas, chips, cards, roomNav);
+  const stage = h('main', { class: 'stage burrow-stage' }, canvas, chips, cards);
   // into arranging, from the header beside Sound, off the room (a long press on a piece does it too, with that piece picked)
   const arrange = h('button', { class: 'icon-btn arrange-btn', type: 'button', 'aria-label': 'Arrange the burrow' });
   arrange.innerHTML = PENCIL;
@@ -779,8 +782,12 @@ function buildBurrowScreen(): void {
   const moodline = h('p', { class: 'moodline', 'aria-live': 'polite' });
   const goalBar = h('button', { class: 'goal-bar', type: 'button', hidden: true });
   goalBar.addEventListener('click', () => openShop({ select: pet.goal }));
-  const panelKids = [moodline, h('div', { class: 'actions' }, acts.feed, acts.pet, acts.play, acts.clean, acts.nap)];
+  const moodRow = h('div', { class: 'mood-row' }, moodline, roomNav);
+  const panelKids = [moodRow, h('div', { class: 'actions' }, acts.feed, acts.pet, acts.play, acts.clean, acts.nap)];
   const panel = h('section', { class: 'panel' }, ...panelKids);
+  // out of arranging: in the header where Arrange was, so the room keeps the panel's height
+  const hudDone = h('button', { class: 'btn primary small hud-done', type: 'button', text: 'Done' });
+  hudDone.addEventListener('click', () => goTab(arrangeReturn));
   // her name is a way to her page, as well as the tab
   const who = h('button', { class: 'who who-btn', type: 'button', 'aria-description': 'Opens her page' }, name, sub);
   who.addEventListener('click', () => goTab('her'));
@@ -790,7 +797,7 @@ function buildBurrowScreen(): void {
     h('header', { class: 'hud' },
       h('div', { class: 'hud-top' },
         who,
-        cloverChip(clover), arrange, sound, gear),
+        cloverChip(clover), arrange, hudDone, sound, gear),
       h('div', { class: 'needs' }, ...needEls),
       goalBar),
     stage,
@@ -798,7 +805,7 @@ function buildBurrowScreen(): void {
   ];
   setScreen('burrow');
   app.replaceChildren(...nodes, tabbar);
-  ui = { nodes, name, sub, clover, needs, stage, canvas, chips, cards, gift, panel, moodline, acts, feedBadge, sound, goal: goalBar, panelKids, roomNav, tabbar, tabs, page: buildPage() };
+  ui = { nodes, name, sub, clover, needs, stage, canvas, chips, cards, gift, panel, moodline, moodRow, acts, feedBadge, sound, goal: goalBar, panelKids, roomNav, tabbar, tabs, page: buildPage() };
 
   scene = new Scene(canvas);
   new ResizeObserver(layoutStage).observe(stage);
@@ -1022,21 +1029,25 @@ function toScene(e: { clientX: number; clientY: number }): { x: number; y: numbe
   return scene ? scene.toRoom(x, y) : { x, y };
 }
 
-/** How wide the soil beside the room has to be (CSS px) to hold the icon rails. */
-const RAIL_MIN_PX = 44;
+/** Rows of plain soil above the arch's top: the fit leaves them off rather than shrink the room for them. */
+const ARCH_TOP = 5;
+/** Soil this wide (CSS px) beside the room holds the pills and cards with their words; narrower, they're icons. */
+const WORDS_MIN_PX = 150;
 
 /**
- * The whole room, arch and all, its floor on the stage's bottom edge. Where
- * the stage is too short for the room at full width (short phones, the
- * desktop column) there's soil either side of it, and once that's wide
- * enough the pills and cards go into it as icons (`.stage.rails`), clear of
- * the arch.
+ * The whole room, arch and all, its floor on the stage's bottom edge, the
+ * same size and shape on every screen. Where the stage is wider than the room
+ * (most phones a little, the site's game frame a lot) there's soil either
+ * side. The pills and cards sit in it as icons over a short number
+ * (`.stage.rails`), in the arch's top corners, clear of the window; with soil
+ * wide enough for their words, they keep them.
  */
 function layoutStage(): void {
   if (!scene || !ui.stage.isConnected) return;
   scale = fitScene(ui.stage, ui.canvas, scene);
   const soil = (ui.stage.clientWidth - (SCENE_W - 2 * WALL_INSET) * scale) / 2;
-  ui.stage.classList.toggle('rails', soil >= RAIL_MIN_PX);
+  ui.stage.classList.toggle('rails', soil < WORDS_MIN_PX);
+  ui.stage.style.setProperty('--soil', `${Math.max(0, Math.floor(soil))}px`);
 }
 
 /**
@@ -1053,7 +1064,7 @@ function fitScene(stageEl: HTMLElement, el: HTMLCanvasElement, sc: Scene, crop =
   // screen pixel wider than its neighbours doesn't show.
   const scale = crop
     ? Math.max(2, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H * 0.6)) || 2)
-    : Math.max(1, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / SCENE_H) || 1);
+    : Math.max(1, Math.min(w / (SCENE_W - 2 * WALL_INSET), hgt / (SCENE_H - ARCH_TOP)) || 1);
   // The surface covers the whole stage in scene pixels; the room sits in it.
   const sw = Math.ceil(w / scale - 1e-6), sh = Math.ceil(hgt / scale - 1e-6);
   const offX = Math.round((sw - SCENE_W) / 2);
@@ -2739,18 +2750,20 @@ function renderDecoratePanel(): void {
     wireDragOut(b, items[0]!, def);
     return b;
   })) : h('p', { class: 'store-empty', text: 'Nothing in storage. Drag a piece down here to put it away.' });
-  const store = h('div', { class: 'store-zone' }, h('div', { class: 'store-head' }, h('span', { text: 'Storage' }), h('span', { class: 'store-drop', text: 'Let go to put it away' })), tray);
   const sel = selected();
   const def = sel ? byId(sel.id) : undefined;
   const where = def?.zone === 'hang' ? 'anywhere on the wall' : 'anywhere on the floor';
   setLine(ui.moodline, sel && def ? `Drag the ${def.name.toLowerCase()} ${where}.`
     : stored.size ? 'Drag pieces about, up out of storage, or down into it.' : 'Drag pieces about, or down into storage to put them away.');
-  const done = button('Done', 'btn primary', () => goTab(arrangeReturn));
-  const flip = sel ? button('Flip', 'btn', () => { sel.flip = !sel.flip; saveBurrow(); play('flip'); }) : null;
-  const away = sel ? button('Put away', 'btn', () => putAway(sel)) : null;
+  // Done is in the header (hudDone); the picked piece's buttons ride in storage's heading
+  const flip = sel ? button('Flip', 'btn small', () => { sel.flip = !sel.flip; saveBurrow(); play('flip'); }) : null;
+  const away = sel ? button('Put away', 'btn small', () => putAway(sel)) : null;
   // digging out rooms lives with the rest of the burrow's shopping
-  const dig = !sel && ROOMS_OPEN && EXTRA_ROOMS.some((r) => !roomsOf(burrow).includes(r)) ? button('Dig a new room', 'btn', () => openDig()) : null;
-  ui.panel.replaceChildren(ui.moodline, store, h('div', { class: 'row2' }, done, flip, away, dig));
+  const dig = !sel && ROOMS_OPEN && EXTRA_ROOMS.some((r) => !roomsOf(burrow).includes(r)) ? button('Dig a new room', 'btn small', () => openDig()) : null;
+  const store = h('div', { class: 'store-zone' },
+    h('div', { class: 'store-head' }, h('span', { text: 'Storage' }), h('span', { class: 'store-drop', text: 'Let go to put it away' }), h('span', { class: 'store-btns' }, flip, away, dig)),
+    tray);
+  ui.panel.replaceChildren(ui.moodRow, store);
   ui.chips.replaceChildren();
   ui.cards.querySelector('.cards-events')?.remove();
 }

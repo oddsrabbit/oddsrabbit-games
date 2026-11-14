@@ -63,8 +63,10 @@ img { -webkit-user-drag: none; }
 .pixfont { font-family: var(--pixel); letter-spacing: 0.02em; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* Phone-shaped everywhere: on a wide screen the game sits in a centred column. */
-#app { height: 100%; max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; }
+/* Phone-shaped everywhere: on a wide screen the game sits in a centred column.
+   720px so it fills the site's game frame (658px wide) edge to edge, with no
+   bars of the page beside it; the room in it stays the same size and shape. */
+#app { height: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; }
 .boot { margin: auto; color: var(--cream-2); }
 
 /* ---------- burrow screen ---------- */
@@ -146,6 +148,10 @@ button.tchip::after { inset: -7px -3px; }
 .stage > .float-chips .tchip { white-space: nowrap; }
 .float-cards { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; max-width: calc(54% - 14px); }
 .cards-events { display: contents; }
+/* The burrow with its words out (soil 150px or more, main.ts layoutStage): each
+   column stays in the soil beside the room, off the arch. */
+.burrow-stage:not(.rails) > .float-chips, .burrow-stage:not(.rails) > .float-cards { max-width: calc(var(--soil, 150px) - 14px); }
+.burrow-stage:not(.rails) .event-card-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- the garden room (docs/rabbit-pets-garden.md) ---------- */
 .room-tab { min-height: 34px; border: 0; border-radius: 7px; background: transparent; color: var(--cream-2); font-weight: 700; font-size: 14px; }
@@ -204,9 +210,9 @@ button.tchip::after { inset: -7px -3px; }
 }
 .tchip .time { font-family: var(--pixel); font-size: 12px; }
 .tchip.ready { background: #eaf5e2; }
-/* Short stages (short phones, the desktop column): the whole room shows with
-   soil either side (main.ts layoutStage), and the pills and cards sit in that
-   soil as icons over a short number (42m, 3, 1/4), clear of the arch. */
+/* The whole room shows with soil either side (main.ts layoutStage). Unless
+   that soil is wide enough for their words, the pills and cards sit in it as
+   icons over a short number (42m, 3, 1/4), in the arch's top corners. */
 .tchip .mini, .card-mini { display: none; }
 .stage.rails .float-chips { left: 2px; top: 6px; gap: 5px; max-width: none; }
 .stage.rails .float-chips .tchip { flex-direction: column; justify-content: center; gap: 3px; width: 42px; min-height: 44px; padding: 4px 0 3px; }
@@ -265,10 +271,13 @@ button.tchip::after { inset: -7px -3px; }
 .moodline { margin: 0; font-size: 15px; font-weight: 600; min-height: 1.4em; }
 /* One line, always, so the room above never jumps as it changes. Too long,
    main.ts fitLine steps the size down, then it ends in "…" and a tap shows it all. */
-.panel > .moodline { line-height: 1.4; height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.panel > .moodline.cut { cursor: pointer; }
+.panel > .moodline, .mood-row > .moodline { line-height: 1.4; height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel > .moodline.cut, .mood-row > .moodline.cut { cursor: pointer; }
+/* the burrow's: the mood line, and beside it the rooms once there's more than one */
+.mood-row { display: flex; align-items: center; gap: 8px; }
+.mood-row > .moodline { flex: 1 1 auto; min-width: 0; }
 .line-bubble {
-  position: fixed; z-index: 40; left: 12px; right: 12px; max-width: 536px; margin: 0 auto;
+  position: fixed; z-index: 40; left: 12px; right: 12px; max-width: 696px; margin: 0 auto;
   background: var(--paper); color: var(--ink); border: 3px solid var(--ink); border-radius: 12px;
   box-shadow: 0 4px 0 var(--ink); padding: 10px 12px; font-size: 15px; font-weight: 600; line-height: 1.4;
   animation: bubble-in .15s ease-out;
@@ -549,7 +558,7 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .choice-row .btn { padding: 0 4px; }
 
 /* friends */
-.visit { position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; background: var(--bar); color: var(--cream); }
+.visit { position: fixed; inset: 0; z-index: 9; display: flex; flex-direction: column; max-width: 720px; margin: 0 auto; background: var(--bar); color: var(--cream); }
 /* A header row like the HUD's: under the status bar, in the back button's row,
    with the button's lane kept empty. */
 .visit-top {
@@ -685,8 +694,20 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 .visit-areas { display: flex; gap: 4px; justify-content: center; align-self: center; padding: 4px; background: var(--bar); border-radius: 10px; }
 /* the guest book */
 .guestbook .quote { display: block; margin-top: 2px; font-style: italic; color: var(--ink); }
-/* the burrow's rooms, once there's more than one: over the floor, like the garden's dots */
-.room-nav { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; background: rgba(30, 20, 15, .72); border-radius: 12px; z-index: 2; }
+/* the burrow's rooms, once there's more than one: beside the mood line, off the
+   floor. The negative margin keeps the panel the mood line's height. */
+.room-nav { flex: 0 0 auto; display: flex; gap: 2px; margin: -6px 0; padding: 2px; background: var(--paper-2); border: 2px solid var(--cream-2); border-radius: 10px; }
+.room-nav .room-tab { min-height: 24px; padding: 0 9px; font-size: 13px; color: var(--ink-2); }
+.room-nav .room-tab[aria-pressed="true"] { color: #fff; }
+/* a phone's column: dots, like the garden's areas, so the mood line keeps its width
+   (each tab's name stays its aria-label's job: the text is there, at size 0) */
+@media (max-width: 519px) {
+  .room-nav { padding: 2px 6px; gap: 0; }
+  .room-nav .room-tab { font-size: 0; padding: 0 5px; }
+  .room-nav .room-tab[aria-pressed="true"] { background: transparent; }
+  .room-nav .room-tab::before { content: ""; display: block; width: 8px; height: 8px; border-radius: 999px; background: var(--ink-2); opacity: .5; }
+  .room-nav .room-tab[aria-pressed="true"]::before { width: 18px; background: var(--clover); opacity: 1; }
+}
 
 /* ---------- the festival raffle's draw (main.ts buyTicket) ---------- */
 /* Ten pips to the ticket that always wins; the last one is a gold star-ish square. */
@@ -1062,13 +1083,19 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
   background: var(--paper-2); border: 2px dashed var(--cream-2); border-radius: 14px;
   transition: background .15s, border-color .15s;
 }
-.store-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+/* One short row, so the room keeps most of its height while arranging. The
+   picked piece's Flip and Put away (or Dig a new room) sit at the heading's end. */
+.store-zone { padding: 4px 10px 6px; gap: 2px; }
+.store-head { display: flex; align-items: center; gap: 8px; min-height: 36px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
 .store-drop { display: none; color: var(--carrot); }
-/* the same height empty or full, so the room above doesn't jump as pieces go in and out */
-.store-zone { min-height: 138px; }
-.store-empty { margin: 0; flex: 1 1 auto; display: flex; align-items: center; font-size: 13px; color: var(--ink-2); }
+.store-btns { margin-left: auto; display: flex; gap: 6px; text-transform: none; letter-spacing: 0; }
+/* the same height empty or full (the empty line is a piece's height), so the room above doesn't jump */
+.store-empty { margin: 0; flex: 1 1 auto; display: flex; align-items: center; min-height: 74px; font-size: 13px; color: var(--ink-2); }
 .store-zone .tray { padding-bottom: 4px; }
-.store-zone .titem { flex-basis: 96px; height: 96px; touch-action: pan-x; }
+.store-zone .titem { flex-basis: 78px; height: 74px; padding: 5px 4px; gap: 2px; border-width: 2px; touch-action: pan-x; }
+.store-zone .titem .nm { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+/* how many: in its aria-label, and a piece at a time comes out anyway */
+.store-zone .titem .pr { display: none; }
 /* a piece held over it goes in when let go */
 .panel.drop-hot .store-zone { background: #fbe0c0; border-color: var(--carrot); border-style: solid; }
 .panel.drop-hot .store-drop { display: inline; }
@@ -1076,8 +1103,10 @@ button.tchip { font: inherit; color: var(--ink); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .store-zone { transition: none; } }
 /* arranging: her needs and the goal aren't what you're doing, and the room needs the height */
 body.arranging-burrow .hud .needs, body.arranging-burrow .hud .goal-bar { display: none; }
-/* already arranging: the way in has nothing to do */
-body.arranging-burrow .arrange-btn { visibility: hidden; }
+/* already arranging: the way in has nothing to do, and Done takes its place */
+body.arranging-burrow .arrange-btn { display: none; }
+.hud .hud-done { display: none; min-height: 32px; border-width: 2px; box-shadow: 0 3px 0 #120c09; color: var(--ink); }
+body.arranging-burrow .hud .hud-done { display: inline-flex; }
 
 /* ---------- the Friends page's views ---------- */
 /* Today | Friends | Guest book, pinned to the top of the page as it scrolls */
@@ -1195,3 +1224,19 @@ button.chip:active { transform: translateY(1px); }
 /* Getting started: the next step, waiting for its day (starter.ts daysUntil) */
 .starter-card-btn.waiting { --ev: #ece4f6; }
 .starter-card.waiting { background: var(--paper); box-shadow: none; border-style: dashed; }
+
+/* ---------- a wide, short frame (the site's game frame on a laptop) ----------
+   The same column, but the room is height-bound there: every pixel of chrome
+   costs it width. The needs, the action buttons and the tabs go to one line
+   each. Last in the file so they win over the sizes above. */
+@media (min-width: 520px) and (max-height: 900px) {
+  .hud { padding-bottom: 8px; gap: 2px; }
+  .hud .need { flex-direction: row; align-items: center; gap: 6px; }
+  .hud .need .bar { flex: 1 1 auto; }
+  .panel { padding-top: 9px; padding-bottom: 10px; gap: 7px; }
+  .panel > .actions:not(.visit-care) > .act { height: 46px; flex-direction: row; gap: 8px; }
+  .panel > .actions:not(.visit-care) > .act img { transform: scale(.8); }
+  .tab { min-height: 38px; flex-direction: row; justify-content: center; align-items: center; gap: 6px; padding: 3px 6px; }
+  .tab-ico { height: 26px; }
+  .tab .badge { top: -4px; left: 4px; }
+}
