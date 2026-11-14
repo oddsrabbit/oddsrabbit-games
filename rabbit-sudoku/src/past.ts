@@ -46,6 +46,8 @@ export interface PastActions {
   filter(f: PastFilter): void;
   help(): void;
   settings(): void;
+  /** Today's board, from the header's trophy; null when this host has none. */
+  board: (() => void) | null;
 }
 
 const CHIPS: readonly [PastFilter, string][] = [

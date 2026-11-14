@@ -54,6 +54,8 @@ export interface PlayOptions {
   more?: () => void;
   /** The note marks a solved board, in green. */
   noteDone?: boolean;
+  /** The header's trophy: this puzzle's board. Left out when there's none. */
+  board?: () => void;
   /** The ✕'s label: where leaving goes. */
   exitLabel?: string;
   exit(): void;
@@ -112,7 +114,8 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   const tick = (): void => {
     clock.textContent = `${race ? '⏱ ' : ''}${formatTime(elapsedSec())}`;
   };
-  bar.append(el('h1', 'title', o.title), ...(showClock ? [clock] : []), tierChip, button('icon-button', '✕', () => o.exit(), o.exitLabel ?? 'Back home'));
+  const trophy = o.board ? [button('icon-button', '🏆', o.board, 'Leaderboard')] : [];
+  bar.append(el('h1', 'title', o.title), ...(showClock ? [clock] : []), tierChip, ...trophy, button('icon-button', '✕', () => o.exit(), o.exitLabel ?? 'Back home'));
   let ticker = showClock && !solvedNow ? window.setInterval(tick, 1000) : 0;
   const stopClock = (): void => {
     window.clearInterval(ticker);

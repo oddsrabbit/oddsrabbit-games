@@ -163,7 +163,7 @@ function scoreCell(label: string, value: string, end = false): HTMLElement {
  * it reads as home showing the list in place of today, as Word Rush's Casual
  * tab swaps today's board for its archive. Fill `sheet`, then append `screen`.
  */
-export function homeFrame(a: { help(): void; settings(): void }): { screen: HTMLElement; sheet: HTMLElement } {
+export function homeFrame(a: { help(): void; settings(): void; board?: (() => void) | null }): { screen: HTMLElement; sheet: HTMLElement } {
   const screen = el('div', 'screen-home');
   const band = el('div', 'band');
   band.innerHTML = BAND_SVG;
@@ -172,8 +172,11 @@ export function homeFrame(a: { help(): void; settings(): void }): { screen: HTML
   brand.append(el('span', 'brand-rabbit', 'Rabbit'), el('span', 'brand-sudoku', 'Sudoku'));
   const ears = el('span', 'brand-ears-wrap');
   ears.innerHTML = EARS_SVG;
-  // The ears first, so the card covers their bottoms.
-  bar.append(ears, brand, el('span', 'bar-space'), button('icon-button', '?', a.help, 'How to play'), button('icon-button', '⚙', a.settings, 'Settings'));
+  // The ears first, so the card covers their bottoms. The trophy opens today's
+  // board, in the header as in Word Rush and Rabbit Words; it's left out where
+  // the host serves no board.
+  const trophy = a.board ? [button('icon-button', '🏆', a.board, "Today's leaderboard")] : [];
+  bar.append(ears, brand, el('span', 'bar-space'), ...trophy, button('icon-button', '?', a.help, 'How to play'), button('icon-button', '⚙', a.settings, 'Settings'));
   const sheet = el('main', 'home-sheet');
   screen.append(band, bar, sheet);
   return { screen, sheet };
@@ -182,7 +185,7 @@ export function homeFrame(a: { help(): void; settings(): void }): { screen: HTML
 /** Renders home; returns a stop function for its countdown. */
 export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () => void {
   root.innerHTML = '';
-  const { screen, sheet } = homeFrame(a);
+  const { screen, sheet } = homeFrame({ ...a, board: d.board });
 
   // ----- today's puzzle -----
   const spot = el('section', 'spotlight');

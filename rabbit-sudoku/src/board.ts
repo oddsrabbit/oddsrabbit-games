@@ -94,7 +94,7 @@ export function friendsRaceLine(friends: { username: string; seconds: number }[]
  * Its header leads with you and the people you follow, and they're marked in
  * the list, so the top of the board isn't the first thing you read.
  */
-function raceTab(index: number): LeaderboardTab | null {
+function raceTab(index: number, past: boolean): LeaderboardTab | null {
   const or = OR();
   if (!or.capabilities.has('scores.top')) return null;
   const key = raceKey(index);
@@ -120,7 +120,7 @@ function raceTab(index: number): LeaderboardTab | null {
   return {
     id: 'race',
     label: 'Race',
-    emptyText: "Nobody has raced today's puzzle yet.",
+    emptyText: past ? 'Nobody raced this puzzle on its day.' : "Nobody has raced today's puzzle yet.",
     load: async () => {
       headline = '';
       friendsLine = '';
@@ -148,8 +148,14 @@ function raceTab(index: number): LeaderboardTab | null {
   };
 }
 
-/** Today's board. `tab: 'race'` opens on the race, e.g. after racing. */
-export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'race' } = {}): void {
+/**
+ * Day `index`'s board. `tab: 'race'` opens on the race, e.g. after racing.
+ * `past`: a day that's over (opened from a past puzzle), so the copy doesn't
+ * ask anyone to be first or to invite a friend to a day that can't be played
+ * for a place any more.
+ */
+export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'race'; past?: boolean } = {}): void {
+  const past = opts.past === true;
   const or = OR();
   const key = roundKey(index);
   const tabs: LeaderboardTab[] = [];
@@ -159,7 +165,7 @@ export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'ra
     tabs.push({
       id: 'everyone',
       label: 'Everyone',
-      emptyText: 'Nobody has played it yet. Be the first.',
+      emptyText: past ? 'Nobody played this puzzle on its day.' : 'Nobody has played it yet. Be the first.',
       load: () => or.scores.top({ roundKey: key, order: 'top', limit: BOARD_LIMIT }),
       // A place is pinned for a solve only: an unsolved row holds none.
       ...(or.capabilities.has('scores.rank')
@@ -178,12 +184,16 @@ export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'ra
     tabs.push({
       id: 'friends',
       label: 'Friends',
-      emptyText: invite,
-      emptyPrompt: {
-        blurb: invite,
-        label: 'Invite a friend',
-        onClick: () => void or.actions.share({ text: `Solve today's Rabbit Sudoku with me. ${SHARE_URL}` }).catch(() => undefined),
-      },
+      emptyText: past ? 'Nobody you follow played this puzzle on its day.' : invite,
+      ...(past
+        ? {}
+        : {
+            emptyPrompt: {
+              blurb: invite,
+              label: 'Invite a friend',
+              onClick: () => void or.actions.share({ text: `Solve today's Rabbit Sudoku with me. ${SHARE_URL}` }).catch(() => undefined),
+            },
+          }),
       load: () => or.scores.friends({ roundKey: key }).then(friendsRows),
       ...shared,
       signInPrompt: or.user
@@ -191,11 +201,11 @@ export function showSolvers(index: number, canSignIn: boolean, opts: { tab?: 'ra
         : {
             blurb: 'Sign in to see how the people you follow did.',
             label: 'Sign in',
-            onClick: () => void or.actions.requestSignIn('See how your friends did on today’s sudoku'),
+            onClick: () => void or.actions.requestSignIn(past ? 'See how your friends did on this sudoku' : 'See how your friends did on today’s sudoku'),
           },
     });
   }
-  const race = raceTab(index);
+  const race = raceTab(index, past);
   if (race) tabs.push(race);
   if (!tabs.length) return;
 

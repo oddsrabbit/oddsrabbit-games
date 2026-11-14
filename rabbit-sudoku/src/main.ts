@@ -176,6 +176,9 @@ async function upgradeLaunchRow(): Promise<void> {
 // ---------- the race ----------
 
 /** Racing needs a signed-in player and score rows: the server times it. */
+/** Whether this host can ask a guest to sign in (the board's Friends tab needs it). */
+const canSignInHere = (): boolean => OR().capabilities.has('actions.requestSignIn');
+
 const canRace = (): boolean => OR().user !== null && OR().capabilities.has('scores.submit');
 
 /** How home shows today's race, from today's save (null when there's none yet). */
@@ -412,6 +415,8 @@ async function play(): Promise<void> {
     saved: mine,
     settings,
     ...(racing ? { race: { startedAt: racing.startedAt, now: serverNow, leave: confirmLeave } } : {}),
+    // Mid-race it opens on the race, the board being raced for.
+    ...(hasBoard(canSignInHere()) ? { board: () => showSolvers(n, canSignInHere(), racing ? { tab: 'race' } : {}) } : {}),
     save: (s) => {
       persist(s);
       if (touched(s, givens)) void sendStart(n, s);
@@ -479,6 +484,7 @@ async function showPast(): Promise<void> {
       },
       help: () => showHelp(),
       settings: showSettings,
+      board: hasBoard(canSignInHere()) ? () => showSolvers(index, canSignInHere()) : null,
     }
   );
   window.scrollTo({ top: 0 });
@@ -541,6 +547,8 @@ async function playArchive(n: number, from: Origin): Promise<void> {
     note,
     noteDone: solvedBoard,
     exitLabel: from === 'past' ? 'Back to past puzzles' : 'Back home',
+    // That day's board, as it closed. Practice here writes no row to it.
+    ...(hasBoard(canSignInHere()) ? { board: () => showSolvers(n, canSignInHere(), { past: n < index }) } : {}),
     givens: past.givens,
     saved,
     settings,
