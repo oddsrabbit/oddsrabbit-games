@@ -12,13 +12,18 @@ The client has two screens:
   solved it, and a countdown to the next puzzle. The friends card opens the day's
   board, as does *See how everyone did* on the solved sheet.
 - **Play:** the grid, Undo, Erase, Notes and Hint, and a row-of-nine pad.
-- **Past puzzles** (`src/past.ts`): every earlier Daily, newest first, with
-  its difficulty and status (solved, in progress, not played). It opens from a
-  card on home, and the week strip's earlier days open straight into their
-  puzzle. A past day is practice: no score row, no streak, saved under
-  `archive-N` once touched. A solved one shows *Play again*. A Daily left
-  unfinished when its day ends moves to its `archive-N` save, so it can be
-  finished later.
+- **Past puzzles** (`src/past.ts`): every earlier Daily, newest first, as
+  Word Rush does its archive. *Play past puzzles →* under today's card swaps
+  home's sheet for the list (*Back to today* swaps it back). Each row has a
+  miniature of the board (givens grey, your digits blue, solved green), its
+  date and difficulty, and its status: *Play ›*, *N to go* or *Solved ✓*.
+  Chips filter it to All, Unsolved or Solved (solved on the day or from the
+  archive). A day's givens load over the network only as its row nears the
+  screen. A row, or an earlier day in the week strip, opens straight onto the
+  board. A past day is practice: no score row, no streak, saved under
+  `archive-N` once touched; the note over the board says so. A solved one
+  shows *Play again* and *More past puzzles*. A Daily left unfinished when its
+  day ends moves to its `archive-N` save, so it can be finished later.
 
 It also has settings (vibration on touch devices only), help and the solved
 sheet.

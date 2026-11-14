@@ -2,7 +2,7 @@
 // the puzzle, sends the solve, runs the opt-in race (race.ts), and owns help,
 // settings and the day rolling over.
 
-import { ARCHIVE_PLAYED_KEY, archiveDate, archiveIntent, archiveKey, PAST_PAGE, pastDays, pastStatus, parseArchivePlayed, unsolvedPast, withArchivePlayed } from './archive';
+import { ARCHIVE_PLAYED_KEY, archiveIntent, archiveKey, PAST_PAGE, pastPage, pastStatus, parseArchivePlayed, shortDate, solvedPast, withArchivePlayed, type PastFilter } from './archive';
 import { friendsRows, hasBoard, isSolvedRow, showSolvers, solveScore, UNSOLVED_SCORE } from './board';
 import { renderHome, TIER_NAME, type PlayState, type RaceHome, type Solvers } from './home';
 import { renderPast } from './past';
@@ -37,8 +37,9 @@ let dailyRace: RaceState | null = null;
 let stopHome = (): void => undefined;
 /** On the Past puzzles list: the day rolling over waits until the player leaves it. */
 let onPast = false;
-/** How many past days the list shows; kept while the player dips into one and back. */
+/** How many past days the list shows, and its chip; kept while the player dips into one and back. */
 let pastShown = PAST_PAGE;
+let pastFilter: PastFilter = 'all';
 /**
  * Bumped by every screen change. A past day loads over the network, so one
  * that lands after the player has moved on (or tapped again) is dropped.
@@ -335,7 +336,7 @@ async function showHome(): Promise<void> {
   stopHome();
   if (!day) return renderUnavailable();
   const signedIn = OR().user !== null;
-  const [saved, archivePlayed] = await Promise.all([readJson<DailySave | null>('daily', null), readJson<unknown>(ARCHIVE_PLAYED_KEY, null)]);
+  const saved = await readJson<DailySave | null>('daily', null);
   const today = saved?.index === index ? saved : null;
   const date = new Date(EPOCH_MS + index * DAY_MS);
   const monday = index - ((date.getUTCDay() + 6) % 7);
@@ -369,7 +370,7 @@ async function showHome(): Promise<void> {
       board: hasBoard(canSignIn) ? () => showSolvers(index, canSignIn) : null,
       nextIn: () => EPOCH_MS + (index + 1) * DAY_MS - serverNow(),
       race: raceHomeFor(today),
-      pastUnsolved: index > 0 ? unsolvedPast(index, stats.solvedDays, parseArchivePlayed(archivePlayed)) : null,
+      hasPast: index > 0,
     },
     {
       play: () => void play(),
@@ -432,31 +433,52 @@ async function play(): Promise<void> {
   });
 }
 
-/** The Past puzzles list: every earlier day, newest first. */
+/** The Past puzzles list, in place of home's content: every earlier day, newest first. */
 async function showPast(): Promise<void> {
   navTicket++;
   playing = null;
   stopHome();
   onPast = true;
-  delete document.documentElement.dataset.screen;
+  // Home's band stays up, so the status bar sits on it as on home.
+  document.documentElement.dataset.screen = 'home';
   const archivePlayed = parseArchivePlayed(await readJson<unknown>(ARCHIVE_PLAYED_KEY, null));
-  const days = pastDays(index, pastShown);
-  renderPast(
+  const solved = solvedPast(index, stats.solvedDays, archivePlayed);
+  const { days, more } = pastPage(index, pastShown, pastFilter, solved);
+  stopHome = renderPast(
     app,
     {
+      today: index,
       days,
-      more: days.length > 0 && days[days.length - 1]! > 0,
+      more,
+      filter: pastFilter,
+      counts: { all: index, unsolved: index - solved.size, solved: solved.size },
       tierOf: dailyTierFor,
-      statusOf: async (n) => pastStatus(n, stats.solvedDays, archivePlayed, await readJson<SavedPlay | null>(archiveKey(n), null)),
+      rowOf: async (n) => {
+        const save = await readJson<SavedPlay | null>(archiveKey(n), null);
+        return { status: pastStatus(n, stats.solvedDays, archivePlayed, save), values: typeof save?.values === 'string' ? save.values : null };
+      },
+      givensOf: async (n) => (await loadPast(n))?.givens ?? null,
     },
     {
       open: (n) => void playArchive(n, 'past'),
-      back: () => void showHome(),
+      back: () => {
+        pastShown = PAST_PAGE;
+        pastFilter = 'all';
+        void showHome();
+      },
       more: () => {
         pastShown += PAST_PAGE;
         const y = window.scrollY;
         void showPast().then(() => window.scrollTo({ top: y }));
       },
+      filter: (f) => {
+        pastFilter = f;
+        pastShown = PAST_PAGE;
+        const y = window.scrollY;
+        void showPast().then(() => window.scrollTo({ top: y }));
+      },
+      help: () => showHelp(),
+      settings: showSettings,
     }
   );
   window.scrollTo({ top: 0 });
@@ -505,11 +527,20 @@ async function playArchive(n: number, from: Origin): Promise<void> {
   const givens = formatGrid(parseGrid(past.givens)!);
   // Saved only once touched, so opening a day for a look doesn't mark it in progress.
   let kept = saved !== null;
-  const note = !saved && stats.solvedDays.includes(n) ? `${archiveDate(n)} · You solved it on the day` : `${archiveDate(n)} · Archive`;
+  // Over the board: which day, and that it's practice, since nothing else says so.
+  const date = shortDate(n, index);
+  const solvedBoard = saved?.solved === true;
+  const note = solvedBoard
+    ? `${date} · Solved ✓`
+    : !saved && stats.solvedDays.includes(n)
+      ? `${date} · You solved it on the day. This time it's practice.`
+      : `${date} · Practice: no score, and your streak stays as it is`;
   playing = mountPlay(app, {
     title: `Daily #${n + 1}`,
     tier: TIER_NAME[tier],
     note,
+    noteDone: solvedBoard,
+    exitLabel: from === 'past' ? 'Back to past puzzles' : 'Back home',
     givens: past.givens,
     saved,
     settings,
@@ -536,6 +567,7 @@ async function playArchive(n: number, from: Origin): Promise<void> {
       writeJson(key, null);
       void playArchive(n, from);
     },
+    more: () => void leave('past'),
     exit: () => void leave(from),
   });
 }

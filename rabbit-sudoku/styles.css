@@ -458,40 +458,83 @@ button.day:active .day-mark { transform: scale(0.94); }
 .solvers-sub:empty { display: none; }
 .solvers-sub { font-size: 13px; }
 .solvers-more { flex: none; font-size: 13px; font-weight: 700; color: var(--accent); }
-button.solvers:active, .past-entry:active { background: var(--peer); }
-/* Home's way into every past puzzle: the same card as who solved it. */
-.past-entry { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: inherit; }
+button.solvers:active { background: var(--peer); }
+/* Home's way into every past puzzle: one text link under today's card, as
+   Word Rush has it, so it never competes with Play. */
+.past-link {
+  display: block;
+  margin: 2px auto -6px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+.past-link:active { opacity: 0.7; }
 /* The shared board's modal, in this game's type. */
 .lb-modal { border-radius: 20px; }
 .lb-modal-title { font-family: var(--display); font-weight: 800; }
 .foot { margin: 18px 4px 0; text-align: center; font-size: 13px; }
 
-/* ---------- past puzzles ---------- */
-.past {
-  flex: 1;
-  padding: 4px calc(14px + var(--oddsrabbit-safe-right, 0px)) calc(24px + var(--oddsrabbit-safe-bottom, 0px)) calc(14px + var(--oddsrabbit-safe-left, 0px));
+/* ---------- past puzzles: in home's sheet, in place of today ---------- */
+.past-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.past-title { flex: 1; min-width: 0; margin: 0; font-family: var(--display); font-size: 22px; font-weight: 800; }
+.past-back { flex: none; min-height: 40px; padding: 0 16px; border-radius: 999px; font-size: 14px; font-weight: 700; }
+.past-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  font-size: 14px;
+  font-weight: 700;
 }
-.past-intro { margin: 0 4px 12px; font-size: 14px; }
+.chip-unsolved { color: var(--accent); }
+.chip-solved { color: var(--turn); }
+.chip.is-on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 .past-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .past-row {
   width: 100%;
-  min-height: 64px;
+  min-height: 76px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding: 10px 14px 10px 10px;
   border-radius: 14px;
   border: 1px solid var(--line);
   background: var(--card);
   text-align: left;
 }
 .past-row:active { background: var(--peer); }
-.past-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.past-name { font-family: var(--display); font-size: 18px; font-weight: 800; }
+/* The board in miniature: givens grey, your digits blue, a solved one green. */
+.past-thumb {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
+  gap: 1px;
+  width: 54px;
+  height: 54px;
+  padding: 2px;
+  border: 2px solid var(--box-line);
+  border-radius: 8px;
+  background: var(--cell-line);
+}
+.past-thumb span { border-radius: 1px; background: var(--cell); }
+.past-thumb .pt-given { background: color-mix(in srgb, var(--ink) 40%, var(--cell)); }
+.past-thumb .pt-mine { background: color-mix(in srgb, var(--entered-ink) 45%, var(--cell)); }
+.past-thumb .pt-done { background: color-mix(in srgb, var(--turn) 55%, var(--cell)); }
+.past-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.past-name { font-family: var(--display); font-size: 18px; font-weight: 800; line-height: 1.1; }
+.past-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .past-date { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.past-status { flex: none; min-width: 76px; text-align: right; font-size: 13px; font-weight: 700; color: var(--accent); }
-.past-status.is-solved { color: var(--turn); }
-.past-status.is-progress { color: var(--ink); }
+.past-meta .tier { padding: 2px 8px; font-size: 11px; }
+.past-status { flex: none; text-align: right; font-size: 13px; font-weight: 700; color: var(--accent); }
+.past-status.is-solved { color: var(--turn); font-weight: 800; }
+.past-status.is-progress { color: var(--entered-ink); }
 .past-more { display: block; width: 100%; margin-top: 12px; padding: 13px 16px; font-size: 16px; }
 
 /* ---------- play ---------- */
@@ -503,6 +546,10 @@ button.solvers:active, .past-entry:active { background: var(--peer); }
   gap: 12px;
 }
 .play-note { margin: 0 auto; max-width: 480px; text-align: center; font-size: 13px; font-weight: 700; color: var(--muted); }
+.play-note.is-done { color: var(--turn); }
+/* Under a solved past board: start over, or on to the list. */
+.play-again { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.play-more { min-height: 44px; padding: 0 12px; text-decoration: none; }
 .board {
   display: grid;
   grid-template-columns: repeat(9, 1fr);

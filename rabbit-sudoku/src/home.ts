@@ -38,8 +38,8 @@ export interface HomeData {
   best: number;
   /** Monday to Sunday of this week. */
   week: { index: number; label: string; tier: Tier; solved: boolean; today: boolean; future: boolean }[];
-  /** Past days never solved, for the Past puzzles card; null before there are any past days. */
-  pastUnsolved: number | null;
+  /** There are past days, so the Past puzzles link shows. */
+  hasPast: boolean;
   /**
    * Who has solved today's: friends' names (null with no friends list here)
    * and how many players in all (null when the host can't say). Null when
@@ -157,11 +157,14 @@ function scoreCell(label: string, value: string, end = false): HTMLElement {
   return cell;
 }
 
-/** Renders home; returns a stop function for its countdown. */
-export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () => void {
-  root.innerHTML = '';
+/**
+ * Home's frame: the band, the header with the title card, and the sheet pulled
+ * up over the band. The Past puzzles list (past.ts) fills the same sheet, so
+ * it reads as home showing the list in place of today, as Word Rush's Casual
+ * tab swaps today's board for its archive. Fill `sheet`, then append `screen`.
+ */
+export function homeFrame(a: { help(): void; settings(): void }): { screen: HTMLElement; sheet: HTMLElement } {
   const screen = el('div', 'screen-home');
-
   const band = el('div', 'band');
   band.innerHTML = BAND_SVG;
   const bar = el('header', 'bar');
@@ -171,8 +174,15 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   ears.innerHTML = EARS_SVG;
   // The ears first, so the card covers their bottoms.
   bar.append(ears, brand, el('span', 'bar-space'), button('icon-button', '?', a.help, 'How to play'), button('icon-button', '⚙', a.settings, 'Settings'));
-
   const sheet = el('main', 'home-sheet');
+  screen.append(band, bar, sheet);
+  return { screen, sheet };
+}
+
+/** Renders home; returns a stop function for its countdown. */
+export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () => void {
+  root.innerHTML = '';
+  const { screen, sheet } = homeFrame(a);
 
   // ----- today's puzzle -----
   const spot = el('section', 'spotlight');
@@ -240,6 +250,9 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
   };
 
   sheet.append(spot);
+  // Every earlier Daily, behind one link under today's card (Word Rush's way),
+  // so the way in never competes with today's Play.
+  if (d.hasPast) sheet.appendChild(button('past-link', 'Play past puzzles →', a.past));
 
   // ----- the week and friends -----
   sheet.appendChild(el('h2', 'group-title', 'This week'));
@@ -276,20 +289,8 @@ export function renderHome(root: HTMLElement, d: HomeData, a: HomeActions): () =
       if (d.board) card.setAttribute('aria-label', `${first.textContent} ${second.textContent} See who solved it.`.trim());
     });
   }
-  // Every earlier Daily: below today's friends, since today comes first.
-  if (d.pastUnsolved !== null) {
-    const card = button('notice past-entry', '', a.past);
-    const lines = el('span', 'solvers-lines');
-    lines.append(
-      el('span', 'solvers-main', 'Past puzzles'),
-      el('span', 'solvers-sub muted', d.pastUnsolved ? `${d.pastUnsolved} you haven't solved yet` : "You've solved every one. Play any again.")
-    );
-    card.append(lines, el('span', 'solvers-more', 'See all ›'));
-    sheet.appendChild(card);
-  }
   sheet.appendChild(el('p', 'foot muted', 'A new puzzle every day at midnight UTC: easy on Monday, hardest on Saturday.'));
 
-  screen.append(band, bar, sheet);
   root.appendChild(screen);
   return stop;
 }

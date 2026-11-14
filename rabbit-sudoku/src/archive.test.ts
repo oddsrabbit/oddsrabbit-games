@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { archiveDate, archiveIntent, archiveKey, parseArchivePlayed, pastDays, pastStatus, unsolvedPast, withArchivePlayed } from './archive';
+import { archiveIntent, archiveKey, cellsToGo, parseArchivePlayed, pastPage, pastStatus, shortDate, solvedPast, withArchivePlayed } from './archive';
 
 test('archiveIntent opens only a past day', () => {
   const play = (roundKey: unknown) => ({ target: 'play', roundKey });
@@ -30,11 +30,8 @@ test('archive-played merges, dedupes and sorts', () => {
   assert.deepEqual(parseArchivePlayed([2, 0]), [0, 2]);
 });
 
-test('archive keys and dates', () => {
+test('archive keys', () => {
   assert.equal(archiveKey(4), 'archive-4');
-  // puzzle-0 is launch day, Monday 2026-11-09.
-  assert.equal(archiveDate(0), 'Monday, Nov 9, 2026');
-  assert.equal(archiveDate(6), 'Sunday, Nov 15, 2026');
 });
 
 test('a past day is solved however it was solved, else in progress with a save', () => {
@@ -48,14 +45,33 @@ test('a past day is solved however it was solved, else in progress with a save',
 });
 
 test('the past list runs newest first and pages', () => {
-  assert.deepEqual(pastDays(0, 30), []);
-  assert.deepEqual(pastDays(4, 30), [3, 2, 1, 0]);
-  assert.deepEqual(pastDays(100, 3), [99, 98, 97]);
+  const none = new Set<number>();
+  assert.deepEqual(pastPage(0, 30, 'all', none), { days: [], more: false });
+  assert.deepEqual(pastPage(4, 30, 'all', none), { days: [3, 2, 1, 0], more: false });
+  assert.deepEqual(pastPage(100, 3, 'all', none), { days: [99, 98, 97], more: true });
+  // Exactly a page left: nothing older.
+  assert.deepEqual(pastPage(3, 3, 'all', none), { days: [2, 1, 0], more: false });
 });
 
-test('unsolved past days count each day once and ignore today and later', () => {
-  assert.equal(unsolvedPast(0, [], []), 0);
-  assert.equal(unsolvedPast(5, [], []), 5);
-  assert.equal(unsolvedPast(5, [0, 1], [1, 2]), 2);
-  assert.equal(unsolvedPast(5, [5, 6], [9]), 5);
+test('the chips filter the whole history, not just the page shown', () => {
+  const solved = solvedPast(10, [9, 7, 1], [8, 7]);
+  assert.deepEqual([...solved].sort(), [1, 7, 8, 9]);
+  assert.deepEqual(pastPage(10, 30, 'solved', solved), { days: [9, 8, 7, 1], more: false });
+  assert.deepEqual(pastPage(10, 30, 'unsolved', solved), { days: [6, 5, 4, 3, 2, 0], more: false });
+  assert.deepEqual(pastPage(10, 2, 'unsolved', solved), { days: [6, 5], more: true });
+  // Today and later never count, nor anything malformed.
+  assert.deepEqual([...solvedPast(5, [5, 6, 2], [-1, 1.5, 3])].sort(), [2, 3]);
+});
+
+test('short dates drop the year within the same year', () => {
+  // puzzle-0 is launch day, Monday 2026-11-09.
+  assert.equal(shortDate(6, 25), 'Sun, Nov 15');
+  assert.equal(shortDate(19, 25), 'Sat, Nov 28');
+  assert.equal(shortDate(0, 400), 'Mon, Nov 9, 2026');
+});
+
+test('cells to go count the empty cells of a saved board', () => {
+  assert.equal(cellsToGo('.'.repeat(81)), 81);
+  assert.equal(cellsToGo('5'.repeat(81)), 0);
+  assert.equal(cellsToGo(`12.4${'.'.repeat(77)}`), 78);
 });

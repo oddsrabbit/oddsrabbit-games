@@ -50,6 +50,12 @@ export interface PlayOptions {
   solved(state: SavedPlay): void;
   /** Offered under a solved board: start the puzzle over (past days only). */
   replay?: () => void;
+  /** Under Play again: on to the Past puzzles list (past days only). */
+  more?: () => void;
+  /** The note marks a solved board, in green. */
+  noteDone?: boolean;
+  /** The ✕'s label: where leaving goes. */
+  exitLabel?: string;
   exit(): void;
 }
 
@@ -106,7 +112,7 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
   const tick = (): void => {
     clock.textContent = `${race ? '⏱ ' : ''}${formatTime(elapsedSec())}`;
   };
-  bar.append(el('h1', 'title', o.title), ...(showClock ? [clock] : []), tierChip, button('icon-button', '✕', () => o.exit(), 'Back home'));
+  bar.append(el('h1', 'title', o.title), ...(showClock ? [clock] : []), tierChip, button('icon-button', '✕', () => o.exit(), o.exitLabel ?? 'Back home'));
   let ticker = showClock && !solvedNow ? window.setInterval(tick, 1000) : 0;
   const stopClock = (): void => {
     window.clearInterval(ticker);
@@ -159,10 +165,15 @@ export function mountPlay(root: HTMLElement, o: PlayOptions): PlayScreen {
     pad.appendChild(k);
   }
 
-  // A solved past day, reopened: one way forward, starting over.
-  const again = o.replay ? button('primary big play-again', 'Play again', o.replay) : null;
+  // A solved past day, reopened: start over, or on to another past day.
+  let again: HTMLElement | null = null;
+  if (o.replay) {
+    again = el('div', 'play-again');
+    again.appendChild(button('primary big', 'Play again', o.replay));
+    if (o.more) again.appendChild(button('link-button play-more', '← More past puzzles', o.more));
+  }
 
-  if (o.note) main.appendChild(el('p', 'play-note', o.note));
+  if (o.note) main.appendChild(el('p', `play-note${o.noteDone ? ' is-done' : ''}`, o.note));
   main.append(board, hintBox, ...(again ? [again] : []), tools, pad);
   root.append(bar, main);
 

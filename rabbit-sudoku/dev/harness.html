@@ -123,7 +123,7 @@ frame.addEventListener('load', () => {
   };
   if (open) setTimeout(tryOpen, 300);
   const tryPast = () => {
-    const entry = frame.contentDocument.querySelector('.past-entry');
+    const entry = frame.contentDocument.querySelector('.past-link');
     if (entry) entry.click();
     else if (tries++ < 30) setTimeout(tryPast, 200);
   };

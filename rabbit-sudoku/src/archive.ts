@@ -39,12 +39,6 @@ export function withArchivePlayed(raw: unknown, n: number): number[] {
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** e.g. "Monday, Nov 16, 2026", the UTC day the puzzle was the Daily. */
-export function archiveDate(n: number): string {
-  const d = new Date(EPOCH_MS + n * DAY_MS);
-  return `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
-}
-
 // ---------- the in-app list of past puzzles ----------
 
 /** How a past day shows in the list. */
@@ -62,18 +56,42 @@ export function pastStatus(n: number, solvedDays: readonly number[], archivePlay
   return solvedDays.includes(n) || archivePlayed.includes(n) ? 'solved' : 'new';
 }
 
+/** e.g. "Sat, Nov 28" for the list and the play note; the year only when it isn't `today`'s. */
+export function shortDate(n: number, today: number): string {
+  const d = new Date(EPOCH_MS + n * DAY_MS);
+  const year = d.getUTCFullYear() === new Date(EPOCH_MS + today * DAY_MS).getUTCFullYear() ? '' : `, ${d.getUTCFullYear()}`;
+  return `${WEEKDAYS[d.getUTCDay()]!.slice(0, 3)}, ${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${year}`;
+}
+
+/** Empty cells left on a saved board (`.` in its text form): the list's "41 to go". */
+export function cellsToGo(values: string): number {
+  let n = 0;
+  for (const ch of values) if (ch === '.') n++;
+  return n;
+}
+
 /** The list pages in this many days at a time. */
 export const PAST_PAGE = 30;
 
-/** The past days to list, newest first: the `shown` most recent before `today`. */
-export function pastDays(today: number, shown: number): number[] {
-  const days: number[] = [];
-  for (let n = today - 1; n >= 0 && days.length < shown; n--) days.push(n);
-  return days;
+/** The list's chips. Solved means ever solved: on the day or from the archive. */
+export type PastFilter = 'all' | 'unsolved' | 'solved';
+
+/** The past days ever solved, on the day (stats) or from the archive (`archive-played`). */
+export function solvedPast(today: number, solvedDays: readonly number[], archivePlayed: readonly number[]): Set<number> {
+  return new Set([...solvedDays, ...archivePlayed].filter((n) => Number.isInteger(n) && n >= 0 && n < today));
 }
 
-/** How many past days were never solved, either on the day or from the archive. */
-export function unsolvedPast(today: number, solvedDays: readonly number[], archivePlayed: readonly number[]): number {
-  const solved = new Set([...solvedDays, ...archivePlayed].filter((n) => n >= 0 && n < today));
-  return Math.max(0, today - solved.size);
+/**
+ * One page of the list, newest first: the `shown` most recent days before
+ * `today` that the filter keeps, and whether older ones are left.
+ */
+export function pastPage(today: number, shown: number, filter: PastFilter, solved: ReadonlySet<number>): { days: number[]; more: boolean } {
+  const keep = (n: number): boolean => filter === 'all' || (filter === 'solved') === solved.has(n);
+  const days: number[] = [];
+  for (let n = today - 1; n >= 0; n--) {
+    if (!keep(n)) continue;
+    if (days.length === shown) return { days, more: true };
+    days.push(n);
+  }
+  return { days, more: false };
 }
