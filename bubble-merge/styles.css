@@ -1,0 +1,157 @@
+/* Bubble Merge: layout B from the round 7 mocks. The scene fills the screen,
+   and the HUD floats over it as soft white pills; the pause, game-over and
+   share cards are white and rounded to match. One look in both host themes:
+   each scene sets its own background. */
+:root {
+  color-scheme: light;
+  --ink: #3F3550;          /* text on white: 11:1 */
+  --muted: #6E6385;        /* secondary text on white: 5.6:1 */
+  --pill: rgba(255, 255, 255, 0.84);
+  --pill-label: #7A6E92;   /* small caps in a pill: 4.6:1 on its white */
+  --accent: #6E55D6;       /* primary buttons, white text on it: 5.6:1 */
+  --accent-soft: #EFEBFA;
+  --joy: #D6336C;
+  --scrim: rgba(30, 20, 50, 0.45);
+  --body: ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI", system-ui, sans-serif;
+  /* The shared leaderboard modal (../leaderboard-v1.css) reads these, as in 2048. */
+  --lb-surface: #FFFFFF;
+  --lb-text: var(--ink);
+  --lb-muted: var(--muted);
+  --lb-border: rgba(63, 53, 80, 0.12);
+  --lb-accent: var(--accent);
+  --lb-accent-text: #FFFFFF;
+  --lb-scrim: var(--scrim);
+  --lb-you-bg: rgba(110, 85, 214, 0.12);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: #EDE3F6; /* replaced by the scene's colour */
+  color: var(--ink);
+  font: 15px/1.4 var(--body);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+canvas, button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.label { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+
+/* Phone-shaped everywhere: a centred column on wide screens. */
+#app { height: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; }
+
+/* ---------- field ---------- */
+.field { flex: 1 1 auto; min-height: 0; position: relative; }
+.field canvas#board { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+
+/* ---------- HUD ---------- */
+/* Floats over the scene. Its first row is the header row, beside the app's
+   back button (docs/game-header-guidelines.md). Taps between the pills fall
+   through to the board. */
+.hud { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; z-index: 2; }
+.hud-row {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  min-height: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 56px));
+  padding: var(--oddsrabbit-safe-top, 0px)
+           calc(12px + var(--oddsrabbit-safe-right, 0px))
+           0
+           calc(var(--oddsrabbit-chrome-start, 16px) + var(--oddsrabbit-safe-left, 0px));
+}
+.pill {
+  pointer-events: auto; position: relative;
+  height: 36px; padding: 0 12px; border: 0; border-radius: 18px;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--pill); color: var(--ink);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(40, 20, 60, 0.12);
+  font-size: 16px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+}
+/* Label then number on one line, as in 2048's chips. */
+.score-container::before, .best-container::before, .next-container::before {
+  font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--pill-label);
+}
+.score-container::before { content: "SCORE"; }
+.best-container::before { content: "BEST"; }
+.next-container::before { content: "NEXT"; }
+.score-container.bump { animation: bump 260ms ease-out; }
+@keyframes bump { 40% { transform: scale(1.08); } }
+.pill.icon { width: 36px; padding: 0; justify-content: center; }
+/* 36px to look at, 44px to hit. */
+.pill.icon::after { content: ""; position: absolute; inset: -4px; }
+.next-container { margin: 6px 0 0 calc(16px + var(--oddsrabbit-safe-left, 0px)); padding: 0 5px 0 12px; gap: 8px; }
+.next-container canvas { width: 26px; height: 26px; }
+
+.toast {
+  position: absolute; left: 50%; top: calc(var(--oddsrabbit-safe-top, 0px) + 112px); transform: translateX(-50%);
+  max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 22px;
+  background: var(--pill); color: var(--ink);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(40, 20, 60, 0.16);
+  font-size: 14px; font-weight: 800; text-align: center; white-space: nowrap;
+  opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 3;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(4px); }
+
+/* ---------- cards: pause, game over, share ---------- */
+.overlay, .share-backdrop {
+  position: fixed; inset: 0; z-index: 10;
+  background: var(--scrim);
+  display: flex; align-items: center; justify-content: center;
+  padding: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 0px) + 16px)
+           calc(16px + var(--oddsrabbit-safe-right, 0px))
+           calc(16px + var(--oddsrabbit-safe-bottom, 0px))
+           calc(16px + var(--oddsrabbit-safe-left, 0px));
+}
+.share-backdrop { z-index: 20; }
+.card {
+  width: min(400px, 100%); max-height: 100%; overflow: auto;
+  background: #FFFFFF; color: var(--ink); border-radius: 28px; padding: 24px 20px 20px;
+  box-shadow: 0 16px 48px rgba(30, 15, 50, 0.3);
+  display: flex; flex-direction: column; gap: 16px; text-align: center;
+}
+.card .title { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 900; letter-spacing: .01em; }
+.ov-body { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.ov-body p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.ov-body canvas { width: 120px; height: 120px; }
+.ov-buttons { display: flex; flex-direction: column; gap: 10px; }
+.btn {
+  min-height: 52px; padding: 0 18px; border: 0; border-radius: 26px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--accent-soft); color: var(--ink); font-weight: 800; font-size: 16px;
+}
+.btn.primary { background: var(--accent); color: #FFFFFF; box-shadow: 0 4px 12px rgba(110, 85, 214, 0.35); }
+.btn.small { min-height: 44px; font-size: 14px; padding: 0 10px; }
+.btn:active { transform: scale(0.98); }
+
+/* Game over: the SCORE line and NEW BEST! note the other games show. */
+.ov-body .final-score { font-size: 28px; font-weight: 900; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ov-body .new-best-note { font-size: 13px; font-weight: 800; letter-spacing: .08em; color: var(--muted); }
+.ov-body .new-best-note.is-new { color: var(--joy); }
+
+/* Settings: the scene picker in the pause card. */
+.setting { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.setting .label { color: var(--muted); }
+.seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 4px; background: var(--accent-soft); border-radius: 26px; }
+.seg-btn {
+  min-height: 44px; padding: 0 6px; border: 0; border-radius: 22px;
+  background: transparent; color: var(--muted); font-weight: 800; font-size: 14px;
+}
+.seg-btn[aria-pressed="true"] { background: #FFFFFF; color: var(--ink); box-shadow: 0 2px 8px rgba(40, 20, 60, 0.14); }
+
+/* Share: the same contents as the other games' share modal, in this card. */
+.share-card { gap: 12px; }
+.share-preview {
+  padding: 12px 14px; background: var(--accent-soft); border-radius: 16px;
+  font-size: 14px; line-height: 1.45; text-align: left; white-space: pre-wrap; word-break: break-word;
+}
+.share-label { margin: 4px 0 0; color: var(--muted); text-align: left; }
+.share-social { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .score-container.bump { animation: none; }
+  .toast { transition: none; }
+}

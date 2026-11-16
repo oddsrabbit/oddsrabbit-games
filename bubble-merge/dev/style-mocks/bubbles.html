@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glossy bubble mocks</title>
+<style>
+  body { margin: 0; background: #f7ead0; font: 13px system-ui, sans-serif; }
+  .row { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-bottom: 1px solid #d8c8a8; }
+  .row h2 { width: 70px; margin: 0; font-size: 13px; align-self: center; }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script type="application/json" id="out">{}</script>
+<script>
+// Smooth, see-through colour bubbles in the style of bubble games, one hue
+// per size around the colour wheel (red to pink). Rendered at 2x the size they
+// are on a 393 px phone (0.91 css px per world unit).
+const R = [17, 23, 30, 36, 44, 53, 62, 72, 84, 98, 116];
+const HUES = ['F25555', 'FF9838', 'FFD23F', 'A6DD4A', '45C46E', '2EC4B6', '4FB6F2', '4A78EE', '6A5CE0', 'A45EE0', 'F06AB8'];
+const SCALE = 0.91 * 2;
+
+const rgb = (h) => { const n = parseInt(h, 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+const mix = (c, t, w) => c.map((v, i) => Math.round(v + (t[i] - v) * w));
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const WHITE = [255, 255, 255], DARK = [30, 24, 40];
+
+function circle(x, cx, cy, r) { x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); }
+
+function shine(x, Rr, strength) {
+  // The big window reflection, top left, and a small dot under it.
+  x.save();
+  x.translate(-0.36 * Rr, -0.44 * Rr);
+  x.rotate(-0.62);
+  const g = x.createLinearGradient(0, -0.17 * Rr, 0, 0.17 * Rr);
+  g.addColorStop(0, `rgba(255,255,255,${0.95 * strength})`);
+  g.addColorStop(1, `rgba(255,255,255,${0.15 * strength})`);
+  x.beginPath();
+  x.ellipse(0, 0, 0.33 * Rr, 0.15 * Rr, 0, 0, Math.PI * 2);
+  x.fillStyle = g;
+  x.fill();
+  x.restore();
+  circle(x, -0.66 * Rr, -0.06 * Rr, 0.06 * Rr);
+  x.fillStyle = `rgba(255,255,255,${0.85 * strength})`;
+  x.fill();
+}
+
+function rimLight(x, Rr, a) {
+  // Light caught on the far inside edge, bottom right.
+  x.beginPath();
+  x.arc(0, 0, Rr * 0.82, 0.15, 1.35);
+  x.strokeStyle = `rgba(255,255,255,${a})`;
+  x.lineWidth = Rr * 0.07;
+  x.lineCap = 'round';
+  x.stroke();
+}
+
+const STYLES = {
+  // Clear in the middle, the colour gathering toward the edge, a crisp rim.
+  glass(x, Rr, c) {
+    const g = x.createRadialGradient(-0.25 * Rr, -0.3 * Rr, Rr * 0.05, 0, 0, Rr);
+    g.addColorStop(0, rgba(mix(c, WHITE, 0.5), 0.22));
+    g.addColorStop(0.6, rgba(c, 0.42));
+    g.addColorStop(0.92, rgba(c, 0.82));
+    g.addColorStop(1, rgba(mix(c, DARK, 0.25), 0.95));
+    circle(x, 0, 0, Rr);
+    x.fillStyle = g;
+    x.fill();
+    rimLight(x, Rr, 0.45);
+    shine(x, Rr, 1);
+    circle(x, 0, 0, Rr - Rr * 0.02);
+    x.strokeStyle = rgba(mix(c, DARK, 0.35), 0.9);
+    x.lineWidth = Math.max(1.5, Rr * 0.04);
+    x.stroke();
+  },
+  // Candy-like: mostly opaque, glowing from below, a gloss band across the top.
+  jelly(x, Rr, c) {
+    const g = x.createRadialGradient(0, 0.25 * Rr, Rr * 0.1, 0, 0, Rr);
+    g.addColorStop(0, rgba(mix(c, WHITE, 0.35), 0.9));
+    g.addColorStop(0.7, rgba(c, 0.9));
+    g.addColorStop(1, rgba(mix(c, DARK, 0.3), 0.95));
+    circle(x, 0, 0, Rr);
+    x.fillStyle = g;
+    x.fill();
+    // gloss band
+    x.save();
+    circle(x, 0, 0, Rr * 0.9);
+    x.clip();
+    const gb = x.createLinearGradient(0, -0.9 * Rr, 0, -0.2 * Rr);
+    gb.addColorStop(0, 'rgba(255,255,255,0.75)');
+    gb.addColorStop(1, 'rgba(255,255,255,0)');
+    x.beginPath();
+    x.ellipse(0, -0.52 * Rr, 0.68 * Rr, 0.36 * Rr, 0, 0, Math.PI * 2);
+    x.fillStyle = gb;
+    x.fill();
+    x.restore();
+    circle(x, -0.5 * Rr, -0.5 * Rr, 0.07 * Rr);
+    x.fillStyle = 'rgba(255,255,255,0.9)';
+    x.fill();
+    rimLight(x, Rr, 0.3);
+    circle(x, 0, 0, Rr - Rr * 0.025);
+    x.strokeStyle = rgba(mix(c, DARK, 0.45), 0.95);
+    x.lineWidth = Math.max(1.5, Rr * 0.05);
+    x.stroke();
+  },
+  // Nearly clear, a rainbow sheen on the rim and a coloured edge.
+  soap(x, Rr, c) {
+    circle(x, 0, 0, Rr);
+    x.fillStyle = rgba(c, 0.14);
+    x.fill();
+    const edge = x.createRadialGradient(0, 0, Rr * 0.62, 0, 0, Rr);
+    edge.addColorStop(0, rgba(c, 0));
+    edge.addColorStop(0.8, rgba(c, 0.45));
+    edge.addColorStop(1, rgba(c, 0.85));
+    x.fillStyle = edge;
+    x.fill();
+    if (x.createConicGradient) {
+      const cg = x.createConicGradient(0.6, 0, 0);
+      ['rgba(255,120,200,0.35)', 'rgba(255,230,120,0.3)', 'rgba(120,240,200,0.3)', 'rgba(120,170,255,0.35)', 'rgba(255,120,200,0.35)']
+        .forEach((s, i, a) => cg.addColorStop(i / (a.length - 1), s));
+      x.beginPath();
+      x.arc(0, 0, Rr * 0.94, 0, Math.PI * 2);
+      x.strokeStyle = cg;
+      x.lineWidth = Rr * 0.1;
+      x.stroke();
+    }
+    // two window reflections
+    x.save();
+    x.translate(-0.4 * Rr, -0.42 * Rr);
+    x.rotate(-0.7);
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    x.beginPath(); x.roundRect(-0.16 * Rr, -0.07 * Rr, 0.32 * Rr, 0.14 * Rr, 0.05 * Rr); x.fill();
+    x.beginPath(); x.roundRect(-0.1 * Rr, 0.11 * Rr, 0.2 * Rr, 0.08 * Rr, 0.03 * Rr); x.fill();
+    x.restore();
+    rimLight(x, Rr, 0.5);
+    circle(x, 0, 0, Rr - 1);
+    x.strokeStyle = rgba(mix(c, DARK, 0.2), 0.7);
+    x.lineWidth = Math.max(1.2, Rr * 0.022);
+    x.stroke();
+  },
+  // Glass, with a soft white rabbit floating inside.
+  glassbunny(x, Rr, c) {
+    const g = x.createRadialGradient(-0.25 * Rr, -0.3 * Rr, Rr * 0.05, 0, 0, Rr);
+    g.addColorStop(0, rgba(mix(c, WHITE, 0.5), 0.22));
+    g.addColorStop(0.6, rgba(c, 0.42));
+    g.addColorStop(0.92, rgba(c, 0.82));
+    g.addColorStop(1, rgba(mix(c, DARK, 0.25), 0.95));
+    circle(x, 0, 0, Rr);
+    x.fillStyle = g;
+    x.fill();
+    // rabbit: head and two ears, white, a little see-through
+    x.save();
+    x.fillStyle = 'rgba(255,255,255,0.7)';
+    x.beginPath();
+    x.ellipse(0, 0.16 * Rr, 0.36 * Rr, 0.3 * Rr, 0, 0, Math.PI * 2);
+    x.fill();
+    for (const s of [-1, 1]) {
+      x.save();
+      x.translate(s * 0.14 * Rr, -0.3 * Rr);
+      x.rotate(s * 0.18);
+      x.beginPath();
+      x.ellipse(0, 0, 0.09 * Rr, 0.28 * Rr, 0, 0, Math.PI * 2);
+      x.fill();
+      x.restore();
+    }
+    x.restore();
+    rimLight(x, Rr, 0.45);
+    shine(x, Rr, 1);
+    circle(x, 0, 0, Rr - Rr * 0.02);
+    x.strokeStyle = rgba(mix(c, DARK, 0.35), 0.9);
+    x.lineWidth = Math.max(1.5, Rr * 0.04);
+    x.stroke();
+  },
+};
+
+const out = {};
+const sheet = document.getElementById('sheet');
+for (const [name, draw] of Object.entries(STYLES)) {
+  out[name] = {};
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<h2>' + name + '</h2>';
+  R.forEach((r, t) => {
+    const Rr = r * SCALE;
+    const c = document.createElement('canvas');
+    c.width = c.height = Math.ceil(Rr * 2 + 4);
+    const x = c.getContext('2d');
+    x.translate(c.width / 2, c.height / 2);
+    draw(x, Rr, rgb(HUES[t]));
+    const url = c.toDataURL('image/png');
+    out[name][t] = url;
+    const im = new Image();
+    im.src = url;
+    im.style.width = c.width / 2 + 'px';
+    row.appendChild(im);
+  });
+  sheet.appendChild(row);
+}
+document.getElementById('out').textContent = JSON.stringify(out);
+</script>
+</body>
+</html>

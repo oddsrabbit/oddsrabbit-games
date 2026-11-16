@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bubble Merge icon mocks</title>
+<style>
+  body { margin: 0; background: #ddd; display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; align-items: flex-end; }
+  canvas { width: 256px; height: 256px; border-radius: 22%; }
+  .small { width: 60px; height: 60px; }
+</style>
+</head>
+<body>
+<script type="application/json" id="out">{}</script>
+<script src="../../js/pieces.js"></script>
+<script>
+// App icon ideas, 1024 px square, full bleed (the app masks the corners),
+// drawn with the game's own soap bubbles (js/pieces.js). Run make-icons.cjs to
+// write them to out/icons/, or open this page to compare them at 256 and 60 px.
+// Tiers: 0 red, 1 orange, 2 yellow, 3 lime, 4 green, 5 teal, 6 sky, 7 blue, 8 indigo, 9 purple, 10 pink.
+const S = 1024;
+
+function bubble(x, cx, cy, R, tier) {
+  x.save(); x.translate(cx, cy); RM.drawPiece(x, tier, R); x.restore();
+}
+function vgrad(x, stops) {
+  const g = x.createLinearGradient(0, 0, 0, S);
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+  x.fillStyle = g; x.fillRect(0, 0, S, S);
+}
+function rr(x, X, Y, w, h, r) { x.beginPath(); x.roundRect(X, Y, w, h, r); }
+function sparkle(x, cx, cy, r, color) {
+  x.save(); x.translate(cx, cy); x.fillStyle = color;
+  x.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, rad = i % 2 ? r * 0.28 : r;
+    x[i ? 'lineTo' : 'moveTo'](Math.cos(a - Math.PI / 2) * rad, Math.sin(a - Math.PI / 2) * rad);
+  }
+  x.closePath(); x.fill(); x.restore();
+}
+function rabbit(x, cx, cy, k, color) {
+  x.save(); x.translate(cx, cy); x.fillStyle = color;
+  x.beginPath(); x.ellipse(0, 0.16 * k, 0.4 * k, 0.33 * k, 0, 0, Math.PI * 2); x.fill();
+  for (const s of [-1, 1]) {
+    x.save(); x.translate(s * 0.15 * k, -0.33 * k); x.rotate(s * 0.16);
+    x.beginPath(); x.ellipse(0, 0, 0.1 * k, 0.31 * k, 0, 0, Math.PI * 2); x.fill();
+    x.restore();
+  }
+  x.restore();
+}
+
+const ICONS = {
+  // 1. The glass jar from the game, a pile inside and one waiting above.
+  jar(x) {
+    vgrad(x, ['#FBE3EE', '#E9E1F8', '#D9E7FB']);
+    x.fillStyle = 'rgba(255,255,255,0.35)'; rr(x, 196, 300, 632, 620, [20, 20, 90, 90]); x.fill();
+    bubble(x, 400, 740, 175, 9);
+    bubble(x, 690, 800, 115, 5);
+    bubble(x, 660, 615, 72, 2);
+    bubble(x, 520, 520, 48, 0);
+    x.lineWidth = 22; x.strokeStyle = 'rgba(255,255,255,0.95)';
+    rr(x, 196, 300, 632, 620, [20, 20, 90, 90]); x.stroke();
+    x.lineWidth = 6; x.strokeStyle = 'rgba(140,150,200,0.6)';
+    rr(x, 182, 286, 660, 648, [26, 26, 100, 100]); x.stroke();
+    x.fillStyle = 'rgba(255,255,255,0.6)'; rr(x, 232, 360, 22, 420, 11); x.fill();
+    x.fillStyle = '#FFFFFF'; x.strokeStyle = 'rgba(140,150,200,0.7)'; x.lineWidth = 6;
+    rr(x, 168, 262, 688, 52, 26); x.fill(); x.stroke();
+    bubble(x, 512, 150, 70, 1);
+  },
+  // 2. The merge itself: two of a colour meeting, with a pop.
+  merge(x) {
+    vgrad(x, ['#8E74E8', '#B993EE']);
+    // two teal touching at the top, the sky-blue they make below
+    bubble(x, 342, 330, 170, 5);
+    bubble(x, 682, 330, 170, 5);
+    bubble(x, 512, 765, 225, 6);
+    sparkle(x, 512, 330, 95, '#FFFFFF');
+    sparkle(x, 880, 560, 36, 'rgba(255,255,255,0.85)');
+    sparkle(x, 150, 600, 30, 'rgba(255,255,255,0.85)');
+  },
+  // 3. Three sizes in a row on the floor, small to big, the colours climbing the rainbow.
+  trio(x) {
+    vgrad(x, ['#FFF4EC', '#F1E8FB']);
+    x.fillStyle = 'rgba(110,85,214,0.10)'; x.beginPath(); x.ellipse(512, 900, 470, 40, 0, 0, Math.PI * 2); x.fill();
+    bubble(x, 150, 780, 95, 0);
+    bubble(x, 385, 715, 160, 5);
+    bubble(x, 735, 650, 225, 10);
+    sparkle(x, 880, 260, 46, '#F6C34A');
+  },
+  // 4. One big bubble with a rabbit inside: the family's rabbit, in this game's bubble.
+  bunny(x) {
+    vgrad(x, ['#F7C6DD', '#A08AEC']);
+    bubble(x, 512, 540, 340, 6);
+    rabbit(x, 512, 585, 420, 'rgba(255,255,255,0.92)');
+    bubble(x, 200, 220, 62, 2);
+    bubble(x, 860, 860, 80, 4);
+    bubble(x, 850, 190, 36, 0);
+  },
+  // 4b. Idea 4 without the rabbit: just the big bubble and a few small ones.
+  bubble(x) {
+    vgrad(x, ['#F7C6DD', '#A08AEC']);
+    bubble(x, 512, 540, 340, 6);
+    bubble(x, 200, 220, 62, 2);
+    bubble(x, 860, 860, 80, 4);
+    bubble(x, 850, 190, 36, 0);
+  },
+  // 5. Night sky: the glowing box and a pile of bubbles.
+  night(x) {
+    vgrad(x, ['#141A3A', '#2C2758']);
+    let seed = 9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 60; i++) { x.fillStyle = `rgba(255,255,255,${0.3 + rnd() * 0.6})`; x.beginPath(); x.arc(rnd() * S, rnd() * 330, rnd() < 0.2 ? 4 : 2, 0, Math.PI * 2); x.fill(); }
+    x.fillStyle = '#FFF4C8'; x.beginPath(); x.arc(840, 150, 56, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#161C3E'; x.beginPath(); x.arc(866, 132, 50, 0, Math.PI * 2); x.fill();
+    x.fillStyle = 'rgba(255,255,255,0.05)'; x.fillRect(190, 380, 644, 520);
+    bubble(x, 390, 730, 170, 9);
+    bubble(x, 680, 790, 110, 4);
+    bubble(x, 650, 610, 72, 2);
+    bubble(x, 470, 225, 62, 0);
+    x.save(); x.shadowColor = 'rgba(120,220,255,0.95)'; x.shadowBlur = 40;
+    x.strokeStyle = '#9FE8FF'; x.lineWidth = 16; x.lineJoin = 'round';
+    x.beginPath(); x.moveTo(184, 360); x.lineTo(184, 906); x.lineTo(840, 906); x.lineTo(840, 360); x.stroke();
+    x.restore();
+  },
+};
+
+const out = {};
+for (const [name, draw] of Object.entries(ICONS)) {
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  draw(c.getContext('2d'));
+  out[name] = c.toDataURL('image/png');
+  document.body.append(c);
+  const small = new Image(); small.src = out[name]; small.className = 'small'; small.style.borderRadius = '22%';
+  document.body.append(small);
+}
+document.getElementById('out').textContent = JSON.stringify(out);
+</script>
+</body>
+</html>

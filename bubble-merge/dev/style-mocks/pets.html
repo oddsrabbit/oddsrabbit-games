@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pets-style mocks</title>
+<style>
+  body { margin: 0; background: #f7ead0; font: 13px system-ui, sans-serif; }
+  .row { display: flex; align-items: flex-end; gap: 6px; padding: 10px; border-bottom: 1px solid #d8c8a8; }
+  .row h2 { width: 80px; margin: 0; font-size: 13px; align-self: center; }
+  img { image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script type="application/json" id="out">{}</script>
+<script>
+// Merge-game pieces drawn the way Rabbit Pets draws (rabbit-pets/src/art):
+// shapes rasterised onto a pixel grid, the bottom-right edge shaded, a dark
+// outline, and pixel faces and outfits stamped on. Three sets: Pets rabbits,
+// the same rabbits in tier-coloured bubbles, and fruit. Each piece is drawn
+// at 2 css px per art pixel at phone scale, so its radius in art pixels is
+// r * 0.455 for the game's world radius r.
+const R = [17, 23, 30, 36, 44, 53, 62, 72, 84, 98, 116];
+const PXR = (t) => R[t] * 0.455;
+
+const hex = (s) => { const n = parseInt(s.replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255, 255]; };
+const inEllipse = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
+function inCapsule(x, y, ax, ay, bx, by, r) {
+  const dx = bx - ax, dy = by - ay;
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+  return (x - (ax + t * dx)) ** 2 + (y - (ay + t * dy)) ** 2 <= r * r;
+}
+function grid(w, h) { return { w, h, px: Array.from({ length: h }, () => Array(w).fill(null)) }; }
+function toCanvas(g) {
+  const c = document.createElement('canvas');
+  c.width = g.w; c.height = g.h;
+  const x = c.getContext('2d');
+  const img = x.createImageData(g.w, g.h);
+  for (let y = 0; y < g.h; y++) for (let xx = 0; xx < g.w; xx++) {
+    const p = g.px[y][xx];
+    if (!p) continue;
+    const i = (y * g.w + xx) * 4;
+    img.data[i] = p[0]; img.data[i + 1] = p[1]; img.data[i + 2] = p[2]; img.data[i + 3] = p[3];
+  }
+  x.putImageData(img, 0, 0);
+  return c;
+}
+// Outline `t` pixels thick around the filled region.
+function outlineGrid(g, filled, col, t) {
+  for (let pass = 0; pass < t; pass++) {
+    const snap = g.px.map((r) => r.slice());
+    const f = (x, y) => x >= 0 && y >= 0 && x < g.w && y < g.h && (pass === 0 ? filled(x, y) : snap[y][x] !== null);
+    for (let y = 0; y < g.h; y++) for (let x = 0; x < g.w; x++) {
+      if (!f(x, y) && (f(x + 1, y) || f(x - 1, y) || f(x, y + 1) || f(x, y - 1))) g.px[y][x] = col;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- rabbits
+// Palettes and shapes copied from rabbit-pets/src/art/rabbit.ts.
+const COATS = {
+  snow: { base: 'F3EFE8', shade: 'D6CDC1', light: 'FFFFFF', line: '5A4746' },
+  cream: { base: 'F0D6AE', shade: 'D6B485', light: 'FAEAD0', line: '6A4834' },
+  cocoa: { base: '9C6C4E', shade: '7B5038', light: 'D1AE8E', line: '3D281E', ring: 'C49A7A' },
+  silver: { base: 'A9ABB6', shade: '868997', light: 'DADBE1', line: '3B3D48' },
+  midnight: { base: '48444F', shade: '36333D', light: '8D8898', line: '1C1A21', ring: '8D8898' },
+  ginger: { base: 'E2945C', shade: 'C17341', light: 'F6CDA5', line: '69381D' },
+};
+const SHARED = { pink: 'F3A6B3', pinkd: 'DE8697', eye: '2A2130', glint: 'FFFFFF', nose: 'E4768D', blush: 'F8B4BF' };
+const DRESS_C = { k: '3B2922', r: 'E4566F', R: 'B03550', y: 'F6D24A', Y: 'D5A12A', w: 'FFFFFF', p: 'F3A6B3',
+  g: '86C95E', G: '4E8C3A', b: '8FC3E8', B: '4677AC', v: '6E55A8', V: '4A3878', o: 'F08A3C', n: 'A0785A' };
+const OUTFITS = {
+  pinkbow: { at: 'ear', rows: ['kk.kk', 'kpkpk', 'kprpk', 'kpkpk', 'kk.kk'] },
+  bluebow: { at: 'ear', rows: ['kk.kk', 'kbkbk', 'kbBbk', 'kbkbk', 'kk.kk'] },
+  daisyclip: { at: 'ear', rows: ['.kwk.', 'kwywk', '.kwk.'] },
+  bowtie: { at: 'chin', rows: ['kk...kk', 'krkkkrk', 'krrkrrk', 'krkkkrk', 'kk...kk'] },
+  bell: { at: 'chin', rows: ['krrrrrrrrrrk', 'kkkkkkkkkkkk', '.....kk.....', '....kyYk....', '....kyYk....', '.....kk.....'] },
+  bandana: { at: 'chin', rows: ['kkkkkkkkkkkk', 'krrwrrrrwrrk', '.krrrwrrrrk.', '..krrrrwrk..', '...krrrRk...', '....kRRk....', '.....kk.....'] },
+  flowercrown: { at: 'top', rows: ['.kpk...kyk...kpk.', 'kpypkGkyrykGkpypk', 'gkpkgGgkykgGgkpkg', '.GgGgGgGgGgGgGgG.'] },
+  beret: { at: 'top', rows: ['.....kk......', '..kkkrrkkkk..', '.krrrrrrrrrk.', 'krrrrrrrrrrRk', 'kRRRRRRRRRRRk', '.kkkkkkkkkkk.'] },
+  strawhat: { at: 'top', rows: ['.....kkkkk.....', '....kyyyyyk....', '....kyyyyyk....', '...kkrrrrrkk...', 'kkkyyyyyyyyykkk', 'kYYYYYYYYYYYYYk', '.kkkkkkkkkkkkk.'] },
+  crown: { at: 'top', rows: ['.k...k...k.', 'kyk.kyk.kyk', 'kyykyyykyyk', 'kyrkyykkryk', 'kYYYYYYYYYk', 'kkkkkkkkkkk'] },
+};
+
+// One rabbit, Pets-style, at size k (Pets uses 1.35). Face features, the
+// outline and outfits scale by whole pixels (f) so big rabbits stay chunky.
+function petRabbit(coat, ears, k, face, outfit) {
+  const f = Math.max(1, Math.round(k / 1.35));
+  const hw = 7.2 * k, hh = 6.4 * k, bw = 6.2 * k, bh = 5.0 * k;
+  const E = { short: { len: 5.3 * k, w: 1.9 * k }, long: { len: 7.0 * k, w: 1.9 * k },
+    lop: { len: 5.2 * k, w: 2.0 * k, lop: { spread: 0.86, out: 0.3, drop: 0.9 } } }[ears];
+  const W = Math.ceil(2 * (hw + E.w + E.len * 0.4) + 4 + 2 * f);
+  const H = Math.ceil(19.2 * k + E.len + E.w + 6 + 2 * f + (outfit && OUTFITS[outfit].at === 'top' ? 4 * f : 0));
+  const cx = W / 2 - 0.5, GROUND = H - 1 - f;
+  const c = COATS[coat];
+  const pal = { base: hex(c.base), shade: hex(c.shade), light: hex(c.light), line: hex(c.line), ring: c.ring ? hex(c.ring) : null,
+    pink: hex(SHARED.pink), pinkd: hex(SHARED.pinkd), eye: hex(SHARED.eye), glint: hex(SHARED.glint), nose: hex(SHARED.nose), blush: hex(SHARED.blush) };
+  const lop = E.lop;
+  const bodyCy = GROUND - bh;
+  const headCy = bodyCy - bh * 0.85 - hh * 0.55;
+  const earsArr = [];
+  for (const side of [-1, 1]) {
+    let ax = cx + side * hw * 0.42, ay = headCy - hh * 0.55, bx, by;
+    if (lop) { ax = cx + side * hw * lop.spread; ay = headCy - hh * 0.7; bx = ax + side * E.len * lop.out; by = ay + E.len * lop.drop; }
+    else { const ang = side * 0.3; bx = ax + Math.sin(ang) * E.len; by = ay - Math.cos(ang) * E.len; }
+    earsArr.push([ax, ay, bx, by]);
+  }
+  const region = Array.from({ length: H }, () => Array(W).fill(null));
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const X = x + 0.5, Y = y + 0.5;
+    let r = null;
+    if (inEllipse(X, Y, cx, bodyCy, bw, bh)) r = 'body';
+    for (const [ax, ay, bx, by] of earsArr) if (inCapsule(X, Y, ax, ay, bx, by, E.w)) r = 'ear';
+    if (inEllipse(X, Y, cx, headCy, hw, hh)) r = 'head';
+    for (const side of [-1, 1]) if (inEllipse(X, Y, cx + side * bw * 0.45, GROUND - 1.2 * Math.max(1, k / 1.35), bw * 0.32, 1.9 * Math.max(1, k / 1.35))) r = 'foot';
+    if (lop) for (const [ax, ay, bx, by] of earsArr) if (inCapsule(X, Y, ax, ay, bx, by, E.w)) r = 'ear';
+    region[y][x] = r;
+  }
+  if (!lop) for (const [ax, ay, bx, by] of earsArr) {
+    const mx = ax + (bx - ax) * 0.15, my = ay + (by - ay) * 0.15;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (region[y][x] === 'ear' && inCapsule(x + 0.5, y + 0.5, mx, my, bx, by, E.w * 0.45)) region[y][x] = 'inner';
+    }
+  }
+  const g = grid(W, H);
+  const filled = (x, y) => x >= 0 && y >= 0 && x < W && y < H && region[y][x] !== null;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const r = region[y][x];
+    if (!r) continue;
+    let col = r === 'inner' ? pal.pink : pal.base;
+    if (r === 'body' && inEllipse(x + 0.5, y + 0.5, cx, bodyCy + bh * 0.35, bw * 0.55, bh * 0.62)) col = pal.light;
+    if (r === 'head' && inEllipse(x + 0.5, y + 0.5, cx, headCy + hh * 0.5, hw * 0.25, hh * 0.2)) col = pal.light;
+    if (r !== 'inner' && (!filled(x + f, y) || !filled(x, y + f)) && x > cx) col = pal.shade;
+    if (r === 'body' && y >= f && region[y - f][x] === 'head') col = pal.shade;
+    if (r === 'foot' && !filled(x, y + f)) col = pal.shade;
+    if (r === 'inner' && (!filled(x + f, y) || region[y][x + f] !== 'inner') && x > cx) col = pal.pinkd;
+    g.px[y][x] = col;
+  }
+  // where an ear lies over the head or body, a line
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (region[y][x] === 'body' || (lop && region[y][x] === 'head')) {
+      let near = false;
+      for (let d = 1; d <= f && !near; d++) for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]]) {
+        const rr = filled(x + dx, y + dy) ? region[y + dy][x + dx] : null;
+        if (rr === 'ear' || rr === 'inner') near = true;
+      }
+      if (near) g.px[y][x] = pal.line;
+    }
+  }
+  outlineGrid(g, filled, pal.line, f);
+
+  // Face, in units of f pixels.
+  const U = (x0, y0, ux, uy, col) => {
+    for (let a = 0; a < f; a++) for (let b = 0; b < f; b++) {
+      const X = x0 + ux * f + a, Y = y0 + uy * f + b;
+      if (X >= 0 && Y >= 0 && X < W && Y < H) g.px[Y][X] = col;
+    }
+  };
+  const ey = Math.round(headCy - 0.2);
+  const eyeGap = 3.3 * (hw / 8.6) * 1.05;
+  const eyeTop = ey - f;
+  const exs = [Math.round(cx - eyeGap - 0.5) - (3 * f - 2), Math.round(cx + eyeGap - 0.5)];
+  exs.forEach((ex, i) => {
+    if (face === 'happy') {
+      [[-1, 2], [0, 1], [1, 1], [2, 2]].forEach(([ux, uy]) => U(ex, eyeTop, ux, uy, pal.eye));
+    } else {
+      if (pal.ring) {
+        for (let uy = -1; uy <= 4; uy++) { U(ex, eyeTop, -1, uy, pal.ring); U(ex, eyeTop, 3, uy, pal.ring); }
+        for (let ux = 0; ux < 3; ux++) U(ex, eyeTop, ux, -1, pal.ring);
+      }
+      for (let uy = 0; uy < 4; uy++) for (let ux = 0; ux < 3; ux++) U(ex, eyeTop, ux, uy, pal.eye);
+      U(ex, eyeTop, 0, 0, pal.glint); U(ex, eyeTop, 1, 1, pal.glint); U(ex, eyeTop, 2, 2, pal.glint);
+    }
+    U(ex, eyeTop, i === 0 ? -1 : 3, 3, pal.blush);
+    if (face === 'happy') U(ex, eyeTop, i === 0 ? -1 : 3, 4, pal.blush);
+  });
+  const nx = Math.round(cx + 0.5 - f), ny = eyeTop + 3 * f;
+  U(nx, ny, 0, 0, pal.nose); U(nx, ny, 1, 0, pal.nose);
+  U(nx, ny, -1, 1, pal.line); U(nx, ny, 2, 1, pal.line);
+
+  if (outfit) {
+    const o = OUTFITS[outfit];
+    const n = o.rows.length, w = Math.max(...o.rows.map((r) => r.length));
+    const top = Math.round(headCy - hh), chin = Math.round(headCy + hh);
+    let bx, by; // bottom-centre
+    if (o.at === 'top') { bx = cx; by = top + Math.min(3, n - 2) * f; }
+    else if (o.at === 'ear') { bx = cx + hw * 0.5; by = top + 2 * f; }
+    else { bx = cx; by = chin + (n - 2) * f; }
+    const x0 = Math.round(bx - (w * f) / 2), y0 = by - n * f + f;
+    o.rows.forEach((row, yy) => {
+      for (let xx = 0; xx < row.length; xx++) {
+        const ch = row[xx];
+        if (ch === '.') continue;
+        U(x0, y0, xx, yy, hex(DRESS_C[ch]));
+      }
+    });
+  }
+  // Where the round part (head and body) sits, for centring on the circle.
+  return { g, cx, cy: (headCy - hh + GROUND) / 2, blobH: GROUND - (headCy - hh) };
+}
+
+// The ladder: coat, ears and an outfit for each size.
+const RABBITS = [
+  ['snow', 'short', null], ['ginger', 'short', 'pinkbow'], ['cream', 'lop', null], ['silver', 'long', 'bluebow'],
+  ['cocoa', 'lop', 'bowtie'], ['midnight', 'short', 'bell'], ['snow', 'lop', 'flowercrown'], ['ginger', 'long', 'bandana'],
+  ['silver', 'lop', 'beret'], ['cream', 'long', 'strawhat'], ['cocoa', 'long', 'crown'],
+];
+const BUBBLE = ['F3A6B3', 'F08A3C', 'F6D24A', '9FD66B', '5CC6B8', '8FC3E8', '4677AC', '8E72D0', 'D45FB0', 'E4566F', 'E8B530'];
+
+// Draws grid g on a square canvas of side S with its blob centred.
+function placeOn(S, rab) {
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  x.drawImage(toCanvas(rab.g), Math.round(S / 2 - rab.cx - 0.5), Math.round(S / 2 - rab.cy));
+  return c;
+}
+
+function rabbitPiece(t, face) {
+  const rp = PXR(t);
+  const [coat, ears, outfit] = RABBITS[t];
+  // The head and body fill the circle; the ears poke out above it.
+  const k = (2 * rp) / 19.2;
+  const rab = petRabbit(coat, ears, k, face, outfit);
+  // Square, centred on the round part, big enough for the ears.
+  const half = Math.max(rp * 1.4, rab.cy + 1, rab.g.h - rab.cy + 1, rab.cx + 1, rab.g.w - rab.cx + 1);
+  return placeOn(Math.ceil(half * 2), rab);
+}
+
+function bubblePiece(t, face) {
+  const rp = PXR(t);
+  const [coat, ears, outfit] = RABBITS[t];
+  // Shrink the rabbit until it sits inside the bubble, ears and all.
+  let k = (2 * rp) / 22, rab;
+  for (let i = 0; i < 20; i++) {
+    rab = petRabbit(coat, ears, k, face, outfit);
+    let minY = 1e9, maxY = -1, minX = 1e9, maxX = -1;
+    rab.g.px.forEach((row, y) => row.forEach((p, x) => { if (p) { minY = Math.min(minY, y); maxY = Math.max(maxY, y); minX = Math.min(minX, x); maxX = Math.max(maxX, x); } }));
+    rab.cy = (minY + maxY) / 2 + 1;
+    rab.cx = (minX + maxX) / 2;
+    if (Math.max(maxY - minY, (maxX - minX) * 1.1) <= rp * 1.62) break;
+    k *= 0.94;
+  }
+  const S = Math.ceil(rp * 2) + 4;
+  const f = Math.max(1, Math.round(rp / 18));
+  const g = grid(S, S);
+  const ccx = S / 2, ccy = S / 2;
+  const col = hex(BUBBLE[t]);
+  const mixc = (c, t2, w) => [Math.round(c[0] + (t2[0] - c[0]) * w), Math.round(c[1] + (t2[1] - c[1]) * w), Math.round(c[2] + (t2[2] - c[2]) * w), 255];
+  const white = [255, 255, 255, 255], dark = [40, 30, 30, 255];
+  const inside = (x, y) => inEllipse(x + 0.5, y + 0.5, ccx, ccy, rp, rp);
+  // The bubble's back: a pale tint of its colour.
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (inside(x, y)) g.px[y][x] = mixc(col, white, 0.72);
+  const back = toCanvas(g);
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const cx2 = c.getContext('2d');
+  cx2.imageSmoothingEnabled = false;
+  cx2.drawImage(back, 0, 0);
+  cx2.drawImage(toCanvas(rab.g), Math.round(S / 2 - rab.cx - 0.5), Math.round(S / 2 - rab.cy));
+  // Front: the rim (the colour, shaded at the bottom right), a glint and the outline.
+  const fg = grid(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (!inside(x, y)) continue;
+    const d = Math.hypot(x + 0.5 - ccx, y + 0.5 - ccy);
+    if (d > rp - 2 * f) {
+      const lower = (x + 0.5 - ccx) + (y + 0.5 - ccy) > rp * 0.5;
+      fg.px[y][x] = lower ? mixc(col, dark, 0.22) : col;
+    }
+  }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const a = Math.atan2(y + 0.5 - ccy, x + 0.5 - ccx), d = Math.hypot(x + 0.5 - ccx, y + 0.5 - ccy);
+    // A small glint just inside the rim, top left.
+    if (d > rp - 3.2 * f && d <= rp - 2 * f && a > -2.55 && a < -2.0) fg.px[y][x] = white;
+  }
+  outlineGrid(fg, inside, mixc(col, dark, 0.7), f);
+  cx2.drawImage(toCanvas(fg), 0, 0);
+  return c;
+}
+
+// ---------------------------------------------------------------- fruit
+const FRUITS = [
+  { id: 'blueberry', name: 'Blueberry', base: '5B6BC0', shade: '3F4C98', light: '9AA8E8', line: '24284F', crown: 'star' },
+  { id: 'cherry', name: 'Cherry', base: 'E0414F', shade: 'B02A3A', light: 'FF8C94', line: '5A1420', stem: 'curl', leaf: true },
+  { id: 'lime', name: 'Lime', base: '8CCB4E', shade: '5E9E2E', light: 'C8EE94', line: '2E4A16', nub: true },
+  { id: 'clementine', name: 'Clementine', base: 'F59A2E', shade: 'D1741A', light: 'FFC982', line: '6A3510', stem: 'short', leaf: true, pores: true },
+  { id: 'plum', name: 'Plum', base: '8E4AA8', shade: '6A3080', light: 'C48AD8', line: '34163F', crease: true, stem: 'short' },
+  { id: 'lemon', name: 'Lemon', base: 'F6D24A', shade: 'D5A12A', light: 'FFF0A0', line: '6A4E10', nub: true, pores: true },
+  { id: 'peach', name: 'Peach', base: 'F7B48E', shade: 'E2876A', light: 'FFDCC6', line: '6A3022', crease: true, blush: 'EE7A68', leaf: true, stem: 'short' },
+  { id: 'pomegranate', name: 'Pomegranate', base: 'C8324A', shade: '962032', light: 'F27A8A', line: '4A0E18', crown: 'spiky' },
+  { id: 'coconut', name: 'Coconut', base: '8A5A3A', shade: '6A4028', light: 'B88A62', line: '2E1A10', fibre: true, eyes: true },
+  { id: 'cantaloupe', name: 'Cantaloupe', base: 'E3BC74', shade: 'C4974C', light: 'F4D9A2', line: '5A4020', net: true },
+  { id: 'pumpkin', name: 'Pumpkin', base: 'F08A3C', shade: 'C8641E', light: 'FFB870', line: '5A2A0E', ribs: true, stem: 'thick', leaf: true },
+];
+
+function fruitPiece(t) {
+  const F = FRUITS[t];
+  const rp = PXR(t);
+  const f = Math.max(1, Math.round(rp / 16));
+  const S = Math.ceil(rp * 2.8);
+  const cx = S / 2, cy = S / 2;
+  const rx = rp * (F.sx || 1), ry = rp * (F.sy || 1);
+  const pal = { base: hex(F.base), shade: hex(F.shade), light: hex(F.light), line: hex(F.line) };
+  const stemC = hex('7A4A2A'), stemS = hex('5A341C'), leafC = hex('6DBE45'), leafS = hex('4E8C3A');
+  const region = Array.from({ length: S }, () => Array(S).fill(null));
+  const top = cy - ry;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const X = x + 0.5, Y = y + 0.5;
+    let r = null;
+    if (inEllipse(X, Y, cx, cy, rx, ry)) r = 'body';
+    if (F.nub && (inEllipse(X, Y, cx - rx * 0.97, cy, rp * 0.13, rp * 0.11) || inEllipse(X, Y, cx + rx * 0.97, cy, rp * 0.13, rp * 0.11))) r = 'body';
+    if (F.stem === 'curl' && inCapsule(X, Y, cx, top + rp * 0.1, cx + rp * 0.35, top - rp * 0.75, Math.max(1, rp * 0.08))) r = 'stem';
+    if (F.stem === 'short' && inCapsule(X, Y, cx, top + rp * 0.08, cx + rp * 0.05, top - rp * 0.22, Math.max(0.9, rp * 0.07))) r = 'stem';
+    if (F.stem === 'thick' && inCapsule(X, Y, cx, top + rp * 0.15, cx + rp * 0.1, top - rp * 0.25, rp * 0.1)) r = 'stem';
+    if (F.leaf) {
+      const lx = F.stem === 'curl' ? cx + rp * 0.55 : cx + rp * 0.3, ly = F.stem === 'curl' ? top - rp * 0.55 : top - rp * 0.12;
+      if (inEllipse(X, Y, lx, ly, rp * 0.3, rp * 0.13) && region[y][x] !== 'stem') r = r || 'leaf';
+      if (inEllipse(X, Y, lx, ly, rp * 0.3, rp * 0.13)) r = 'leaf';
+    }
+    if (F.crown === 'spiky') {
+      for (const dx of [-0.16, 0, 0.16]) if (inCapsule(X, Y, cx + dx * rp, top + rp * 0.1, cx + dx * rp * 1.6, top - rp * 0.2, rp * 0.07)) r = 'crown';
+    }
+    region[y][x] = r;
+  }
+  const g = grid(S, S);
+  const filled = (x, y) => x >= 0 && y >= 0 && x < S && y < S && region[y][x] !== null;
+  const isBody = (x, y) => filled(x, y) && region[y][x] === 'body';
+  let seed = t * 97 + 13;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const r = region[y][x];
+    if (!r) continue;
+    const X = x + 0.5, Y = y + 0.5;
+    let col = pal.base;
+    if (r === 'stem') col = x + 0.5 > cx + rp * 0.02 ? stemS : stemC;
+    else if (r === 'leaf') col = Y > (F.stem === 'curl' ? top - rp * 0.55 : top - rp * 0.12) ? leafS : leafC;
+    else if (r === 'crown') col = pal.shade;
+    else {
+      // Pets-style shade: the bottom-right rim, f pixels thick, plus a softer band inside it.
+      const dx = (X - cx) / rx, dy = (Y - cy) / ry;
+      const d = Math.hypot(dx, dy);
+      if ((!isBody(x + f, y) || !isBody(x, y + f)) && X > cx - rx * 0.2) col = pal.shade;
+      else if (d > 0.72 && dx + dy > 0.55) col = pal.shade;
+      if (F.blush && inEllipse(X, Y, cx + rx * 0.35, cy + ry * 0.05, rx * 0.42, ry * 0.5) && col === pal.base) col = hex(F.blush);
+      if (F.ribs) for (const k of [-0.62, -0.25, 0.25, 0.62]) {
+        const rib = cx + k * rx * Math.sqrt(Math.max(0, 1 - dy * dy)) ;
+        if (Math.abs(X - rib) < Math.max(0.6, f * 0.6)) col = pal.shade;
+      }
+      if (F.crease) {
+        const cr = cx + rx * 0.12 * Math.sin((dy + 1) * 1.6);
+        if (Math.abs(X - cr) < Math.max(0.6, f * 0.55) && dy < 0.7) col = pal.shade;
+      }
+      if (F.net) {
+        const u = (X + Y) / (rp * 0.32), v = (X - Y) / (rp * 0.32);
+        if (Math.abs(u - Math.round(u)) < 0.09 || Math.abs(v - Math.round(v)) < 0.09) col = pal.light;
+      }
+      if (F.fibre && rnd() < 0.18) col = rnd() < 0.5 ? pal.shade : pal.light;
+      if (F.pores && rnd() < 0.05 && col === pal.base) col = pal.shade;
+      // highlight, top left
+      if (inEllipse(X, Y, cx - rx * 0.42, cy - ry * 0.45, rx * 0.2, ry * 0.13) && !F.net) col = pal.light;
+      if (inEllipse(X, Y, cx - rx * 0.62, cy - ry * 0.12, rx * 0.07, ry * 0.07) && rp > 10) col = pal.light;
+    }
+    g.px[y][x] = col;
+  }
+  // Blueberry's star crown and the coconut's three eyes, in the line colour.
+  if (F.crown === 'star') {
+    const s = Math.max(1, Math.round(rp * 0.12));
+    for (let a = -s; a <= s; a++) {
+      for (const [x, y] of [[cx + a, top + rp * 0.25], [cx, top + rp * 0.25 + a]]) {
+        const X = Math.floor(x), Y = Math.floor(y);
+        if (g.px[Y] && g.px[Y][X]) g.px[Y][X] = pal.line;
+      }
+    }
+  }
+  if (F.eyes) for (const [ex, ey2] of [[-0.18, -0.55], [0.18, -0.55], [0, -0.35]]) {
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      if (inEllipse(x + 0.5, y + 0.5, cx + ex * rp, cy + ey2 * rp, rp * 0.08, rp * 0.07)) g.px[y][x] = pal.line;
+    }
+  }
+  // Lines between stem/leaf and body, then the outline.
+  const lineCol = pal.line;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (region[y][x] === 'leaf' || region[y][x] === 'crown') {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (filled(x + dx, y + dy) && region[y + dy][x + dx] === 'body' && region[y][x] === 'leaf') g.px[y][x] = hex('2E5A1E');
+      }
+    }
+  }
+  outlineGrid(g, filled, lineCol, f);
+  return toCanvas(g);
+}
+
+// ---------------------------------------------------------------- out
+// ---------------------------------------------------------------- faces
+// Just the head, so each piece is the physics circle. With the whole circle
+// to work with, the breeds' face markings come back: the Dutch blaze, the
+// Harlequin split, the Lionhead mane, the Checkered butterfly.
+const FACE_BREEDS = [
+  { name: 'Netherland Dwarf', base: 'E2945C', shade: 'C17341', light: 'F6CDA5', line: '69381D', ears: 'short' },
+  { name: 'Polish', base: 'F3EFE8', shade: 'D6CDC1', light: 'FFFFFF', line: '5A4746', ears: 'close', ruby: true },
+  { name: 'Lionhead', base: 'E6C08E', shade: 'C79E6A', light: 'F8E3C2', line: '6A4834', ears: 'short', mark: 'mane', mane: 'F7E7C8', maneS: 'DCC29A' },
+  { name: 'Holland Lop', base: 'F3EFE8', shade: 'D6CDC1', light: 'FFFFFF', line: '5E4330', ears: 'lop', mark: 'broken', patch: 'E39A53', patchS: 'C47A35' },
+  { name: 'Mini Rex', base: 'A9ABB6', shade: '868997', light: 'DADBE1', line: '3B3D48', ears: 'up' },
+  { name: 'Dutch', base: '48444F', shade: '36333D', light: 'F3EFE8', line: '1C1A21', ears: 'up', mark: 'dutch' },
+  { name: 'Mini Lop', base: '9C6C4E', shade: '7B5038', light: 'D1AE8E', line: '3D281E', ears: 'lop', ring: 'C49A7A' },
+  { name: 'Harlequin', base: 'E59B4C', shade: 'C47A30', light: 'F4C48E', line: '1E1617', ears: 'up', mark: 'harlequin', dark: '48444F', darkS: '36333D' },
+  { name: 'English Lop', base: 'B9A6B0', shade: '998592', light: 'E0D3DA', line: '3E3039', ears: 'longlop' },
+  { name: 'Checkered Giant', base: 'F3EFE8', shade: 'D6CDC1', light: 'FFFFFF', line: '25232A', ears: 'up', mark: 'checkered', dark: '36333D' },
+  { name: 'Flemish Giant', base: 'A38C70', shade: '836D53', light: 'D9C8AE', line: '33281D', ears: 'long', mark: 'agouti' },
+];
+
+function facePiece(t, ringColor) {
+  const B = FACE_BREEDS[t];
+  const rp = PXR(t);
+  const f = Math.max(1, Math.round(rp / 12));
+  const S = Math.ceil(rp * 3.4) + 2 * f; // room for the tallest ears
+  const cx = S / 2, cy = S / 2;
+  const P = (k) => hex(B[k]);
+  const pal = { base: P('base'), shade: P('shade'), light: P('light'), line: P('line') };
+  const pink = hex(SHARED.pink), pinkd = hex(SHARED.pinkd);
+  // Ears as capsules [ax, ay, bx, by, w] in units of rp from the centre.
+  const EARS = {
+    short: [[-0.42, -0.6, -0.55, -1.2, 0.2], [0.42, -0.6, 0.55, -1.2, 0.2]],
+    close: [[-0.24, -0.6, -0.3, -1.22, 0.17], [0.24, -0.6, 0.3, -1.22, 0.17]],
+    up: [[-0.38, -0.62, -0.52, -1.32, 0.19], [0.38, -0.62, 0.52, -1.32, 0.19]],
+    long: [[-0.36, -0.62, -0.5, -1.42, 0.18], [0.36, -0.62, 0.5, -1.42, 0.18]],
+    lop: [[-0.6, -0.62, -0.93, 0.12, 0.24], [0.6, -0.62, 0.93, 0.12, 0.24]],
+    longlop: [[-0.62, -0.6, -0.98, 0.62, 0.25], [0.62, -0.6, 0.98, 0.62, 0.25]],
+  }[B.ears];
+  const lop = B.ears === 'lop' || B.ears === 'longlop';
+  const region = Array.from({ length: S }, () => Array(S).fill(null));
+  const earAt = (X, Y) => EARS.findIndex(([ax, ay, bx, by, w]) => inCapsule(X, Y, cx + ax * rp, cy + ay * rp, cx + bx * rp, cy + by * rp, w * rp));
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const X = x + 0.5, Y = y + 0.5;
+    let r = null;
+    if (!lop && earAt(X, Y) >= 0) r = 'ear';
+    if (inEllipse(X, Y, cx, cy, rp, rp)) r = 'head';
+    if (lop && earAt(X, Y) >= 0) r = 'ear';
+    region[y][x] = r;
+  }
+  if (!lop) EARS.forEach(([ax, ay, bx, by, w]) => {
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      if (region[y][x] === 'ear' && inCapsule(x + 0.5, y + 0.5, cx + (ax + (bx - ax) * 0.25) * rp, cy + (ay + (by - ay) * 0.25) * rp, cx + bx * rp, cy + by * rp, w * rp * 0.45)) region[y][x] = 'inner';
+    }
+  });
+  const g = grid(S, S);
+  const filled = (x, y) => x >= 0 && y >= 0 && x < S && y < S && region[y][x] !== null;
+  const eyeY = -0.08, eyeX = 0.37;
+  let seed = 31 + t * 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const r = region[y][x];
+    if (!r) continue;
+    const X = x + 0.5, Y = y + 0.5, u = (X - cx) / rp, v = (Y - cy) / rp;
+    let base = pal.base, shade = pal.shade;
+    // Which coat colour this pixel is, before shading.
+    if (B.mark === 'harlequin') {
+      const left = r === 'head' ? u < 0 : u > 0; // the ears swap sides
+      if (!left) { base = P('dark'); shade = P('darkS'); }
+    }
+    if (B.mark === 'broken' && (r === 'ear' || (u + eyeX) ** 2 + (v - eyeY) ** 2 < 0.29 ** 2 || (u - 0.62) ** 2 + (v - 0.5) ** 2 < 0.26 ** 2 || (u - 0.15) ** 2 + (v + 0.88) ** 2 < 0.3 ** 2)) { base = P('patch'); shade = P('patchS'); }
+    if (B.mark === 'checkered' && (r === 'ear' || (u + eyeX) ** 2 + (v - eyeY) ** 2 < 0.27 ** 2 || (u - eyeX) ** 2 + (v - eyeY) ** 2 < 0.27 ** 2 ||
+      inEllipse(u, v, -0.15, 0.3, 0.17, 0.11) || inEllipse(u, v, 0.15, 0.3, 0.17, 0.11) || (Math.abs(u) < 0.05 && v > -0.2 && v < 0.3) ||
+      (Math.abs(u) - 0.82) ** 2 + (v - 0.28) ** 2 < 0.11 ** 2 || (Math.abs(u) - 0.55) ** 2 + (v - 0.72) ** 2 < 0.09 ** 2 || (Math.abs(u) < 0.07 && v < -0.6))) {
+      base = P('dark'); shade = P('dark');
+    }
+    let col = r === 'inner' ? pink : base;
+    if (r === 'head') {
+      // light muzzle and cheeks
+      if (B.mark !== 'dutch' && B.mark !== 'checkered' && inEllipse(u, v, 0, 0.42, 0.45, 0.3)) col = B.mark === 'harlequin' ? col : pal.light;
+      if (B.mark === 'dutch' && (v > 0.3 || (v > -0.75 && Math.abs(u) < 0.08 + 0.3 * (v + 0.75) && v > -0.75))) col = pal.light;
+      if (B.mark === 'mane') {
+        const d = Math.hypot(u, v), a = Math.atan2(v, u);
+        if (d > 0.7 + 0.07 * Math.sin(a * 11)) col = P('mane');
+      }
+      if (B.mark === 'agouti' && rnd() < 0.06) col = rnd() < 0.6 ? pal.shade : pal.light;
+      if (B.mark === 'agouti' && ((u + eyeX) ** 2 + (v - eyeY) ** 2 < 0.22 ** 2 || (u - eyeX) ** 2 + (v - eyeY) ** 2 < 0.22 ** 2)) col = pal.light;
+    }
+    // Pets shading: the bottom-right rim, f pixels thick.
+    if (r !== 'inner' && (!filled(x + f, y) || !filled(x, y + f)) && X > cx - rp * 0.3) {
+      col = B.mark === 'mane' && r === 'head' && Math.hypot(u, v) > 0.7 ? P('maneS') : shade;
+    }
+    if (r === 'inner' && (!filled(x + f, y) || region[y][x + f] !== 'inner') && X > cx) col = pinkd;
+    g.px[y][x] = col;
+  }
+  // A line where lop ears lie over the face.
+  if (lop) for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (region[y][x] !== 'head') continue;
+    let near = false;
+    for (let d = 1; d <= f && !near; d++) for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]]) if (filled(x + dx, y + dy) && region[y + dy][x + dx] === 'ear') near = true;
+    if (near) g.px[y][x] = pal.line;
+  }
+  // Optional tier-coloured rim inside the outline.
+  if (ringColor) {
+    const rc = hex(ringColor);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      if (region[y][x] !== 'head') continue;
+      const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+      if (d > rp - 2 * f && !(lop && earAt(x + 0.5, y + 0.5) >= 0)) g.px[y][x] = rc;
+    }
+  }
+  outlineGrid(g, filled, pal.line, f);
+  // Face, Pets-style, in units of f.
+  const U = (x0, y0, ux, uy, col) => {
+    for (let a = 0; a < f; a++) for (let b = 0; b < f; b++) {
+      const X = x0 + ux * f + a, Y = y0 + uy * f + b;
+      if (X >= 0 && Y >= 0 && X < S && Y < S) g.px[Y][X] = col;
+    }
+  };
+  const eye = B.ruby ? hex('C23A55') : hex(SHARED.eye), glint = hex(SHARED.glint), blush = hex(SHARED.blush);
+  const ey0 = Math.round(cy + eyeY * rp - 2 * f);
+  [-1, 1].forEach((side, i) => {
+    const ex = Math.round(cx + side * eyeX * rp - 1.5 * f);
+    if (B.ring) {
+      for (let uy = -1; uy <= 4; uy++) { U(ex, ey0, -1, uy, hex(B.ring)); U(ex, ey0, 3, uy, hex(B.ring)); }
+      for (let ux = 0; ux < 3; ux++) U(ex, ey0, ux, -1, hex(B.ring));
+    }
+    for (let uy = 0; uy < 4; uy++) for (let ux = 0; ux < 3; ux++) U(ex, ey0, ux, uy, eye);
+    U(ex, ey0, 0, 0, glint); U(ex, ey0, 1, 1, glint); U(ex, ey0, 2, 2, glint);
+    if (B.mark !== 'checkered') U(ex, ey0, i === 0 ? -1 : 3, 4, blush);
+  });
+  const nx = Math.round(cx - f), ny = Math.round(cy + 0.2 * rp);
+  U(nx, ny, 0, 0, hex(SHARED.nose)); U(nx, ny, 1, 0, hex(SHARED.nose));
+  const mouth = B.mark === 'checkered' || B.mark === 'harlequin' || B.mark === 'dutch' ? hex('8D8898') : pal.line;
+  U(nx, ny, -1, 1, mouth); U(nx, ny, 2, 1, mouth);
+  return toCanvas(g);
+}
+
+// ---------------------------------------------------------------- plain bubbles
+// A ball of colour per size, shaded and outlined the Pets way, with an
+// optional mark: 'bunny' (a rabbit silhouette) or 'face' (Pets eyes and blush).
+const BALL = ['F3A6B3', 'F08A3C', 'F6D24A', '9FD66B', '5CC6B8', '8FC3E8', '4677AC', '8E72D0', 'D45FB0', 'E4566F', 'E8B530'];
+function ballPiece(t, mark) {
+  const rp = PXR(t);
+  const f = Math.max(1, Math.round(rp / 12));
+  const S = Math.ceil(rp * 2) + 4 * f + 2;
+  const cx = S / 2, cy = S / 2;
+  const col = hex(BALL[t]);
+  const mixc = (c, t2, w) => [Math.round(c[0] + (t2[0] - c[0]) * w), Math.round(c[1] + (t2[1] - c[1]) * w), Math.round(c[2] + (t2[2] - c[2]) * w), 255];
+  const white = [255, 255, 255, 255], dark = [42, 28, 30, 255];
+  const shade = mixc(col, dark, 0.2), light = mixc(col, white, 0.55), line = mixc(col, dark, 0.62), pale = mixc(col, white, 0.82);
+  const inside = (x, y) => x >= 0 && y >= 0 && x < S && y < S && inEllipse(x + 0.5, y + 0.5, cx, cy, rp, rp);
+  const g = grid(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (!inside(x, y)) continue;
+    const X = x + 0.5, Y = y + 0.5, u = (X - cx) / rp, v = (Y - cy) / rp;
+    let c = col;
+    if ((!inside(x + f, y) || !inside(x, y + f)) && u > -0.3) c = shade;
+    else if (Math.hypot(u, v) > 0.74 && u + v > 0.5) c = shade;
+    if (inEllipse(u, v, -0.44, -0.5, 0.2, 0.12)) c = light;
+    if (rp > 9 && inEllipse(u, v, -0.68, -0.16, 0.06, 0.06)) c = light;
+    if (mark === 'bunny') {
+      // over the shine, so the ears stay whole
+      const head = inEllipse(u, v, 0, 0.16, 0.38, 0.32);
+      const ears = inCapsule(u, v, -0.14, -0.05, -0.22, -0.6, 0.1) || inCapsule(u, v, 0.14, -0.05, 0.22, -0.6, 0.1);
+      if (head || ears) c = pale;
+    }
+    g.px[y][x] = c;
+  }
+  outlineGrid(g, inside, line, f);
+  if (mark === 'face') {
+    const U = (x0, y0, ux, uy, c) => {
+      for (let a = 0; a < f; a++) for (let b = 0; b < f; b++) {
+        const X = x0 + ux * f + a, Y = y0 + uy * f + b;
+        if (X >= 0 && Y >= 0 && X < S && Y < S) g.px[Y][X] = c;
+      }
+    };
+    const eye = hex(SHARED.eye), glint = hex(SHARED.glint), blush = hex(SHARED.blush);
+    const ey0 = Math.round(cy + 0.02 * rp - 2 * f);
+    [-1, 1].forEach((side, i) => {
+      const ex = Math.round(cx + side * 0.32 * rp - 1.5 * f);
+      for (let uy = 0; uy < 4; uy++) for (let ux = 0; ux < 3; ux++) U(ex, ey0, ux, uy, eye);
+      U(ex, ey0, 0, 0, glint); U(ex, ey0, 1, 1, glint);
+      U(ex, ey0, i === 0 ? -1 : 3, 4, blush);
+    });
+    const mx = Math.round(cx - f), my = ey0 + 4 * f;
+    U(mx, my, -1, 0, line); U(mx, my, 0, 1, line); U(mx, my, 1, 1, line); U(mx, my, 2, 0, line);
+  }
+  return toCanvas(g);
+}
+
+const out = { rabbit: {}, bubble: {}, fruit: {}, face: {}, facering: {}, ball: {}, ballbunny: {}, ballface: {} };
+const sheet = document.getElementById('sheet');
+function row(name, make) {
+  const el = document.createElement('div');
+  el.className = 'row';
+  el.innerHTML = '<h2>' + name + '</h2>';
+  R.forEach((_, t) => {
+    const c = make(t);
+    const url = c.toDataURL('image/png');
+    out[name][t] = url;
+    const im = new Image();
+    im.src = url;
+    im.style.width = c.width * 2 + 'px';
+    el.appendChild(im);
+  });
+  sheet.appendChild(el);
+}
+row('rabbit', (t) => rabbitPiece(t, 'content'));
+row('bubble', (t) => bubblePiece(t, 'content'));
+row('fruit', (t) => fruitPiece(t));
+row('face', (t) => facePiece(t));
+row('facering', (t) => facePiece(t, BUBBLE[t]));
+row('ball', (t) => ballPiece(t));
+row('ballbunny', (t) => ballPiece(t, 'bunny'));
+row('ballface', (t) => ballPiece(t, 'face'));
+document.getElementById('out').textContent = JSON.stringify(out);
+</script>
+</body>
+</html>

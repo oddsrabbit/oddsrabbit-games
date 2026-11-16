@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Background and box mocks</title>
+<style>
+  body { margin: 0; background: #ddd; display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; font: 13px system-ui; }
+  canvas { width: 393px; height: 640px; border-radius: 12px; }
+</style>
+</head>
+<body>
+<script type="application/json" id="out">{}</script>
+<script src="../../js/pieces.js"></script>
+<script>
+// The play area (between the HUD and the panel) at phone size, 393x640 css
+// px, drawn at 2x: each candidate background and box, with the same settled
+// pile of soap bubbles and the next bubble waiting above the rim. The box's
+// inside always matches the physics: walls at x 0 and 400, floor at 564.
+const W = 400, RIM = 84, FLOOR = 564, WALL = 16;
+const VIEW = { x0: -WALL, x1: W + WALL, y0: -16, y1: FLOOR + WALL };
+const CW = 393, CH = 640, D = 2;
+const s = Math.min(CW / (VIEW.x1 - VIEW.x0), CH / (VIEW.y1 - VIEW.y0));
+const ox = (CW - (VIEW.x1 - VIEW.x0) * s) / 2 - VIEW.x0 * s;
+const oy = CH - VIEW.y1 * s;
+const PILE = [[9, 98, 466], [8, 293, 480], [7, 328, 328.2], [6, 62, 310.4], [5, 208.4, 363.4], [4, 356, 215.9], [3, 36, 216.1],
+  [2, 153.3, 301.7], [1, 206.3, 287.7], [0, 243, 303], [4, 133.4, 230.7], [2, 86.4, 173.9], [3, 252.7, 251.2], [1, 290, 205.9],
+  [0, 190.6, 251.2], [5, 212.1, 172.3], [2, 135.8, 140.4], [1, 23.5, 158.7]];
+const HELD = { t: 2, x: 250 };
+const px = 1 / s; // one css px in world units
+
+function rr(x, X, Y, w, h, r) { x.beginPath(); x.roundRect(X, Y, w, h, r); }
+function screen(x) { x.setTransform(D, 0, 0, D, 0, 0); }
+function world(x) { x.setTransform(D * s, 0, 0, D * s, D * ox, D * oy); }
+
+function bubbles(x, rimColor, guide) {
+  world(x);
+  // aim guide and the held bubble
+  x.setLineDash([4, 6]);
+  x.strokeStyle = guide;
+  x.lineWidth = 2 * px;
+  x.beginPath(); x.moveTo(HELD.x, RIM - 48 + RM.PIECES[HELD.t].r); x.lineTo(HELD.x, FLOOR); x.stroke();
+  x.setLineDash([]);
+  for (const [t, bx, by] of PILE) { x.save(); x.translate(bx, by); RM.drawPiece(x, t, RM.PIECES[t].r); x.restore(); }
+  x.save(); x.translate(HELD.x, RIM - 48); RM.drawPiece(x, HELD.t, RM.PIECES[HELD.t].r); x.restore();
+  // the rim line
+  x.setLineDash([10, 8]);
+  x.strokeStyle = rimColor;
+  x.lineWidth = 3 * px;
+  x.beginPath(); x.moveTo(0, RIM); x.lineTo(W, RIM); x.stroke();
+  x.setLineDash([]);
+}
+
+function cloud(x, cx, cy, r) {
+  x.beginPath();
+  x.arc(cx, cy, r, 0, Math.PI * 2); x.arc(cx + r * 1.1, cy + r * 0.2, r * 0.8, 0, Math.PI * 2); x.arc(cx - r * 1.1, cy + r * 0.25, r * 0.7, 0, Math.PI * 2);
+  x.fill();
+}
+
+const SCENES = {
+  // 1. What the game has now.
+  now(x) {
+    screen(x);
+    const g = x.createLinearGradient(0, 0, 0, CH); g.addColorStop(0, '#9fd0ec'); g.addColorStop(1, '#e4f3f2');
+    x.fillStyle = g; x.fillRect(0, 0, CW, CH);
+    const horizon = oy + (RIM + 150) * s;
+    x.fillStyle = 'rgba(255,255,255,0.85)';
+    cloud(x, CW * 0.16, horizon * 0.18, 22); cloud(x, CW * 0.8, horizon * 0.3, 18);
+    world(x);
+    x.fillStyle = '#f7ead0'; x.fillRect(0, RIM - 6, W, FLOOR - RIM + 6);
+    x.strokeStyle = 'rgba(160,120,70,0.18)'; x.lineWidth = 2 * px;
+    for (let X = 50; X < W; X += 50) { x.beginPath(); x.moveTo(X, RIM - 6); x.lineTo(X, FLOOR); x.stroke(); }
+    bubbles(x, 'rgba(59,41,34,0.25)', 'rgba(59,41,34,0.22)');
+    world(x);
+    x.fillStyle = '#c08955'; x.strokeStyle = '#3b2922'; x.lineWidth = 3 * px;
+    rr(x, -WALL, RIM - 10, WALL, FLOOR - RIM + 10 + WALL, 4); x.fill(); x.stroke();
+    rr(x, W, RIM - 10, WALL, FLOOR - RIM + 10 + WALL, 4); x.fill(); x.stroke();
+    x.fillStyle = '#e2b860'; rr(x, -WALL, FLOOR, W + 2 * WALL, WALL, 4); x.fill(); x.stroke();
+  },
+
+  // 2. A glass jar on a pastel backdrop.
+  jar(x) {
+    screen(x);
+    const g = x.createLinearGradient(0, 0, 0, CH); g.addColorStop(0, '#FBE3EE'); g.addColorStop(0.55, '#E9E1F8'); g.addColorStop(1, '#D9E7FB');
+    x.fillStyle = g; x.fillRect(0, 0, CW, CH);
+    // soft bokeh
+    for (const [bx, by, br, a] of [[0.12, 0.08, 40, 0.35], [0.85, 0.15, 55, 0.3], [0.5, 0.04, 26, 0.4], [0.92, 0.55, 34, 0.25], [0.05, 0.6, 46, 0.25]]) {
+      x.fillStyle = `rgba(255,255,255,${a})`; x.beginPath(); x.arc(bx * CW, by * CH, br, 0, Math.PI * 2); x.fill();
+    }
+    world(x);
+    // table
+    x.fillStyle = '#E8D3C0'; x.fillRect(VIEW.x0 - 200, FLOOR + 10, W + 400, 60);
+    // glass body, behind
+    x.fillStyle = 'rgba(255,255,255,0.32)';
+    rr(x, -10, RIM - 18, W + 20, FLOOR - RIM + 30, [6, 6, 26, 26]); x.fill();
+    bubbles(x, 'rgba(120,100,160,0.35)', 'rgba(120,100,160,0.25)');
+    world(x);
+    // glass walls and bottom, in front
+    x.strokeStyle = 'rgba(255,255,255,0.95)'; x.lineWidth = 6 * px;
+    rr(x, -7, RIM - 15, W + 14, FLOOR - RIM + 24, [4, 4, 24, 24]); x.stroke();
+    x.strokeStyle = 'rgba(140,150,200,0.45)'; x.lineWidth = 2 * px;
+    rr(x, -11, RIM - 19, W + 22, FLOOR - RIM + 32, [6, 6, 28, 28]); x.stroke();
+    // reflections down the walls
+    x.fillStyle = 'rgba(255,255,255,0.55)';
+    rr(x, 6, RIM + 20, 7, FLOOR - RIM - 80, 4); x.fill();
+    rr(x, 18, RIM + 40, 3, FLOOR - RIM - 180, 2); x.fill();
+    rr(x, W - 14, RIM + 60, 5, FLOOR - RIM - 160, 3); x.fill();
+    // thick glass bottom
+    x.fillStyle = 'rgba(255,255,255,0.45)'; rr(x, -6, FLOOR, W + 12, 10, [0, 0, 20, 20]); x.fill();
+    // the jar's lip at the rim
+    x.fillStyle = 'rgba(255,255,255,0.9)'; x.strokeStyle = 'rgba(140,150,200,0.6)'; x.lineWidth = 2 * px;
+    rr(x, -16, RIM - 26, W + 32, 14, 7); x.fill(); x.stroke();
+  },
+
+  // 3. Bath time: a white tub against tiles, a rubber rabbit on the rim.
+  bath(x) {
+    screen(x);
+    x.fillStyle = '#DDF1EE'; x.fillRect(0, 0, CW, CH);
+    x.strokeStyle = '#FFFFFF'; x.lineWidth = 2;
+    const T = 34;
+    for (let X = -2; X < CW; X += T) { x.beginPath(); x.moveTo(X, 0); x.lineTo(X, CH); x.stroke(); }
+    for (let Y = 0; Y < CH; Y += T) { x.beginPath(); x.moveTo(0, Y); x.lineTo(CW, Y); x.stroke(); }
+    world(x);
+    // water and the tub's inside
+    x.fillStyle = '#F4FBFC'; x.fillRect(0, RIM - 4, W, FLOOR - RIM + 4);
+    const wg = x.createLinearGradient(0, RIM + 120, 0, FLOOR);
+    wg.addColorStop(0, 'rgba(140,210,235,0.0)'); wg.addColorStop(0.08, 'rgba(140,210,235,0.35)'); wg.addColorStop(1, 'rgba(110,190,225,0.45)');
+    x.fillStyle = wg; x.fillRect(0, RIM + 120, W, FLOOR - RIM - 120);
+    x.strokeStyle = 'rgba(255,255,255,0.8)'; x.lineWidth = 3 * px;
+    x.beginPath(); for (let X = 0; X <= W; X += 4) x.lineTo(X, RIM + 129 + Math.sin(X / 18) * 3); x.stroke();
+    bubbles(x, 'rgba(70,130,150,0.35)', 'rgba(70,130,150,0.25)');
+    world(x);
+    // enamel walls and floor, with a rolled rim
+    const enamel = (X, Y, w, h, r) => {
+      const eg = x.createLinearGradient(X, 0, X + w, 0); eg.addColorStop(0, '#FFFFFF'); eg.addColorStop(1, '#E3ECEF');
+      x.fillStyle = eg; rr(x, X, Y, w, h, r); x.fill();
+      x.strokeStyle = '#9FB8C0'; x.lineWidth = 3 * px; x.stroke();
+    };
+    enamel(-WALL, RIM - 6, WALL, FLOOR - RIM + 6 + WALL, [0, 0, 0, 14]);
+    enamel(W, RIM - 6, WALL, FLOOR - RIM + 6 + WALL, [0, 0, 14, 0]);
+    enamel(-WALL, FLOOR, W + 2 * WALL, WALL, [0, 0, 14, 14]);
+    enamel(-WALL - 8, RIM - 18, WALL + 14, 16, 8);
+    enamel(W - 6, RIM - 18, WALL + 14, 16, 8);
+    // feet
+    x.fillStyle = '#C9D6DA'; x.strokeStyle = '#9FB8C0';
+    for (const fx of [10, W - 40]) { rr(x, fx, FLOOR + WALL, 30, 10, [0, 0, 8, 8]); x.fill(); x.stroke(); }
+    // a little rubber rabbit on the right rim
+    x.save(); x.translate(W - 6, RIM - 34); x.scale(-1.5, 1.5);
+    x.fillStyle = '#F7A8C0'; x.strokeStyle = '#B5577A'; x.lineWidth = 2 * px;
+    x.beginPath(); x.ellipse(0, 0, 12, 10, 0, 0, Math.PI * 2); x.fill(); x.stroke();
+    x.beginPath(); x.ellipse(6, -10, 8, 7, 0, 0, Math.PI * 2); x.fill(); x.stroke();
+    for (const ex of [3, 9]) { x.beginPath(); x.ellipse(ex, -22, 2.6, 7, ex === 3 ? -0.2 : 0.2, 0, Math.PI * 2); x.fill(); x.stroke(); }
+    x.fillStyle = '#3B2922'; x.beginPath(); x.arc(9, -11, 1.4, 0, Math.PI * 2); x.fill();
+    x.restore();
+  },
+
+  // 4. Night sky: dark, stars, a glowing outline for the box.
+  night(x) {
+    screen(x);
+    const g = x.createLinearGradient(0, 0, 0, CH); g.addColorStop(0, '#141A3A'); g.addColorStop(1, '#2C2758');
+    x.fillStyle = g; x.fillRect(0, 0, CW, CH);
+    let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 70; i++) {
+      x.fillStyle = `rgba(255,255,255,${0.3 + rnd() * 0.6})`;
+      x.beginPath(); x.arc(rnd() * CW, rnd() * CH, rnd() < 0.15 ? 1.6 : 0.8, 0, Math.PI * 2); x.fill();
+    }
+    x.fillStyle = '#FFF4C8'; x.beginPath(); x.arc(CW * 0.82, 52, 18, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#141A3A'; x.beginPath(); x.arc(CW * 0.82 + 8, 46, 16, 0, Math.PI * 2); x.fill();
+    world(x);
+    x.fillStyle = 'rgba(255,255,255,0.05)'; x.fillRect(0, RIM, W, FLOOR - RIM);
+    bubbles(x, 'rgba(255,220,240,0.55)', 'rgba(255,255,255,0.25)');
+    world(x);
+    x.save();
+    x.shadowColor = 'rgba(120,220,255,0.9)'; x.shadowBlur = 12 * D;
+    x.strokeStyle = '#9FE8FF'; x.lineWidth = 4 * px; x.lineJoin = 'round';
+    x.beginPath(); x.moveTo(-3, RIM - 12); x.lineTo(-3, FLOOR + 3); x.lineTo(W + 3, FLOOR + 3); x.lineTo(W + 3, RIM - 12); x.stroke();
+    x.restore();
+  },
+
+  // 5. Paper: flat and clean, the box drawn like the game's chunky buttons.
+  paper(x) {
+    screen(x);
+    x.fillStyle = '#FFF6E6'; x.fillRect(0, 0, CW, CH);
+    x.fillStyle = 'rgba(59,41,34,0.08)';
+    for (let Y = 8; Y < CH; Y += 16) for (let X = (Y / 16) % 2 ? 8 : 0; X < CW; X += 16) { x.beginPath(); x.arc(X, Y, 1.3, 0, Math.PI * 2); x.fill(); }
+    world(x);
+    // the drop shadow and the box
+    x.fillStyle = '#3B2922'; rr(x, -WALL, RIM - 10 + 6 * px, W + 2 * WALL, FLOOR - RIM + 10 + WALL, 22); x.fill();
+    x.fillStyle = '#FFFFFF'; x.strokeStyle = '#3B2922'; x.lineWidth = 3.5 * px;
+    rr(x, -WALL, RIM - 10, W + 2 * WALL, FLOOR - RIM + 10 + WALL, 22); x.fill(); x.stroke();
+    x.fillStyle = '#F3E6D2'; rr(x, 0, RIM - 10, W, FLOOR - RIM + 10, [0, 0, 10, 10]); x.fill();
+    bubbles(x, 'rgba(228,86,111,0.55)', 'rgba(59,41,34,0.2)');
+  },
+
+  // 6. Meadow basket: a woven basket in the garden.
+  basket(x) {
+    screen(x);
+    const g = x.createLinearGradient(0, 0, 0, CH); g.addColorStop(0, '#BFE3F5'); g.addColorStop(1, '#EAF6F0');
+    x.fillStyle = g; x.fillRect(0, 0, CW, CH);
+    x.fillStyle = 'rgba(255,255,255,0.85)'; cloud(x, CW * 0.2, 60, 20); cloud(x, CW * 0.78, 95, 16);
+    const horizon = oy + (RIM + 40) * s;
+    x.fillStyle = '#B9DE98'; x.beginPath(); x.ellipse(CW * 0.2, horizon + 60, CW * 0.7, 120, 0, Math.PI, 0); x.fill();
+    x.fillStyle = '#A3D27F'; x.beginPath(); x.ellipse(CW * 0.9, horizon + 80, CW * 0.6, 110, 0, Math.PI, 0); x.fill();
+    x.fillStyle = '#8CC46A'; x.fillRect(0, horizon + 70, CW, CH);
+    for (const [fx, fy, c] of [[0.06, 0.82, '#F6D24A'], [0.94, 0.78, '#F3A6B3'], [0.03, 0.95, '#FFFFFF'], [0.97, 0.93, '#F6D24A']]) {
+      x.fillStyle = c; for (let k = 0; k < 5; k++) { x.beginPath(); x.arc(fx * CW + Math.cos(k * 1.26) * 5, fy * CH + Math.sin(k * 1.26) * 5, 3.5, 0, Math.PI * 2); x.fill(); }
+      x.fillStyle = '#E39A2E'; x.beginPath(); x.arc(fx * CW, fy * CH, 2.5, 0, Math.PI * 2); x.fill();
+    }
+    world(x);
+    x.fillStyle = '#F6E7C8'; x.fillRect(0, RIM - 6, W, FLOOR - RIM + 6);
+    x.strokeStyle = 'rgba(170,120,60,0.12)'; x.lineWidth = 3 * px;
+    for (let Y = RIM + 10; Y < FLOOR; Y += 22) { x.beginPath(); x.moveTo(0, Y); x.lineTo(W, Y); x.stroke(); }
+    bubbles(x, 'rgba(120,80,40,0.35)', 'rgba(120,80,40,0.22)');
+    world(x);
+    const weave = (X, Y, w, h, vertical) => {
+      x.save(); rr(x, X, Y, w, h, 5); x.clip();
+      x.fillStyle = '#C9935A'; x.fillRect(X, Y, w, h);
+      const step = 11;
+      for (let k = 0, p = vertical ? Y : X; p < (vertical ? Y + h : X + w); p += step, k++) {
+        x.fillStyle = k % 2 ? '#B57C43' : '#DDAA6E';
+        if (vertical) { x.fillRect(X, p, w / 2, step); x.fillStyle = k % 2 ? '#DDAA6E' : '#B57C43'; x.fillRect(X + w / 2, p, w / 2, step); }
+        else { x.fillRect(p, Y, step, h / 2); x.fillStyle = k % 2 ? '#DDAA6E' : '#B57C43'; x.fillRect(p, Y + h / 2, step, h / 2); }
+      }
+      x.restore();
+      x.strokeStyle = '#6E4521'; x.lineWidth = 3 * px; rr(x, X, Y, w, h, 5); x.stroke();
+    };
+    weave(-WALL - 2, RIM - 8, WALL + 2, FLOOR - RIM + 8 + WALL, true);
+    weave(W, RIM - 8, WALL + 2, FLOOR - RIM + 8 + WALL, true);
+    weave(-WALL - 2, FLOOR, W + 2 * WALL + 4, WALL + 2, false);
+    // a rolled rim on top of each side
+    x.fillStyle = '#DDAA6E'; x.strokeStyle = '#6E4521'; x.lineWidth = 3 * px;
+    rr(x, -WALL - 6, RIM - 16, WALL + 10, 12, 6); x.fill(); x.stroke();
+    rr(x, W - 4, RIM - 16, WALL + 10, 12, 6); x.fill(); x.stroke();
+  },
+};
+
+const out = {};
+for (const [name, draw] of Object.entries(SCENES)) {
+  const c = document.createElement('canvas');
+  c.width = CW * D; c.height = CH * D;
+  draw(c.getContext('2d'));
+  out[name] = c.toDataURL('image/png');
+  document.body.appendChild(c);
+}
+document.getElementById('out').textContent = JSON.stringify(out);
+</script>
+</body>
+</html>

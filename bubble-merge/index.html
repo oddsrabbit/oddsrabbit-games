@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <!-- Edge to edge, like the other first-party games: the HUD bar runs up
+         under the status bar and the panel down under the home indicator.
+         See docs/game-header-guidelines.md. -->
+    <meta name="oddsrabbit-chrome" content="edge" />
+    <title>Bubble Merge</title>
+    <!-- The SDK and the shared leaderboard component, as in flappy-rabbits and
+         match3: the leaderboard stylesheet first so styles.css has the last
+         word, then window.OddsRabbit and window.OddsRabbitUI. Served next to
+         the game in the release build; opened from the repo they 404 and the
+         game runs on its own, with the leaderboard buttons hidden. -->
+    <link rel="stylesheet" href="../leaderboard-v1.css?v=__UI_VERSION__" />
+    <link rel="stylesheet" href="./styles.css?v=__BUILD_ID__" />
+    <script src="../sdk-v1.js?v=__SDK_VERSION__"></script>
+    <script src="../leaderboard-v1.js?v=__UI_VERSION__"></script>
+    <script>
+      // Local testing only (dev/ isn't in the release bundle, so on the live
+      // site this loads nothing): ?mockhost stands in a fake host with a filled-in
+      // leaderboard (dev/mock-host.js), loading the shared UI from dist/.
+      if (/[?&]mockhost\b/.test(location.search)) {
+        document.write('<link rel="stylesheet" href="../dist/leaderboard-v1.css"><link rel="stylesheet" href="./styles.css">' +
+          '<script src="../dist/leaderboard-v1.js"><\/script><script src="./dev/mock-host.js"><\/script>');
+      }
+    </script>
+  </head>
+  <body>
+    <!-- Full screen: the scene fills it and everything else floats over it as
+         soft pills (round 7, layout B). js/game.js fits the box under the HUD. -->
+    <div id="app">
+      <main class="field" id="field">
+        <canvas id="board" aria-label="The box. Drag to aim, let go to drop."></canvas>
+
+        <div class="hud" id="hud">
+          <!-- The header row, beside the app's back button. -->
+          <div class="hud-row">
+            <!-- The score and best every arcade game shows (2048, snake, match3,
+                 flappy): the figure is the text, the label comes from CSS. -->
+            <div class="pill score-container" id="score" aria-label="Score 0">0</div>
+            <div class="pill best-container" id="best" aria-label="Best 0">0</div>
+            <!-- Starts hidden; js/scores.js reveals it once the host says it can
+                 serve a global board, like every other game's button. -->
+            <button type="button" class="pill icon" id="lb-btn" aria-label="Leaderboard" hidden>
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                <path d="M4 2h8v3a4 4 0 0 1-8 0z" fill="currentColor" />
+                <path d="M4 3H2v1.5A2.5 2.5 0 0 0 4.5 7M12 3h2v1.5A2.5 2.5 0 0 1 11.5 7" fill="none" stroke="currentColor" stroke-width="1.3" />
+                <rect x="7" y="8.5" width="2" height="3" fill="currentColor" />
+                <rect x="4.5" y="11.5" width="7" height="2.5" rx="0.6" fill="currentColor" />
+              </svg>
+            </button>
+            <button type="button" class="pill icon" id="menu-btn" aria-label="Pause">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <rect x="3.5" y="3" width="3" height="10" rx="1" fill="currentColor" />
+                <rect x="9.5" y="3" width="3" height="10" rx="1" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
+          <div class="pill next-container" aria-label="Next bubble">
+            <canvas id="next" width="26" height="26"></canvas>
+          </div>
+        </div>
+
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </main>
+    </div>
+
+    <div class="overlay" id="overlay" hidden>
+      <div class="card">
+        <h1 class="title" id="ov-title">Paused</h1>
+        <div class="ov-body" id="ov-body"></div>
+        <div class="ov-buttons" id="ov-buttons"></div>
+      </div>
+    </div>
+
+    <script src="./js/pieces.js?v=__BUILD_ID__"></script>
+    <script src="./js/scenes.js?v=__BUILD_ID__"></script>
+    <script src="./js/scores.js?v=__BUILD_ID__"></script>
+    <script src="./js/physics.js?v=__BUILD_ID__"></script>
+    <script src="./js/sound.js?v=__BUILD_ID__"></script>
+    <script src="./js/game.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

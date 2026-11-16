@@ -122,6 +122,18 @@ const GAME_HOP_JS = [
   'leaderboard.js',
 ];
 
+// Bubble Merge (slug `bubble-merge`; first built as Rabbit Merge). Drop-and-merge
+// physics puzzle with soap bubbles. Vanilla JS in load order: the pieces, scenes
+// and scores modules install themselves on window.RM before game.js reads them.
+const GAME_BUBBLE_MERGE_JS = [
+  'pieces.js',
+  'scenes.js',
+  'scores.js',
+  'physics.js',
+  'sound.js',
+  'game.js',
+];
+
 // Solitaire. Original Klondike. Splits deck/rules out of game.js since
 // solitaire has materially more rules logic than the action games.
 const GAME_SOLITAIRE_JS = [
@@ -151,6 +163,7 @@ await mkdir('dist/solitaire/images', { recursive: true });
 await mkdir('dist/liquid/js', { recursive: true });
 await mkdir('dist/flappy-rabbits/js', { recursive: true });
 await mkdir('dist/flappy-rabbits/fonts', { recursive: true });
+await mkdir('dist/bubble-merge/js', { recursive: true });
 
 const baseOpts = {
   bundle: true,
@@ -344,6 +357,16 @@ async function copyHostAssets() {
     ),
     copyFile('snake/fonts/press-start-2p-latin.woff2', 'dist/flappy-rabbits/fonts/press-start-2p-latin.woff2'),
     copyFile('snake/fonts/OFL.txt', 'dist/flappy-rabbits/fonts/OFL.txt'),
+    // Bubble Merge. Asset-free besides its icon: the bubbles and the three
+    // scenes are drawn in code (js/pieces.js, js/scenes.js). dev/ (the mock
+    // host, screenshots, style mocks) stays out of the bundle. The platform
+    // manifest points at <slug>/icon-512.png, so the icon ships with it.
+    copyHtmlWithBuildId('bubble-merge/index.html', 'dist/bubble-merge/index.html'),
+    copyFile('bubble-merge/styles.css', 'dist/bubble-merge/styles.css'),
+    ...GAME_BUBBLE_MERGE_JS.map((name) =>
+      copyFile(`bubble-merge/js/${name}`, `dist/bubble-merge/js/${name}`)
+    ),
+    copyFile('bubble-merge/icon/icon-512.png', 'dist/bubble-merge/icon-512.png'),
     // Liquid — WebGL fluid simulation. Vendored vanilla JS, no bundling needed.
     copyHtmlWithBuildId('liquid/index.html', 'dist/liquid/index.html'),
     copyFile('liquid/js/script.js', 'dist/liquid/js/script.js'),

@@ -43,6 +43,7 @@ chess/          Chess — async two-player chess (rules: ChessRules.php)
 word-rush/      Word Rush — daily word grid, Ranked + Casual
 rabbit-paint/   Rabbit Paint — tap-to-fill coloring with a daily gallery
 rabbit-sudoku/  Rabbit Sudoku — one calm daily 9×9 sudoku, with streaks and hints
+bubble-merge/   Bubble Merge — drop-and-merge bubble puzzle, three scenes, two keepBest boards
 docs/           Deploy cache policy, header guidelines, proposals
 scripts/        sync-public-sdk.mjs
 ```

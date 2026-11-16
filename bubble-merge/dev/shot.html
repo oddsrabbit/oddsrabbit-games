@@ -1,0 +1,42 @@
+<!doctype html><html><body style="margin:0;background:#222">
+<!-- Loads the game in a 393x852 iframe for headless-Chrome screenshots.
+     ?mode=fill | danger | menu | auto&n=20000 | lb | share   what to show
+     ?scene=jar | bath | night                                  which backdrop
+     ?host=mock                                                 use dev/mock-host.js
+     The iframe shares this page's origin, so the scene is set in its storage
+     before it loads. -->
+<iframe id="f" style="width:393px;height:852px;border:0;display:block"></iframe>
+<script>
+const q = new URLSearchParams(location.search);
+if (q.get('scene')) {
+  const s = JSON.parse(localStorage.getItem('bubble-merge:v1') || '{}');
+  s.scene = q.get('scene');
+  localStorage.setItem('bubble-merge:v1', JSON.stringify(s));
+}
+f.src = '../index.html' + (q.get('host') === 'mock' ? '?mockhost' : '');
+f.onload = () => {
+  const w = f.contentWindow;
+  const mode = q.get('mode');
+  setTimeout(() => {
+    const D = w.RM.debug;
+    if (mode === 'fill') {
+      [[0, 40, 500], [1, 90, 500], [2, 150, 490], [3, 230, 490], [4, 320, 480], [5, 80, 420], [6, 200, 400], [7, 310, 380], [8, 110, 300], [9, 280, 260], [10, 150, 150]]
+        .forEach(([t, x, y]) => D.spawn(t, x, y));
+      D.setAim(250);
+    }
+    if (mode === 'danger') { D.fill(34); D.setAim(120); }
+    if (mode === 'menu') w.document.getElementById('menu-btn').click();
+    if (mode === 'auto' || mode === 'share') {
+      D.auto = true; D.run(+q.get('n') || 3000); D.auto = false; D.run(1);
+      document.title = 'phase=' + D.phase + ' score=' + D.score + ' n=' + D.world.bodies.length;
+    }
+    if (mode === 'share') setTimeout(() => [...w.document.querySelectorAll('.btn')].find((b) => b.textContent === 'Share').click(), 900);
+    if (mode === 'lb') {
+      // Headless Chrome freezes CSS animations part way, so skip the fade-in.
+      const st = w.document.createElement('style'); st.textContent = '.lb-backdrop{animation:none!important}';
+      w.document.head.append(st);
+      w.RM.Scores.openLeaderboard();
+    }
+  }, 300);
+};
+</script></body></html>
