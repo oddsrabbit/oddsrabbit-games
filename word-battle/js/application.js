@@ -216,6 +216,9 @@
     searchTimer: null,
     searchRun: 0,
     invitees: {},
+    // Picker and seat-chip avatars, kept across redraws (see keptAvatar).
+    inviteAvatars: {},
+    seatAvatars: {},
     open: false,
     seats: 2,
     creating: false,
@@ -358,6 +361,16 @@
   function avatar(username, url) {
     if (UI && typeof UI.leaderboardAvatar === "function") return UI.leaderboardAvatar(username, url);
     return el("span", "avatar-fallback", (username || "?").charAt(0).toUpperCase());
+  }
+
+  // For lists that are cleared and rebuilt on every keystroke or tick (the
+  // invite picker, the seat chips): the same avatar node is moved into the new
+  // row instead of building a fresh one, so a photo that has loaded stays up
+  // rather than dropping back to the initial while it loads again. A `kept`
+  // map must only serve one list, which shows each person at most once.
+  function keptAvatar(kept, key, username, url) {
+    var k = key + "|" + (url || "");
+    return kept[k] || (kept[k] = avatar(username, url));
   }
 
   function meIn(view) {
@@ -1183,6 +1196,8 @@
     els.inviteInput.value = "";
     els.inviteSearch.hidden = !canSearch();
     resetSearch();
+    state.inviteAvatars = {};
+    state.seatAvatars = {};
     els.inviteNote.textContent = canSearch()
       ? "Search for anyone on OddsRabbit. They get a challenge to accept or decline."
       : "People you follow, or who follow you. For anyone else, add a seat for a link.";
@@ -1333,7 +1348,7 @@
       renderInvitable();
     });
     label.appendChild(box);
-    label.appendChild(avatar(person.username, person.avatar));
+    label.appendChild(keptAvatar(state.inviteAvatars, person.uuid, person.username, person.avatar));
     label.appendChild(el("span", "invitable-name", "@" + person.username));
     var relation = RELATION_LABEL[person.relation];
     if (relation) label.appendChild(el("span", "muted small relation", relation));
@@ -1446,13 +1461,13 @@
     clear(els.tableSeats);
     var you = el("span", "table-seat is-you");
     you.setAttribute("role", "listitem");
-    you.appendChild(avatar(OR.user ? OR.user.username : "you", OR.user ? OR.user.avatar : null));
+    you.appendChild(keptAvatar(state.seatAvatars, "you", OR.user ? OR.user.username : "you", OR.user ? OR.user.avatar : null));
     you.appendChild(el("span", "", "You"));
     els.tableSeats.appendChild(you);
     invitees.forEach(function (person) {
       var chip = el("span", "table-seat");
       chip.setAttribute("role", "listitem");
-      chip.appendChild(avatar(person.username, person.avatar));
+      chip.appendChild(keptAvatar(state.seatAvatars, person.uuid, person.username, person.avatar));
       chip.appendChild(el("span", "", "@" + person.username));
       var drop = el("button", "seat-remove", "✕");
       drop.type = "button";

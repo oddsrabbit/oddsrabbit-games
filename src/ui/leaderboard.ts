@@ -192,6 +192,9 @@ function el(tag: string, className?: string | null, text?: string): HTMLElement 
   return node;
 }
 
+/** Avatar URLs that have loaded at least once in this page. */
+const loadedAvatars = new Set<string>();
+
 /**
  * Colored-initial circle with the user's photo layered over it. The initial is
  * always painted first and the photo only revealed once it loads, so a 404 or a
@@ -211,17 +214,33 @@ export function leaderboardAvatar(name: string, avatarUrl: string | null): HTMLE
     const img = document.createElement('img');
     img.className = 'lb-avatar-img';
     img.alt = '';
-    // One request per row, and boards are now up to 100 rows deep while the
-    // list shows about ten at a time — so eager loading would fetch ~90 photos
-    // nobody has scrolled to, on a mobile connection, every time a board opens.
-    // Lazy loading is measured against the scroll container, which is exactly
-    // the bounded `.lb-list`. The initial is painted first either way, so a row
-    // that hasn't fetched its photo yet is already complete rather than empty.
-    img.loading = 'lazy';
-    img.decoding = 'async';
+    if (loadedAvatars.has(avatarUrl)) {
+      // Already fetched in this page, so it is in the memory cache: show it
+      // from the first frame. Waiting for `load` again would flash the initial
+      // and fade the photo back in every time a game redraws a list — once per
+      // keystroke in a search-as-you-type picker. Not lazy or async-decoded, so
+      // the cached image is painted with the row rather than a frame later.
+      node.classList.add('lb-avatar-has-img');
+    } else {
+      // One request per row, and boards are now up to 100 rows deep while the
+      // list shows about ten at a time — so eager loading would fetch ~90 photos
+      // nobody has scrolled to, on a mobile connection, every time a board opens.
+      // Lazy loading is measured against the scroll container, which is exactly
+      // the bounded `.lb-list`. The initial is painted first either way, so a row
+      // that hasn't fetched its photo yet is already complete rather than empty.
+      img.loading = 'lazy';
+      img.decoding = 'async';
+    }
     img.src = avatarUrl;
-    img.addEventListener('load', () => node.classList.add('lb-avatar-has-img'));
-    img.addEventListener('error', () => img.remove());
+    img.addEventListener('load', () => {
+      loadedAvatars.add(avatarUrl);
+      node.classList.add('lb-avatar-has-img');
+    });
+    img.addEventListener('error', () => {
+      loadedAvatars.delete(avatarUrl);
+      node.classList.remove('lb-avatar-has-img');
+      img.remove();
+    });
     node.appendChild(img);
   }
   return node;
