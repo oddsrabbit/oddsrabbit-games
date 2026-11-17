@@ -105,8 +105,13 @@ const DAILY_EXAMPLE = JSON.stringify(
 
 /** Multiplayer needs rules on our server, so neither preset offers it. */
 const SIMULATED = BRIDGE_REQUEST_TYPES.filter((v) => !v.startsWith('matches.') && v !== 'ready');
+/**
+ * The game info sheet is the app's: the games page has no such sheet, so the
+ * web preset leaves it out, the same as the real web host.
+ */
+const APP_ONLY = new Set(['actions.showGameInfo']);
 const CAPABILITIES: Record<HostKind, string[]> = {
-  web: SIMULATED,
+  web: SIMULATED.filter((v) => !APP_ONLY.has(v)),
   app: SIMULATED.filter((v) => v !== 'actions.requestSignIn'),
 };
 
@@ -492,6 +497,9 @@ async function pageOutcome(verb: string, payload: unknown): Promise<Outcome> {
       toast(`Share sheet opened: ${parts.join(' — ') || '(nothing to share)'}`);
       return { ok: true };
     }
+    case 'actions.showGameInfo':
+      showGameInfoSheet(typeof p.section === 'string' ? p.section : 'about');
+      return { ok: true };
     case 'chat.sharePicture': {
       if (!player()) return { ok: false, error: { code: CHAT_ERROR_CODES.unauthorized, message: 'Not authenticated.' } };
       const choice = await pickChat(p.image, typeof p.caption === 'string' ? p.caption : '');
@@ -577,6 +585,24 @@ function pickChat(image: unknown, caption: string): Promise<string | null> {
       { label: 'Cancel', onClick: () => settle(null) },
     ]);
   });
+}
+
+/**
+ * The app's sheet about the game. Like the app, the game is paused while it is
+ * up and resumed when it closes; the request resolves as soon as it is shown.
+ */
+function showGameInfoSheet(section: string): void {
+  sendLifecycle('pause');
+  dialog.addEventListener('close', () => sendLifecycle('resume'), { once: true });
+  openDialog('About this game', [
+    el('p', { text: `Opened on: ${section}.` }),
+    el('p', { className: 'hint', text: "The app's own sheet: description, how to play, ratings and reviews, notifications, report. The game only places the button." }),
+  ], [{ label: 'Close', primary: true, onClick: () => undefined }]);
+}
+
+function sendLifecycle(event: string): void {
+  post({ type: 'lifecycle', event });
+  record({ at: Date.now(), direction: 'out', verb: `lifecycle ${event}`, payload: { event } });
 }
 
 function promptSignIn(reason: string): void {
@@ -817,11 +843,7 @@ function bind(): void {
   for (const r of radios('scope')) r.addEventListener('change', readControls);
 
   for (const b of document.querySelectorAll<HTMLButtonElement>('[data-lifecycle]')) {
-    b.addEventListener('click', () => {
-      const event = b.dataset.lifecycle!;
-      post({ type: 'lifecycle', event });
-      record({ at: Date.now(), direction: 'out', verb: `lifecycle ${event}`, payload: { event } });
-    });
+    b.addEventListener('click', () => sendLifecycle(b.dataset.lifecycle!));
   }
 
   for (const tab of document.querySelectorAll<HTMLButtonElement>('.tab')) {

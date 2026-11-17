@@ -62,6 +62,9 @@ import {
   type BridgeUser,
   type AppColorScheme,
   type AppHapticType,
+  GameInfoSectionSchema,
+  GAME_INFO_SECTIONS,
+  type GameInfoSection,
   type AppLifecycleEvent,
   type FriendScore,
   type TopScoreEntry,
@@ -972,6 +975,18 @@ export interface OddsRabbitGlobal {
      * boot. `reason` is shown to the user in the prompt; keep it short.
      */
     requestSignIn(reason?: string): Promise<void>;
+    /**
+     * Open the platform's info sheet for this game: its description and how to
+     * play, ratings and reviews, notification settings and Report. The sheet
+     * is the host's, so it looks the same in every game; you decide where the
+     * button that opens it goes (a header action, a pause or settings menu).
+     * `section` picks where it opens: 'about' (default) or 'rate'.
+     *
+     * Resolves once the sheet is shown. In the app the game gets a `pause`
+     * lifecycle event while it is up and `resume` when it closes. Gate the
+     * button on `capabilities.has('actions.showGameInfo')`: older hosts lack it.
+     */
+    showGameInfo(section?: GameInfoSection): Promise<void>;
   };
 
   readonly lifecycle: {
@@ -1682,6 +1697,20 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       return this.request<void>(
         'actions.requestSignIn',
         reason ? { reason } : undefined
+      );
+    },
+    showGameInfo: (section?: GameInfoSection): Promise<void> => {
+      // Checked here so a plain-JS typo fails loudly, not as a host rejection.
+      if (section !== undefined && !GameInfoSectionSchema.safeParse(section).success) {
+        return Promise.reject(
+          new Error(
+            `actions.showGameInfo: section must be one of ${GAME_INFO_SECTIONS.join(', ')}`
+          )
+        );
+      }
+      return this.request<void>(
+        'actions.showGameInfo',
+        section ? { section } : undefined
       );
     },
   };

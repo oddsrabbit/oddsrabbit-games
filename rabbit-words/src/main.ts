@@ -363,6 +363,26 @@ function renderPuzzleHeader(state: State): HTMLElement {
   help.addEventListener('click', () => showInstructions());
   actions.appendChild(help);
 
+  // The platform's sheet about this game (ratings, reviews, notifications,
+  // report). The host draws it; this is only the way in. Older hosts lack it.
+  if (window.OddsRabbit.capabilities.has('actions.showGameInfo')) {
+    const info = document.createElement('button');
+    info.type = 'button';
+    info.className = 'header-icon-btn info-btn';
+    info.setAttribute('aria-label', 'About and ratings');
+    info.innerHTML =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 11v6M12 7.5v.01"/></svg>';
+    info.addEventListener('click', () => {
+      void window.OddsRabbit.actions.showGameInfo().catch((error: unknown) => {
+        // A host that listed the verb but turned it down: the SDK now reports
+        // it unsupported, so drop the button rather than leave a dead one.
+        if (!window.OddsRabbit.capabilities.has('actions.showGameInfo')) info.remove();
+        else console.warn('showGameInfo failed', error);
+      });
+    });
+    actions.appendChild(info);
+  }
+
   wrap.appendChild(meta);
   wrap.appendChild(actions);
   return wrap;

@@ -189,6 +189,15 @@ header h1 {
 
 .leaderboard-btn { font-size: 15px; }
 
+/* Up to three header buttons (trophy, ?, i): tighten them on narrow phones so
+   the puzzle number and date keep their room. */
+@media (max-width: 360px) {
+  .puzzle-header-actions { gap: 4px; }
+  .header-icon-btn { width: 28px; height: 28px; font-size: 14px; }
+  .puzzle-meta { min-width: 0; }
+  .puzzle-number, .puzzle-date { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
 /* Board */
 .board {
   display: grid;

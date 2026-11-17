@@ -16,6 +16,14 @@ export const HAPTIC_TYPES = ['light', 'medium', 'success', 'error'] as const;
 export const AppHapticTypeSchema = z.enum(HAPTIC_TYPES);
 export type AppHapticType = z.infer<typeof AppHapticTypeSchema>;
 
+/**
+ * Which part of the host's game info sheet `actions.showGameInfo` opens on:
+ * the game's description and how to play, or ratings and reviews.
+ */
+export const GAME_INFO_SECTIONS = ['about', 'rate'] as const;
+export const GameInfoSectionSchema = z.enum(GAME_INFO_SECTIONS);
+export type GameInfoSection = z.infer<typeof GameInfoSectionSchema>;
+
 export const LIFECYCLE_EVENTS = ['pause', 'resume', 'terminating'] as const;
 export const AppLifecycleEventSchema = z.enum(LIFECYCLE_EVENTS);
 export type AppLifecycleEvent = z.infer<typeof AppLifecycleEventSchema>;
@@ -814,6 +822,17 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
     type: z.literal('actions.haptic'),
     correlationId: CorrelationId,
     payload: z.object({ type: AppHapticTypeSchema }),
+  }),
+  // Open the host's own sheet about this game: description, how to play,
+  // ratings and reviews, notifications, report. The game only places the
+  // button; the host draws the sheet, so it is the same in every game.
+  // Resolves once the sheet is up, not when it closes.
+  z.object({
+    type: z.literal('actions.showGameInfo'),
+    correlationId: CorrelationId,
+    payload: z
+      .object({ section: GameInfoSectionSchema.optional() })
+      .optional(),
   }),
   z.object({
     type: z.literal('actions.requestSignIn'),

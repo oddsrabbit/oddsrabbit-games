@@ -45,6 +45,7 @@ export type {
   AppColorScheme,
   AppHapticType,
   AppLifecycleEvent,
+  GameInfoSection,
 } from '../schemas/messages';
 
 const sdk = new OddsRabbitSDK();
