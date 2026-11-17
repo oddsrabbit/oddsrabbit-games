@@ -23,8 +23,15 @@
 // move is one or the other, never both, and nothing is captured.
 //
 // Home: every hole of your target point is filled and at least one marble in
-// it is yours. So marbles parked in your target (a player who never left, or
-// left the table) can't keep you out forever. The first player home wins.
+// it is yours. So marbles parked in your target (a player who never left it)
+// can't keep you out forever. The first player home wins; after each move the
+// mover is checked first, then the others in turn order, since a move can
+// fill someone else's target too.
+//
+// Leaving: a seat that resigns or is claimed out of a bigger table takes its
+// marbles off at the end of the next move or pass, so ten marbles that never
+// moved can't fill someone's target for good. The state's `gone` records it,
+// [[seat, n]]: off after the nth move (moves and passes), which replay uses.
 
 (function (root) {
   "use strict";
@@ -191,44 +198,72 @@
 
   /**
    * One move, as the server applies it. `state` is { seats, board, moves,
-   * last, winner }; returns the new state or throws an Error with a message
-   * for the player. `move` is { type: "move", from, to } or { type: "pass" }
-   * (only when there is nothing else).
+   * last, winner, gone }; returns the new state or throws an Error with a
+   * message for the player. `move` is { type: "move", from, to } or
+   * { type: "pass" } (only when there is nothing else). `active` is the seats
+   * still playing, every seat when left out.
    */
-  function apply(state, seat, move) {
+  function apply(state, seat, move, active) {
     if (state.winner !== null && state.winner !== undefined) throw new Error("The game is over.");
+    var next;
     if (move && move.type === "pass") {
       if (hasMove(state.board, seat)) throw new Error("You can only pass with no move to make.");
-      return { seats: state.seats, board: state.board, moves: state.moves + 1, last: { seat: seat, pass: true }, winner: null };
+      next = { seats: state.seats, board: state.board, moves: state.moves + 1, last: { seat: seat, pass: true } };
+    } else {
+      if (!move || move.type !== "move") throw new Error("A move is { type: \"move\", from, to }.");
+      var path = pathFor(state.board, seat, move.from, move.to);
+      if (!path) throw new Error("That move isn’t legal.");
+      next = { seats: state.seats, board: put(state.board, move.from, move.to), moves: state.moves + 1,
+        last: { seat: seat, from: move.from, to: move.to, path: path } };
     }
-    if (!move || move.type !== "move") throw new Error("A move is { type: \"move\", from, to }.");
-    var path = pathFor(state.board, seat, move.from, move.to);
-    if (!path) throw new Error("That move isn’t legal.");
-    var board = put(state.board, move.from, move.to);
-    return {
-      seats: state.seats,
-      board: board,
-      moves: state.moves + 1,
-      last: { seat: seat, from: move.from, to: move.to, path: path },
-      winner: isHome(board, state.seats, seat) ? seat : null
-    };
+    return settle(next, seat, active, state.gone || []);
+  }
+
+  // The winner, if anyone is home (the mover first, then the others in turn
+  // order), else the marbles of seats no longer playing come off.
+  function settle(next, seat, active, gone) {
+    var n = next.seats;
+    var playing = function (s) { return s === seat || !active || active.indexOf(s) >= 0; };
+    next.winner = null;
+    next.gone = gone.slice();
+    for (var i = 0; i < n; i++) {
+      var w = (seat + i) % n;
+      if (playing(w) && isHome(next.board, n, w)) { next.winner = w; return next; }
+    }
+    for (var s = 0; s < n; s++) {
+      if (playing(s) || gone.some(function (g) { return g[0] === s; })) continue;
+      next.board = clear(next.board, s);
+      next.gone.push([s, next.moves]);
+    }
+    return next;
+  }
+
+  function clear(board, seat) {
+    return board.split(String(seat)).join(EMPTY);
   }
 
   /**
    * The move log (the server's `view.history`) replayed from the start:
    * [{ ply, seat, type, from, to, path, hops, jump, board }] where `board` is
    * the position after the move. Entries that aren't moves (a pass, a claim)
-   * come through with their type and the board unchanged. Stops at the first
-   * move that doesn't replay.
+   * come through with their type and the board unchanged. `gone` is the
+   * state's: a seat that left has its marbles taken off after the move the
+   * server took them off after. Stops at the first move that doesn't replay.
    */
-  function replay(seatCount, history) {
-    var board = start(seatCount), out = [];
+  function replay(seatCount, history, gone) {
+    var board = start(seatCount), out = [], moves = 0;
     for (var i = 0; i < (history || []).length; i++) {
-      var h = history[i], mv = h && h.move || {};
+      var h = history[i], mv = h && h.move || {}, path = null;
       if (mv.type === "move") {
-        var path = pathFor(board, h.seat, mv.from, mv.to);
+        path = pathFor(board, h.seat, mv.from, mv.to);
         if (!path) break;
         board = put(board, mv.from, mv.to);
+      }
+      if (mv.type === "move" || mv.type === "pass") {
+        moves++;
+        (gone || []).forEach(function (g) { if (g[1] === moves) board = clear(board, g[0]); });
+      }
+      if (path) {
         out.push({ ply: h.ply, seat: h.seat, type: "move", from: mv.from, to: mv.to, path: path,
           hops: path.length - 1, jump: path.length > 2 || hexDist(path[0], path[1]) === 2, board: board });
       } else {

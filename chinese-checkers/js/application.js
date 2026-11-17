@@ -2464,7 +2464,7 @@
     var v = view && view.view;
     if (!v || !Array.isArray(v.history) || !v.history.length) return [];
     var key = view.matchUuid + "@" + view.version + "#" + v.history.length;
-    if (replayed.key !== key) replayed = { key: key, moves: Rules.replay(seatsOf(view), v.history) };
+    if (replayed.key !== key) replayed = { key: key, moves: Rules.replay(seatsOf(view), v.history, v.gone) };
     return replayed.moves;
   }
 

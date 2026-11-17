@@ -92,12 +92,38 @@ test('agrees with the fixtures the server is tested on', () => {
   for (const g of games) {
     let s = { seats: g.seats, board: R.start(g.seats), moves: 0, last: null, winner: null };
     g.moves.forEach((mv, i) => {
-      s = R.apply(s, mv.seat, mv.move);
+      s = R.apply(s, mv.seat, mv.move, g.active);
       assert.equal(s.board, g.boards[i]);
       assert.deepEqual(s.last.path || null, g.paths[i]);
     });
     assert.equal(s.winner, g.winner);
+    assert.deepEqual(s.gone, g.gone);
+    const log = R.replay(g.seats, g.moves.map((mv, i) => ({ ply: i + 1, seat: mv.seat, move: mv.move })), s.gone);
+    assert.equal(log[log.length - 1].board, s.board);
   }
+});
+
+test('a seat that left takes its marbles off after the next move', () => {
+  const s = { seats: 4, board: R.start(4), moves: 0, last: null, winner: null, gone: [] };
+  const m = R.allMoves(s.board, 0)[0];
+  const next = R.apply(s, 0, { type: 'move', from: m.from, to: m.to }, [0, 1, 3]);
+  assert.equal([...next.board].filter((c) => c === '2').length, 0);
+  assert.deepEqual(next.gone, [[2, 1]]);
+  const again = R.apply(next, 1, { type: 'move', from: R.allMoves(next.board, 1)[0].from, to: R.allMoves(next.board, 1)[0].to }, [0, 1, 3]);
+  assert.deepEqual(again.gone, [[2, 1]]);
+});
+
+test('a move that fills someone else\'s target wins for them', () => {
+  let b = empty();
+  const tgt = R.pointHoles[R.targetOf(2, 1)];
+  tgt.forEach((h, i) => { b = set(b, h, i === 0 ? '1' : '0'); });
+  // A hole on the target's edge, filled last from just outside it.
+  const last = tgt.find((h) => R.neighbours[h].some((n) => n >= 0 && !tgt.includes(n)) && h !== tgt[0]);
+  b = set(b, last, '.');
+  const from = R.neighbours[last].find((n) => n >= 0 && !tgt.includes(n));
+  b = set(b, from, '0');
+  const next = R.apply({ seats: 2, board: b, moves: 5, last: null, winner: null }, 0, { type: 'move', from, to: last });
+  assert.equal(next.winner, 1);
 });
 
 function rng(seed) {
