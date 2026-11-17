@@ -1,0 +1,87 @@
+<!doctype html><html><body style="margin:0;background:#222">
+<!-- The harness in a 393×852 frame, for headless-Chrome screenshots and an
+     end-to-end run through the real page. Serve chinese-checkers/ and open
+     dev/shot.html?mode=…:
+       cpu       the Play the computer screen
+       select    a computer game with a marble picked up (the move dots)
+       e2e       a whole game against the computer, every move made by
+                 tapping Hint, the ringed hole, then Send; the result goes in
+                 the page title (read it with --dump-dom)
+     Other params go through to the harness (players=3 sets the table). -->
+<iframe id="f" style="width:393px;height:852px;border:0;display:block"></iframe>
+<script>
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') || 'cpu';
+const seats = q.get('players') || '2';
+f.src = 'harness.html?fresh=1&games=0&' + (q.get('pass') || '');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function game() { return f.contentWindow.frames[0]; }
+async function until(fn, ms = 20000) {
+  const t = Date.now();
+  while (Date.now() - t < ms) { const v = fn(); if (v) return v; await sleep(50); }
+  throw new Error('timed out');
+}
+function tapAt(w, node) {
+  const r = node.getBoundingClientRect();
+  const svg = w.document.querySelector('.cc-board');
+  svg.dispatchEvent(new w.PointerEvent('pointerdown', { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true, button: 0, pointerType: 'touch' }));
+}
+const report = (s) => { document.title = s; };
+(async () => {
+  await sleep(600);
+  const w = await until(() => game() && game().document.querySelector('.cpu-open-button') && game());
+  w.requestAnimationFrame = (cb) => setTimeout(() => cb(w.performance.now()), 16);
+  const errors = [];
+  w.addEventListener('error', (e) => errors.push(e.message));
+  const d = w.document;
+  await until(() => !d.querySelector('.hero').hidden);
+  [...d.querySelectorAll('.cpu-open-button')].find((b) => b.offsetParent).click();
+  await until(() => !d.querySelector('.screen-cpu').hidden);
+  d.querySelector('.cpu-table[data-seats="' + seats + '"]').click();
+  if (mode === 'cpu') return;
+  d.querySelector('.cpu-start').click();
+  await until(() => !d.querySelector('.screen-match').hidden);
+  if (mode === 'select') {
+    await until(() => !d.querySelector('.move-hint').hidden);
+    d.querySelector('.hint-button').click();
+    return;
+  }
+  if (mode === 'zoom') {
+    // The dots up close: the board scaled up so a misplaced dot would show.
+    await until(() => !d.querySelector('.move-hint').hidden);
+    d.querySelector('.hint-button').click();
+    await until(() => d.querySelector('.cc-dot'));
+    const svg = d.querySelector('.cc-board');
+    const dot = d.querySelector('.cc-dot');
+    const cx = +dot.getAttribute('cx'), cy = +dot.getAttribute('cy');
+    svg.setAttribute('viewBox', (cx - 3) + ' ' + (cy - 3) + ' 6 6');
+    return;
+  }
+  let moves = 0, takeback = false;
+  while (true) {
+    await until(() => !d.querySelector('.game-over').hidden || (!d.querySelector('.move-hint').hidden && !d.querySelector('.assist').hidden), 60000);
+    if (!d.querySelector('.game-over').hidden) break;
+    d.querySelector('.hint-button').click();
+    const ring = await until(() => d.querySelector('.cc-hint'));
+    tapAt(w, ring);
+    await until(() => !d.querySelector('.move-bar').hidden);
+    d.querySelector('.send-button').click();
+    moves++;
+    if (moves === 3 && !takeback) {
+      takeback = true;
+      await sleep(100);
+      await until(() => !d.querySelector('.takeback-button, .wait-takeback') || ![...d.querySelectorAll('.takeback-button, .wait-takeback')].every((b) => b.hidden || b.offsetParent === null));
+      const tb = [...d.querySelectorAll('.wait-takeback, .takeback-button')].find((b) => b.offsetParent && !b.disabled);
+      if (tb) { tb.click(); moves--; }
+    }
+    report('moves=' + moves + ' errors=' + errors.join('|'));
+  }
+  report('DONE moves=' + moves + ' title=' + d.querySelector('.game-over-title').textContent + ' kicker=' + d.querySelector('.over-kicker').textContent
+    + ' scores=' + [...d.querySelectorAll('.over-row')].map((r) => r.textContent).join(';') + ' errors=' + errors.join('|'));
+})().catch((e) => {
+  const d = game() && game().document;
+  const vis = (sel) => d && d.querySelector(sel) && !d.querySelector(sel).hidden;
+  report('FAIL ' + e.message + ' ' + (d ? ['move-hint', 'assist', 'move-bar', 'wait-bar', 'game-over', 'pass-button'].map((c) => c + '=' + vis('.' + c)).join(' ')
+    + ' turn=' + d.querySelector('.turn-main').textContent + ' wait=' + d.querySelector('.wait-text').textContent + ' hint=' + d.querySelector('.move-hint-text').textContent : ''));
+});
+</script></body></html>

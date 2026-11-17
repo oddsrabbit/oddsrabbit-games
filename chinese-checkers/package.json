@@ -1,0 +1,13 @@
+{
+  "name": "chinese-checkers",
+  "private": true,
+  "description": "Chinese Checkers: an async game for 2-4 players on OddsRabbit, plus games against the computer.",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
