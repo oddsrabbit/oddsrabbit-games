@@ -38,8 +38,12 @@ export type {
   ContentSubmitResult,
   ChatSharePicturePayload,
   ChatShareResult,
+  WalletItem,
+  WalletItems,
+  WalletSpendPayload,
+  WalletSpendResult,
 } from './sdk';
-export { CONTENT_ERROR_CODES, CHAT_ERROR_CODES, PICTURE_MAX_BYTES, MATCH_ERROR_CODES, SOCIAL_ERROR_CODES, GIFT_ERROR_CODES, VISIT_ERROR_CODES } from './sdk';
+export { CONTENT_ERROR_CODES, CHAT_ERROR_CODES, PICTURE_MAX_BYTES, MATCH_ERROR_CODES, SOCIAL_ERROR_CODES, GIFT_ERROR_CODES, VISIT_ERROR_CODES, WALLET_ERROR_CODES } from './sdk';
 export type {
   BridgeUser,
   AppColorScheme,

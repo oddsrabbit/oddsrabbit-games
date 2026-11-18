@@ -7,6 +7,11 @@ import {
   ContentRevealSchema,
   ContentSubmitResultSchema,
   ChatShareResultSchema,
+  WALLET_ERROR_CODES,
+  WalletBalanceSchema,
+  WalletItemSchema,
+  WalletItemsResultSchema,
+  WalletSpendResultSchema,
   SeasonBoardEnvelopeSchema,
   SeasonEntrySchema,
   RoundRankSchema,
@@ -74,6 +79,8 @@ import {
   type ContentReveal,
   type ContentSubmitResult,
   type ChatShareResult,
+  type WalletItem,
+  type WalletSpendResult,
 } from '../schemas/messages';
 import { BridgeTransport, type LifecycleHandler } from './transport';
 
@@ -86,6 +93,8 @@ export type {
   ContentReveal,
   ContentSubmitResult,
   ChatShareResult,
+  WalletItem,
+  WalletSpendResult,
   SeasonBoard,
   SeasonEntry,
   SeasonMetric,
@@ -119,6 +128,7 @@ export type {
 export {
   CONTENT_ERROR_CODES,
   CHAT_ERROR_CODES,
+  WALLET_ERROR_CODES,
   PICTURE_MAX_BYTES,
   MATCH_ERROR_CODES,
   MATCH_MAX_PENDING_STRANGER_INVITES,
@@ -164,6 +174,24 @@ export interface VisitRecordPayload {
    * `'snack'`. Picks the push line from the manifest's `social.visitLines`.
    */
   kind: string;
+}
+
+export interface WalletSpendPayload {
+  /** The catalog item, e.g. `'warp-8h'`. */
+  item: string;
+  /**
+   * The game's id for this one purchase, `[A-Za-z0-9._:-]{1,64}`. Make it
+   * before the first try and keep it for retries: the server charges a key
+   * once. A new purchase needs a new key.
+   */
+  key: string;
+}
+
+export interface WalletItems {
+  /** The player's clover. */
+  balance: number;
+  /** What this game sells, with the player's standing on each. */
+  items: WalletItem[];
 }
 
 export interface NotificationSchedulePayload {
@@ -962,6 +990,34 @@ export interface OddsRabbitGlobal {
     sentToday(): Promise<string[]>;
   };
 
+  /**
+   * Clover, the currency players earn across games from Daily and Weekly
+   * Quests. A game can sell its own items for clover; prices and limits live
+   * in the server's catalog, never in the game. There is no way to give
+   * clover: only quests make it.
+   *
+   * Requires the `bridge:wallet` scope and a signed-in player. Gate the shop
+   * on `capabilities.has('wallet.spend')`, then on `items()` not being null:
+   * clover opens to players in stages, and a player it hasn't reached yet
+   * gets null.
+   *
+   * `balance` and `items` resolve null when there is nothing to show (signed
+   * out, not open yet, no host support, a failure). `spend` REJECTS with a
+   * `wallet/*` code (`WALLET_ERROR_CODES`).
+   */
+  readonly wallet: {
+    balance(): Promise<number | null>;
+    items(): Promise<WalletItems | null>;
+    /**
+     * Buy one item. Apply its effect from the result, and only once per key:
+     * a retry with the same key resolves `replayed: true` without charging.
+     * A failure without a `wallet/*` code (a dropped or malformed answer) may
+     * still have charged, so retry with the same key before telling the
+     * player it didn't go through.
+     */
+    spend(payload: WalletSpendPayload): Promise<WalletSpendResult>;
+  };
+
   readonly actions: {
     share(payload?: { title?: string; text?: string }): Promise<void>;
     haptic(type: AppHapticType): Promise<void>;
@@ -1684,6 +1740,44 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
           if (isUnsupportedError(error)) return [];
           throw error;
         });
+    },
+  };
+
+  readonly wallet = {
+    // Reads degrade to null on every failure: a shop the game can't fill is
+    // one it hides, and `wallet/unavailable` (not open to this player yet)
+    // must look the same as no wallet at all.
+    balance: (): Promise<number | null> => {
+      if (!this.user) return Promise.resolve(null);
+      return this.request<unknown>('wallet.balance')
+        .then((result) => {
+          const parsed = WalletBalanceSchema.safeParse(result);
+          return parsed.success ? parsed.data.balance : null;
+        })
+        .catch(() => null);
+    },
+    items: (): Promise<WalletItems | null> => {
+      if (!this.user) return Promise.resolve(null);
+      return this.request<unknown>('wallet.items')
+        .then((result) => {
+          const parsed = WalletItemsResultSchema.safeParse(result);
+          if (!parsed.success) return null;
+          return {
+            balance: parsed.data.balance,
+            items: parseRows<WalletItem>(WalletItemSchema, parsed.data.items),
+          };
+        })
+        .catch(() => null);
+    },
+    spend: (payload: WalletSpendPayload): Promise<WalletSpendResult> => {
+      if (!this.user) {
+        return Promise.reject({ code: WALLET_ERROR_CODES.unauthorized, message: 'Sign in to use clover.' });
+      }
+      return this.request<unknown>('wallet.spend', { item: payload.item, key: payload.key }).then((result) => {
+        const parsed = WalletSpendResultSchema.safeParse(result);
+        if (!parsed.success) throw new Error('wallet.spend: malformed result');
+        return parsed.data;
+      });
     },
   };
 

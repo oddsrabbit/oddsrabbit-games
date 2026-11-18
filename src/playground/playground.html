@@ -104,6 +104,7 @@
             <label class="check"><input type="checkbox" name="scope" value="bridge:notifications" checked /> bridge:notifications</label>
             <label class="check"><input type="checkbox" name="scope" value="bridge:social" checked /> bridge:social</label>
             <label class="check"><input type="checkbox" name="scope" value="bridge:submit" checked /> bridge:submit</label>
+            <label class="check"><input type="checkbox" name="scope" value="bridge:wallet" checked /> bridge:wallet</label>
             <p class="hint">Untick one to see the <code>*/forbidden</code> error. The server doesn't check <code>bridge:storage</code> or <code>bridge:share</code>.</p>
           </fieldset>
 
@@ -180,6 +181,23 @@
               <textarea id="visit-lines" rows="3" spellcheck="false" placeholder='{"snack": "{username} came by and left a snack."}'></textarea>
             </label>
             <ul class="rows" id="social"></ul>
+          </details>
+
+          <details>
+            <summary>Clover <span class="muted" id="clover-balance"></span></summary>
+            <p class="hint">Only quests make clover; Earn stands in for one. The catalog is what <code>OR.wallet.items</code> serves: prices and limits live on the server, never in the game. Force <code>wallet/unavailable</code> on the Errors tab to see a player clover hasn't reached yet.</p>
+            <div class="row">
+              <button class="btn small" type="button" id="earn-clover">Earn 50 clover</button>
+            </div>
+            <label class="field">
+              <span>Catalog (JSON)</span>
+              <textarea id="wallet-items" rows="8" spellcheck="false"></textarea>
+            </label>
+            <div class="row">
+              <button class="btn small" type="button" id="apply-wallet">Apply</button>
+              <span class="error-text" id="wallet-error"></span>
+            </div>
+            <ul class="rows" id="purchases"></ul>
           </details>
 
           <details>

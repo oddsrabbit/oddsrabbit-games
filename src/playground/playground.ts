@@ -26,6 +26,8 @@ import {
   NOTIFICATION_ERROR_CODES,
   SOCIAL_ERROR_CODES,
   VISIT_ERROR_CODES,
+  WALLET_ERROR_CODES,
+  WALLET_ITEM_PATTERN,
 } from '../schemas/messages';
 import {
   DEFAULT_PLAYER,
@@ -37,6 +39,7 @@ import {
   type Outcome,
   type PlaygroundSettings,
   type PlaygroundState,
+  type WalletCatalogItem,
   type PlaygroundUser,
   type Reminder,
 } from './fake-platform';
@@ -60,6 +63,7 @@ interface Config {
   initialState: string;
   dailyContent: string;
   visitLines: string;
+  walletItems: string;
 }
 
 interface ErrorRule {
@@ -103,6 +107,17 @@ const DAILY_EXAMPLE = JSON.stringify(
   2
 );
 
+const WALLET_EXAMPLE = JSON.stringify(
+  [
+    { item: 'warp-8h', name: 'Time warp (8 hours)', kind: 'consumable', price: 40, limit: { count: 2, per: 'week' } },
+    { item: 'hat-red', name: 'Red hat', kind: 'permanent', price: 120, limit: null },
+  ],
+  null,
+  2
+);
+/** What the Earn button pays, about one Daily Quest. */
+const CLOVER_PER_QUEST = 50;
+
 /** Multiplayer needs rules on our server, so neither preset offers it. */
 const SIMULATED = BRIDGE_REQUEST_TYPES.filter((v) => !v.startsWith('matches.') && v !== 'ready');
 /**
@@ -127,6 +142,7 @@ const KNOWN_CODES = [
   ...Object.values(SOCIAL_ERROR_CODES),
   ...Object.values(GIFT_ERROR_CODES),
   ...Object.values(VISIT_ERROR_CODES),
+  ...Object.values(WALLET_ERROR_CODES),
   ...Object.values(MATCH_ERROR_CODES),
 ];
 
@@ -217,13 +233,14 @@ const config: Config = {
   username: DEFAULT_PLAYER.username,
   supporter: false,
   host: 'web',
-  scopes: ['bridge:notifications', 'bridge:social', 'bridge:submit'],
+  scopes: ['bridge:notifications', 'bridge:social', 'bridge:submit', 'bridge:wallet'],
   fillBoards: true,
   pushReachable: true,
   delay: 0,
   initialState: '',
   dailyContent: DAILY_EXAMPLE,
   visitLines: '',
+  walletItems: WALLET_EXAMPLE,
   ...saved,
 };
 if (params.get('gameUrl')) config.gameUrl = params.get('gameUrl')!;
@@ -233,6 +250,8 @@ let errorRules: ErrorRule[] = readStore<ErrorRule[]>(ERRORS_KEY) ?? [];
 const log: LogEntry[] = [];
 /** The last daily content that parsed, kept in use while the editor holds a typo. */
 let lastGoodDaily: Record<string, DailyRound> = {};
+/** The same for the clover catalog. */
+let lastGoodWallet: WalletCatalogItem[] = [];
 let platform = makePlatform();
 let initialStateForNextLoad: Record<string, unknown> | null = null;
 
@@ -254,11 +273,46 @@ function parseDaily(text: string): Record<string, DailyRound> {
   return parsed as Record<string, DailyRound>;
 }
 
+/** The catalog's shape as the server keeps it; a row the SDK would drop is refused here instead. */
+function parseWallet(text: string): WalletCatalogItem[] {
+  if (!text.trim()) return [];
+  const parsed = JSON.parse(text) as unknown;
+  if (!Array.isArray(parsed)) throw new Error('Expected an array of items.');
+  const seen = new Set<string>();
+  return parsed.map((row, i) => {
+    const r = (row ?? {}) as Record<string, unknown>;
+    const where = `Item ${i + 1}`;
+    if (typeof r.item !== 'string' || !WALLET_ITEM_PATTERN.test(r.item)) throw new Error(`${where}: "item" must match [a-z0-9-]{1,64}.`);
+    if (seen.has(r.item)) throw new Error(`${where}: "${r.item}" is listed twice.`);
+    seen.add(r.item);
+    if (typeof r.name !== 'string' || !r.name) throw new Error(`${where}: needs a "name".`);
+    if (r.kind !== 'permanent' && r.kind !== 'consumable') throw new Error(`${where}: "kind" is "permanent" or "consumable".`);
+    if (!Number.isInteger(r.price) || (r.price as number) < 1) throw new Error(`${where}: "price" is a whole number of clover, 1 or more.`);
+    const limit = r.limit as { count?: unknown; per?: unknown } | null | undefined;
+    if (limit != null) {
+      if (!Number.isInteger(limit.count) || (limit.count as number) < 1) throw new Error(`${where}: "limit.count" is 1 or more.`);
+      if (limit.per !== 'day' && limit.per !== 'week' && limit.per !== 'ever') throw new Error(`${where}: "limit.per" is "day", "week" or "ever".`);
+    }
+    return {
+      item: r.item,
+      name: r.name,
+      kind: r.kind,
+      price: r.price as number,
+      limit: limit == null ? null : { count: limit.count as number, per: limit.per as 'day' | 'week' | 'ever' },
+    };
+  });
+}
+
 function settings(): PlaygroundSettings {
   try {
     lastGoodDaily = parseDaily(config.dailyContent);
   } catch {
     // Shown next to the editor; the last good content stays in use.
+  }
+  try {
+    lastGoodWallet = parseWallet(config.walletItems);
+  } catch {
+    // Same as daily content.
   }
   return {
     user: player(),
@@ -266,6 +320,7 @@ function settings(): PlaygroundSettings {
     fillBoards: config.fillBoards,
     pushReachable: config.pushReachable,
     dailyContent: lastGoodDaily,
+    walletItems: lastGoodWallet,
   };
 }
 
@@ -532,6 +587,10 @@ function afterOutcome(verb: string, payload: unknown, outcome: Outcome): void {
     }
     if (verb === 'actions.haptic' && config.host === 'app') toast(`Haptic: ${String(p.type)}`);
     if (verb === 'content.submit') toast(`"${String(p.title)}" went to the review queue.`);
+    if (verb === 'wallet.spend') {
+      const r = outcome.result as { item: string; balance: number; replayed: boolean };
+      toast(r.replayed ? `Replayed ${r.item}: no charge.` : `Bought ${r.item}. ${r.balance} clover left.`);
+    }
     if (verb === 'notifications.schedule') toast(`Reminder "${String(p.title)}" set for ${relative(String(p.fireAt))}.`);
   }
   if (verb !== 'ready' && verb !== 'time.now') {
@@ -728,6 +787,17 @@ function renderData(): void {
   ];
   $('social').replaceChildren(...social);
 
+  const wallet = platform.state;
+  $('clover-balance').textContent = `${wallet.cloverBalance} clover`;
+  $('purchases').replaceChildren(
+    ...(wallet.walletPurchases.length
+      ? wallet.walletPurchases
+          .slice(-10)
+          .reverse()
+          .map((b) => el('li', {}, [el('code', { text: b.item }), el('span', { className: 'grow muted', text: `${b.key} · ${relative(b.at)}` })]))
+      : [el('li', { className: 'muted', text: 'Nothing bought yet.' })])
+  );
+
   $('submissions').replaceChildren(
     ...(platform.state.submissions.length
       ? platform.state.submissions.map((s) => {
@@ -798,6 +868,7 @@ function syncControls(): void {
   input('initial-state').value = config.initialState;
   ($('daily-content') as HTMLTextAreaElement).value = config.dailyContent;
   ($('visit-lines') as HTMLTextAreaElement).value = config.visitLines;
+  ($('wallet-items') as HTMLTextAreaElement).value = config.walletItems;
 }
 
 function readControls(): void {
@@ -870,6 +941,25 @@ function bind(): void {
     }
   });
 
+  $('apply-wallet').addEventListener('click', () => {
+    const text = ($('wallet-items') as HTMLTextAreaElement).value;
+    try {
+      parseWallet(text);
+      config.walletItems = text;
+      saveConfig();
+      $('wallet-error').textContent = '';
+      toast('Clover catalog updated.');
+    } catch (error) {
+      $('wallet-error').textContent = error instanceof Error ? error.message : String(error);
+    }
+  });
+  $('earn-clover').addEventListener('click', () => {
+    platform.earnClover(CLOVER_PER_QUEST);
+    toast(`The player finished a quest: +${CLOVER_PER_QUEST} clover.`);
+    saveState();
+    renderData();
+  });
+
   const from = $('friend-from') as HTMLSelectElement;
   from.replaceChildren(...FRIENDS.map((f) => {
     const option = el('option', { text: f.username });
@@ -910,7 +1000,7 @@ function bind(): void {
     renderData();
   });
   $('reset').addEventListener('click', () => {
-    openDialog('Reset all test data?', [el('p', { text: `Saves, scores, reminders, gifts, visits and submissions for "${config.slug}" are removed.` })], [
+    openDialog('Reset all test data?', [el('p', { text: `Saves, scores, reminders, gifts, visits, submissions, clover and purchases for "${config.slug}" are removed.` })], [
       { label: 'Cancel', onClick: () => undefined },
       {
         label: 'Reset',

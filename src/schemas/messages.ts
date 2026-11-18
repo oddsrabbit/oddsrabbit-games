@@ -281,6 +281,39 @@ export const CHAT_ERROR_CODES = {
   rateLimited: 'chat/rate-limited',
 } as const;
 
+// ---- Clover wallet (`bridge:wallet`): the games-wide currency players earn
+// from Daily and Weekly Quests. A game can sell its own items for clover
+// (prices and limits are the server's catalog) but can never create clover.
+
+/** A `wallet.spend` key: the game's id for one purchase, reused on retry. */
+export const WALLET_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
+/** An item key in the server catalog, e.g. `warp-8h`. */
+export const WALLET_ITEM_PATTERN = /^[a-z0-9-]{1,64}$/;
+
+/** Per-call outcomes of `wallet.*`. None of them retire a verb. */
+export const WALLET_ERROR_CODES = {
+  /** Signed out. */
+  unauthorized: 'wallet/unauthorized',
+  /** The app's manifest does not declare `bridge:wallet`. */
+  forbidden: 'wallet/forbidden',
+  /** Clover isn't open to this player yet (it opens with quests). */
+  unavailable: 'wallet/unavailable',
+  /** A bad item or key shape. */
+  invalid: 'wallet/invalid',
+  /** This game doesn't sell that item. */
+  unknownItem: 'wallet/unknown-item',
+  /** A permanent item the player already owns. */
+  owned: 'wallet/owned',
+  /** The item's limit for this day or week is used up. */
+  limit: 'wallet/limit',
+  /** Not enough clover. */
+  insufficient: 'wallet/insufficient',
+  /** This key already bought a different item: a bug in the game. */
+  keyReused: 'wallet/key-reused',
+  /** Too many spends in the last minute. */
+  rateLimited: 'wallet/rate-limited',
+} as const;
+
 /** Most uuids one `visits.seen` call may name. */
 export const VISITS_SEEN_MAX = 50;
 
@@ -798,6 +831,27 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('visits.sentToday'),
     correlationId: CorrelationId,
+  }),
+  // ---- Clover wallet (`bridge:wallet`). All signed in. No earn verb: only
+  // the server creates clover.
+  z.object({
+    type: z.literal('wallet.balance'),
+    correlationId: CorrelationId,
+  }),
+  // This game's items, with prices, limits and the player's standing on each.
+  z.object({
+    type: z.literal('wallet.items'),
+    correlationId: CorrelationId,
+  }),
+  // Buy one item. `key` is the game's id for this purchase: a retry with the
+  // same key charges once and answers `replayed: true`.
+  z.object({
+    type: z.literal('wallet.spend'),
+    correlationId: CorrelationId,
+    payload: z.object({
+      item: z.string().regex(WALLET_ITEM_PATTERN),
+      key: z.string().regex(WALLET_KEY_PATTERN),
+    }),
   }),
   z.object({
     type: z.literal('actions.share'),
@@ -1454,6 +1508,47 @@ export const GiftClaimResultSchema = z.object({
 });
 
 export type GiftClaimResult = z.infer<typeof GiftClaimResultSchema>;
+
+// Result of `wallet.balance`: the player's clover.
+export const WalletBalanceSchema = z.object({ balance: z.number().int().nonnegative() });
+
+export const WALLET_ITEM_KINDS = ['permanent', 'consumable'] as const;
+export const WALLET_LIMIT_PERIODS = ['day', 'week', 'ever'] as const;
+
+// One item a game sells. `limit` caps buys per UTC day, per week (resets
+// Monday 00:00 UTC, with Weekly Quests) or ever; `remaining` is how many more
+// this window, null when unlimited. `owned` is for permanent items.
+export const WalletItemSchema = z.object({
+  item: z.string().regex(WALLET_ITEM_PATTERN),
+  name: z.string().min(1),
+  kind: z.enum(WALLET_ITEM_KINDS),
+  price: z.number().int().positive(),
+  limit: z
+    .object({ count: z.number().int().positive(), per: z.enum(WALLET_LIMIT_PERIODS) })
+    .nullable(),
+  remaining: z.number().int().nonnegative().nullable(),
+  owned: z.boolean(),
+});
+
+export type WalletItem = z.infer<typeof WalletItemSchema>;
+
+// Result of `wallet.items`. Rows are parsed one at a time by the SDK.
+export const WalletItemsResultSchema = z.object({
+  balance: z.number().int().nonnegative(),
+  items: z.array(z.unknown()),
+});
+
+// Result of `wallet.spend`: the balance after it, every permanent item the
+// player owns in this game, and how many more of this item this window.
+export const WalletSpendResultSchema = z.object({
+  balance: z.number().int().nonnegative(),
+  item: z.string().regex(WALLET_ITEM_PATTERN),
+  owned: z.array(z.string()),
+  remaining: z.number().int().nonnegative().nullable(),
+  replayed: z.boolean(),
+});
+
+export type WalletSpendResult = z.infer<typeof WalletSpendResultSchema>;
 
 // Result of `visits.record`.
 export const VisitRecordResultSchema = z.object({

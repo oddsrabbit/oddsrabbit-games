@@ -14,7 +14,8 @@
  * doesn't model (matches), and the page decides.
  *
  * The limits mirror the server's policy classes (AppNotificationPolicy,
- * AppGiftPolicy, AppVisitPolicy, AppSubmissionPolicy, AppStorageService). When
+ * AppGiftPolicy, AppVisitPolicy, AppSubmissionPolicy, AppStorageService, the
+ * clover wallet). When
  * one of those changes, change it here too.
  */
 
@@ -26,9 +27,12 @@ import {
   SOCIAL_ERROR_CODES,
   STORAGE_TOTAL_MAX_BYTES,
   VISIT_ERROR_CODES,
+  WALLET_ERROR_CODES,
+  WALLET_ITEM_PATTERN,
+  WALLET_KEY_PATTERN,
 } from '../schemas/messages';
 
-export const PLAYGROUND_SCOPES = ['bridge:notifications', 'bridge:social', 'bridge:submit'] as const;
+export const PLAYGROUND_SCOPES = ['bridge:notifications', 'bridge:social', 'bridge:submit', 'bridge:wallet'] as const;
 
 const DAY_MS = 86_400_000;
 const NOTIFICATIONS_MAX_PENDING = 5;
@@ -72,6 +76,23 @@ export interface PlaygroundSettings {
   pushReachable: boolean;
   /** Round key → content; `*` answers any round without its own entry. */
   dailyContent: Record<string, DailyRound>;
+  /** What the game sells for clover: the server's catalog, typed into the playground. */
+  walletItems: WalletCatalogItem[];
+}
+
+/** One row of the server's clover catalog for a game. */
+export interface WalletCatalogItem {
+  item: string;
+  name: string;
+  kind: 'permanent' | 'consumable';
+  price: number;
+  limit: { count: number; per: 'day' | 'week' | 'ever' } | null;
+}
+
+export interface WalletPurchase {
+  key: string;
+  item: string;
+  at: string;
 }
 
 export interface ScoreRow {
@@ -142,6 +163,9 @@ export interface PlaygroundState {
   /** `${roundKey}#${index}` → the first guess locked in. */
   guesses: Record<string, Record<string, unknown>>;
   submissions: Submission[];
+  /** The player's clover. Only quests make it; the page's Earn button stands in. */
+  cloverBalance: number;
+  walletPurchases: WalletPurchase[];
 }
 
 export type Outcome =
@@ -163,6 +187,8 @@ export function emptyState(): PlaygroundState {
     visitsSent: [],
     guesses: {},
     submissions: [],
+    cloverBalance: 0,
+    walletPurchases: [],
   };
 }
 
@@ -345,6 +371,11 @@ export class FakePlatform {
       case 'visits.seen':
       case 'visits.sentToday':
         return this.visits(type, p);
+
+      case 'wallet.balance':
+      case 'wallet.items':
+      case 'wallet.spend':
+        return this.wallet(type, p);
 
       default:
         return null;
@@ -850,6 +881,79 @@ export class FakePlatform {
     const visit: VisitRow = { visitUuid: this.uuid(), from, kind, visitedAt: this.iso(), seenAt: null, counts };
     this.state.visitsInbox.unshift(visit);
     return visit;
+  }
+
+  // ---- clover wallet ---------------------------------------------------------
+
+  /** Clover a quest would pay out. The page's stand-in for Daily and Weekly Quests. */
+  earnClover(amount: number): void {
+    this.state.cloverBalance += Math.max(0, Math.floor(amount));
+  }
+
+  private wallet(type: string, p: Payload): Outcome {
+    if (!this.user) return fail(WALLET_ERROR_CODES.unauthorized, 'Not authenticated.');
+    if (!this.hasScope('bridge:wallet')) {
+      return fail(WALLET_ERROR_CODES.forbidden, 'The manifest does not declare bridge:wallet.');
+    }
+    const balance = this.state.cloverBalance;
+    if (type === 'wallet.balance') return ok({ balance });
+    if (type === 'wallet.items') {
+      return ok({
+        balance,
+        items: this.settings.walletItems.map((c) => ({
+          ...c,
+          remaining: this.walletRemaining(c),
+          owned: this.walletOwns(c),
+        })),
+      });
+    }
+
+    const item = String(p.item);
+    const key = String(p.key);
+    if (!WALLET_ITEM_PATTERN.test(item) || !WALLET_KEY_PATTERN.test(key)) {
+      return fail(WALLET_ERROR_CODES.invalid, 'Bad item or key.');
+    }
+    const previous = this.state.walletPurchases.find((b) => b.key === key);
+    if (previous && previous.item !== item) {
+      return fail(WALLET_ERROR_CODES.keyReused, 'That key already bought a different item.');
+    }
+    const entry = this.settings.walletItems.find((c) => c.item === item);
+    if (!entry) return fail(WALLET_ERROR_CODES.unknownItem, `This game doesn't sell ${item}.`);
+    if (!previous) {
+      if (entry.kind === 'permanent' && this.walletOwns(entry)) {
+        return fail(WALLET_ERROR_CODES.owned, 'The player already owns it.');
+      }
+      if (this.walletRemaining(entry) === 0) return fail(WALLET_ERROR_CODES.limit, 'The limit for this window is used up.');
+      if (balance < entry.price) return fail(WALLET_ERROR_CODES.insufficient, 'Not enough clover.');
+      this.state.cloverBalance -= entry.price;
+      this.state.walletPurchases.push({ key, item, at: this.iso() });
+    }
+    const permanent = new Set(this.settings.walletItems.filter((c) => c.kind === 'permanent').map((c) => c.item));
+    return ok({
+      balance: this.state.cloverBalance,
+      item,
+      owned: [...new Set(this.state.walletPurchases.map((b) => b.item))].filter((i) => permanent.has(i)),
+      remaining: this.walletRemaining(entry),
+      replayed: Boolean(previous),
+    });
+  }
+
+  private walletOwns(entry: WalletCatalogItem): boolean {
+    return entry.kind === 'permanent' && this.state.walletPurchases.some((b) => b.item === entry.item);
+  }
+
+  /** Buys left in the limit's window (UTC day; week from Monday 00:00 UTC; ever), or null. */
+  private walletRemaining(entry: WalletCatalogItem): number | null {
+    if (!entry.limit) return null;
+    const now = new Date(this.now());
+    let since = 0;
+    if (entry.limit.per === 'day') since = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if (entry.limit.per === 'week') {
+      const sinceMonday = (now.getUTCDay() + 6) % 7;
+      since = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - sinceMonday);
+    }
+    const used = this.state.walletPurchases.filter((b) => b.item === entry.item && Date.parse(b.at) >= since).length;
+    return Math.max(0, entry.limit.count - used);
   }
 }
 

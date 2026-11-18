@@ -24,6 +24,11 @@ const PNG = 'data:image/png;base64,iVBORw0KGgo=';
 const MIKA = FRIENDS[0]!;
 const STRANGER = '7b1c5e0a-1f0e-4c4b-9a51-999999999999';
 
+const CATALOG: PlaygroundSettings['walletItems'] = [
+  { item: 'warp-8h', name: 'Time warp', kind: 'consumable', price: 40, limit: { count: 2, per: 'week' } },
+  { item: 'hat-red', name: 'Red hat', kind: 'permanent', price: 120, limit: null },
+];
+
 function settings(over: Partial<PlaygroundSettings> = {}): PlaygroundSettings {
   return {
     user: DEFAULT_PLAYER,
@@ -31,6 +36,7 @@ function settings(over: Partial<PlaygroundSettings> = {}): PlaygroundSettings {
     fillBoards: true,
     pushReachable: true,
     dailyContent: {},
+    walletItems: CATALOG,
     ...over,
   };
 }
@@ -289,4 +295,60 @@ test('made-up scores spread out rather than bunching', async () => {
   const scores = (await sdk.scores.top({ roundKey: 'spread', limit: 100 })).map((r) => r.score);
   assert.ok(new Set(scores).size >= 15, `only ${new Set(scores).size} distinct scores`);
   assert.ok(Math.max(...scores) - Math.min(...scores) >= 60);
+});
+
+// ─── clover wallet ─────────────────────────────────────────────────────────
+// NOW is a Thursday, so the weekly window resets four days on (Monday 00:00 UTC).
+
+test('the catalog parses through the SDK, with standing on each item', async () => {
+  const { sdk, platform } = setup();
+  platform.earnClover(100);
+  const shop = await sdk.wallet.items();
+  assert.equal(shop?.balance, 100);
+  assert.equal(shop?.items.length, CATALOG.length);
+  assert.deepEqual(
+    shop?.items.map((i) => [i.item, i.remaining, i.owned]),
+    [['warp-8h', 2, false], ['hat-red', null, false]]
+  );
+});
+
+test('a spend charges once per key, and a replay answers without charging', async () => {
+  const { sdk, platform } = setup();
+  await rejectsWith(sdk.wallet.spend({ item: 'warp-8h', key: 'k1' }), 'wallet/insufficient');
+  platform.earnClover(100);
+  const first = await sdk.wallet.spend({ item: 'warp-8h', key: 'k1' });
+  assert.deepEqual([first.balance, first.remaining, first.replayed], [60, 1, false]);
+  const again = await sdk.wallet.spend({ item: 'warp-8h', key: 'k1' });
+  assert.deepEqual([again.balance, again.remaining, again.replayed], [60, 1, true]);
+  await rejectsWith(sdk.wallet.spend({ item: 'hat-red', key: 'k1' }), 'wallet/key-reused');
+  assert.equal(await sdk.wallet.balance(), 60);
+});
+
+test('a weekly limit holds until Monday 00:00 UTC', async () => {
+  const { sdk, platform, tick } = setup();
+  platform.earnClover(500);
+  await sdk.wallet.spend({ item: 'warp-8h', key: 'a' });
+  await sdk.wallet.spend({ item: 'warp-8h', key: 'b' });
+  await rejectsWith(sdk.wallet.spend({ item: 'warp-8h', key: 'c' }), 'wallet/limit');
+  tick(3 * 86_400_000 + 8 * 3_600_000); // Sunday 23:00 UTC
+  await rejectsWith(sdk.wallet.spend({ item: 'warp-8h', key: 'c' }), 'wallet/limit');
+  tick(3_600_000); // Monday 00:00 UTC
+  assert.equal((await sdk.wallet.spend({ item: 'warp-8h', key: 'c' })).remaining, 1);
+});
+
+test('a permanent item is bought once and listed as owned', async () => {
+  const { sdk, platform } = setup();
+  platform.earnClover(300);
+  const bought = await sdk.wallet.spend({ item: 'hat-red', key: 'hat1' });
+  assert.deepEqual(bought.owned, ['hat-red']);
+  await rejectsWith(sdk.wallet.spend({ item: 'hat-red', key: 'hat2' }), 'wallet/owned');
+  assert.equal((await sdk.wallet.items())?.items.find((i) => i.item === 'hat-red')?.owned, true);
+});
+
+test('the wallet refuses an unknown item and a manifest without bridge:wallet', async () => {
+  const { sdk } = setup();
+  await rejectsWith(sdk.wallet.spend({ item: 'crown', key: 'k1' }), 'wallet/unknown-item');
+  const bare = setup({ scopes: ['bridge:social'] });
+  await rejectsWith(bare.sdk.wallet.spend({ item: 'warp-8h', key: 'k1' }), 'wallet/forbidden');
+  assert.equal(await bare.sdk.wallet.items(), null);
 });
