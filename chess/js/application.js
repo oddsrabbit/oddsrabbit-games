@@ -105,9 +105,9 @@
     lobbyLink: $(".lobby-link"),
     lobbyLinkField: $(".lobby-link-field"),
     copyLinkButton: $(".copy-link-button"),
-    helpButtons: $$(".help-button, .help-link"),
+    helpButtons: $$(".help-button"),
+    infoButton: $(".info-button"),
     signIn: $(".sign-in"),
-    signInActions: $(".sign-in-actions"),
     signInNote: $(".sign-in-note"),
     unsupported: $(".unsupported"),
     invitableList: $(".invitable-list"),
@@ -3933,14 +3933,14 @@
   }
 
   // No games with people here (signed out, or a host without the match
-  // verbs): the computer is the one way in, so it is the only button left.
+  // verbs): the computer is the one way in. It leads unless Sign in shows.
   function offlineOnly() {
     els.newGameButtons.forEach(function (b) { if (b.closest(".hero")) b.hidden = true; });
     els.joinOpenButtons.forEach(function (b) { b.hidden = true; });
     els.quickButtons.forEach(function (b) { b.hidden = true; });
     state.canQuick = false;
     els.cpuOpenButtons.forEach(function (b) {
-      if (b.closest(".hero")) b.classList.add("primary");
+      if (b.closest(".hero")) { b.hidden = false; b.classList.add("primary"); }
     });
   }
 
@@ -3952,8 +3952,23 @@
     }
   }
 
+  // The host's sheet about this game. Older hosts lack it; one that lists the
+  // verb but turns it down drops it from capabilities, so the button goes too.
+  function wireGameInfo() {
+    var b = els.infoButton;
+    b.hidden = !(OR.capabilities.has("actions.showGameInfo") && OR.actions && typeof OR.actions.showGameInfo === "function");
+    if (b.hidden) return;
+    b.addEventListener("click", function () {
+      OR.actions.showGameInfo().catch(function (error) {
+        if (!OR.capabilities.has("actions.showGameInfo")) b.hidden = true;
+        else console.warn("showGameInfo failed", error);
+      });
+    });
+  }
+
   OR.whenReady().then(function () {
     applyTheme();
+    wireGameInfo();
     drawHero();
     drawBand();
     drawChooseArt();
@@ -3989,7 +4004,10 @@
       }
       var invite = peekJoin();
       offlineOnly();
-      els.signInActions.hidden = !OR.capabilities.has("actions.requestSignIn");
+      var canSignIn = OR.capabilities.has("actions.requestSignIn");
+      els.signIn.hidden = !canSignIn;
+      // One orange button: signing in is the real game, the computer the side door.
+      if (canSignIn) els.cpuOpenButtons.forEach(function (b) { if (b.closest(".hero")) b.classList.remove("primary"); });
       loadList().then(function () {
         // The note goes on the hero, which only shows with no computer games.
         if (invite) showHeroOnly("You’ve been invited to a table (code " + invite + "). Sign in to take your seat.");

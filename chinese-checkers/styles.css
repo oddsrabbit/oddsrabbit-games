@@ -570,7 +570,7 @@ html[data-theme="dark"] .list-band {
   border: 1px solid var(--line); background: var(--card); font-weight: 600;
 }
 .lobby-hint { margin: 0; max-width: 32ch; }
-.hero-actions .quick-button, .hero-actions .cpu-open-button:not(.primary) {
+.hero-actions .cpu-open-button:not(.primary) {
   border-radius: 12px; border: 1px solid var(--line); background: var(--card); cursor: pointer;
 }
 

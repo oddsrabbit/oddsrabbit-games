@@ -8,9 +8,9 @@
 // Turned so the viewer's own point is at the bottom, as across a real table:
 // the star is symmetric under a sixth of a turn, so the holes land on holes.
 //
-// Whose turn it is shows on the board itself: a name tag in that player's
-// colour ("Your move", "@pip's move") just outside the tip of their starting
-// point, so a glance at the star answers it without reading the strip above.
+// When it is your turn the board says so: a "Your move" tag in your colour
+// just outside the tip of your starting point. (opts.turnLabel picks the
+// text; an empty label draws no tag, as on everyone else's turn.)
 //
 // Taps go to the nearest hole within most of a hole's spacing, so the targets
 // are bigger than the holes look.
@@ -30,6 +30,7 @@
   var ASPECT = 32.8 / 26.4;
   var VIEW_HALF_W = 13.2;
   var TAG_FONT = 0.9;
+  var TAG_H = 1.7;
 
   function svgEl(tag, attrs, parent) {
     var node = document.createElementNS(NS, tag);
@@ -206,26 +207,35 @@
   CCBoard.prototype.turnTag = function (seat) {
     var text = this.opts.turnLabel ? this.opts.turnLabel(seat) : "";
     if (!text) return;
-    var tip = this.tips[R.pointOf(this.seats, seat)];
-    var k = (12 + 1.6) / 12, h = 1.7;
     var g = svgEl("g", { class: "cc-tag" }, this.gTop);
-    var rect = svgEl("rect", { height: h, rx: h / 2, y: -h / 2, style: "fill: var(--s" + seat + ")" }, g);
+    var rect = svgEl("rect", { height: TAG_H, rx: TAG_H / 2, y: -TAG_H / 2, style: "fill: var(--s" + seat + ")" }, g);
     var t = svgEl("text", { "font-size": TAG_FONT, "dominant-baseline": "central", y: 0.02 }, g);
     t.textContent = text;
-    // The real width once it is on the page; an estimate while the board is
-    // hidden (it is drawn again when shown).
+    var dot = marble(g, seat, 0, 0, "cc-tag-marble");
+    this.tag = { g: g, rect: rect, text: t, dot: dot, tip: this.tips[R.pointOf(this.seats, seat)], measured: false };
+    this.fitTag();
+  };
+
+  // Size the pill to its text and place it. Text can only be measured once
+  // the board is on screen: a match is drawn while its screen is still
+  // hidden, so the first fit is an estimate and resize() fits it again once
+  // the screen is up. (The estimate alone ran long names into the pill's end.)
+  CCBoard.prototype.fitTag = function () {
+    var tag = this.tag;
+    if (!tag || tag.measured || !tag.g.isConnected) return;
     var len = 0;
-    try { len = t.getComputedTextLength(); } catch (_) {}
-    if (!(len > 0)) len = text.length * TAG_FONT * 0.6;
+    try { len = tag.text.getComputedTextLength(); } catch (_) {}
+    tag.measured = len > 0;
+    if (!tag.measured) len = tag.text.textContent.length * TAG_FONT * 0.68;
+    var h = TAG_H, k = (12 + 1.6) / 12, tip = tag.tip;
     var w = h + 0.25 + len + 0.75;
     var x = Math.max(-VIEW_HALF_W + w / 2 + 0.1, Math.min(VIEW_HALF_W - w / 2 - 0.1, tip.x * k));
     var y = tip.y * k + (tip.y > 0 ? 1.7 : -1.7);
-    g.setAttribute("transform", "translate(" + x.toFixed(3) + " " + y.toFixed(3) + ")");
-    rect.setAttribute("x", (-w / 2).toFixed(3));
-    rect.setAttribute("width", w.toFixed(3));
-    t.setAttribute("x", (-w / 2 + h + 0.25).toFixed(3));
-    var dot = marble(g, seat, 0, 0, "cc-tag-marble");
-    dot.setAttribute("transform", "translate(" + (-w / 2 + h / 2).toFixed(3) + " 0) scale(0.8)");
+    tag.g.setAttribute("transform", "translate(" + x.toFixed(3) + " " + y.toFixed(3) + ")");
+    tag.rect.setAttribute("x", (-w / 2).toFixed(3));
+    tag.rect.setAttribute("width", w.toFixed(3));
+    tag.text.setAttribute("x", (-w / 2 + h + 0.25).toFixed(3));
+    tag.dot.setAttribute("transform", "translate(" + (-w / 2 + h / 2).toFixed(3) + " 0) scale(0.8)");
   };
 
   // Play the marble now at the path's end in from the path's start, hop by
@@ -289,6 +299,7 @@
     if (!w || !h) return false;
     var width = Math.min(w, h / ASPECT);
     this.host.style.setProperty("--board", Math.round(width) + "px");
+    this.fitTag();
     return true;
   };
 

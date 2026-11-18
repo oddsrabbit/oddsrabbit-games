@@ -36,6 +36,11 @@
       <header class="bar">
         <h1 class="title">Chess</h1>
         <button type="button" class="help-button icon-button" aria-label="How to play">?</button>
+        <!-- The platform's sheet about the game (ratings, reviews,
+             notifications, report). Shown when the host has it. -->
+        <button type="button" class="info-button icon-button" aria-label="About and ratings" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 11v6M12 7.5v.01"/></svg>
+        </button>
       </header>
 
       <p class="unsupported notice" hidden>Playing against friends isn’t available on this version of the app yet. You can still play the computer.</p>
@@ -50,17 +55,16 @@
           <li><span class="hero-step-mark" aria-hidden="true">2</span><span><strong>Move whenever.</strong> No clock. You get a notification when it’s your turn.</span></li>
           <li><span class="hero-step-mark" aria-hidden="true">3</span><span><strong>Checkmate.</strong> Every rule of chess, down to en passant. The rabbit is your knight.</span></li>
         </ol>
+        <p class="sign-in-note muted" hidden></p>
+        <!-- Signed in: start one, or join one. The computer and matchmaking
+             are cards on the New game screen, one tap past Start a game.
+             Signed out: Sign in leads, and the computer is the way in meanwhile. -->
         <div class="hero-actions">
           <button type="button" class="new-game-button primary">Start a game</button>
-          <button type="button" class="quick-button" hidden>Find an opponent</button>
-          <button type="button" class="cpu-open-button">Play the computer</button>
+          <button type="button" class="sign-in primary" hidden>Sign in to play</button>
+          <button type="button" class="cpu-open-button" hidden>Play the computer</button>
           <button type="button" class="join-open-button">I have a join code</button>
         </div>
-        <p class="sign-in-note muted" hidden></p>
-        <div class="hero-actions sign-in-actions" hidden>
-          <button type="button" class="sign-in primary">Sign in to play</button>
-        </div>
-        <button type="button" class="help-link">How to play</button>
       </div>
 
       <p class="list-status muted" role="status"></p>

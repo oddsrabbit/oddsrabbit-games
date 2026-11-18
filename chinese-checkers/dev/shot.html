@@ -35,7 +35,14 @@ const report = (s) => { document.title = s; };
   w.addEventListener('error', (e) => errors.push(e.message));
   const d = w.document;
   await until(() => !d.querySelector('.hero').hidden);
-  [...d.querySelectorAll('.cpu-open-button')].find((b) => b.offsetParent).click();
+  // Signed in, the computer is a card behind Start a game.
+  const cpu = [...d.querySelectorAll('.cpu-open-button')].find((b) => b.offsetParent);
+  if (cpu) cpu.click();
+  else {
+    [...d.querySelectorAll('.new-game-button')].find((b) => b.offsetParent).click();
+    await until(() => !d.querySelector('.screen-choose').hidden);
+    d.querySelector('.choose-cpu').click();
+  }
   await until(() => !d.querySelector('.screen-cpu').hidden);
   d.querySelector('.cpu-table[data-seats="' + seats + '"]').click();
   if (mode === 'cpu') return;

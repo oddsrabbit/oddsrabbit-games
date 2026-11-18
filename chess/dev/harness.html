@@ -221,6 +221,7 @@ if (q.get('challenge') === '1') {
 
 const frame = document.getElementById('g');
 const caps = ['storage.get', 'storage.set', 'actions.share', 'actions.haptic', 'actions.requestSignIn'];
+if (q.get('info') !== '0') caps.push('actions.showGameInfo');
 if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'matches.list', 'matches.get', 'matches.move', 'matches.resign', 'matches.invitable', 'matches.nudge', 'matches.claim');
 if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.quick');
 if (q.get('matches') !== '0' && q.get('chat') !== '0') caps.push('matches.chat', 'matches.chatSend');
@@ -246,6 +247,7 @@ function handle(type, p) {
     // so they survive a reload. `?fresh=1` starts empty.
     case 'storage.get': return localStorage.getItem('chess-harness:' + p.key);
     case 'storage.set': localStorage.setItem('chess-harness:' + p.key, p.value); return null;
+    case 'actions.showGameInfo': console.log('[harness] game info sheet', p && p.section); return null;
     case 'storage.delete': localStorage.removeItem('chess-harness:' + p.key); return null;
     case 'matches.list': return Object.values(matches).map((x) => { const v = view(x); delete v.view; delete v.joinCode; return v; });
     case 'matches.quick': {
