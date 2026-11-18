@@ -9,7 +9,8 @@
   // ---------- world layout (world units, y down) ----------
   const W = 400;          // the box's inside width
   const RIM = 84;         // the box's rim: the line the pile mustn't stay over
-  const FLOOR = 564;      // the box's floor
+  const FLOOR = 624;      // the box's floor (was 564 before 2026-11-18; same on
+                          // every screen so leaderboard scores stay comparable)
   const WALL = 16;        // wall and floor thickness, drawn outside the play area
   const HOLD_Y = RIM - 48; // where the next bubble waits before it drops
   const VIEW = { x0: -WALL, x1: W + WALL, y0: -16, y1: FLOOR + WALL };
@@ -399,13 +400,16 @@
     board.width = Math.round(r.width * d);
     board.height = Math.round(r.height * d);
     // The scene fills the screen and the HUD floats over it, so the box fits
-    // in what the HUD leaves, sitting on the bottom above the home indicator.
+    // in what the HUD leaves. Any spare height (tall phones) is split around
+    // the box, a little more above so it still sits low, near the thumbs.
     const top = hud.getBoundingClientRect().bottom - r.top + 4;
     const bottom = cssPx('--oddsrabbit-safe-bottom') + 10;
-    const s = Math.min(r.width / VIEW_W, (r.height - top - bottom) / VIEW_H);
+    const avail = r.height - top - bottom;
+    const s = Math.min(r.width / VIEW_W, avail / VIEW_H);
+    const spare = Math.max(0, avail - VIEW_H * s);
     view.s = s;
     view.ox = (r.width - VIEW_W * s) / 2 - VIEW.x0 * s;
-    view.oy = r.height - bottom - VIEW.y1 * s;
+    view.oy = top + spare * 0.6 - VIEW.y0 * s;
     RM.clearSprites();
     buildSceneLayers();
     drawNext();
