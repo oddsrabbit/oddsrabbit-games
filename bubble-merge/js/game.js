@@ -13,10 +13,11 @@
                           // every screen so leaderboard scores stay comparable)
   const WALL = 16;        // wall and floor thickness, drawn outside the play area
   const HOLD_Y = RIM - 48; // where the next bubble waits before it drops
-  // The one after it waits small in a top corner of the box, on the side
-  // away from the held bubble (it swaps corners when the held one comes near).
-  const PREVIEW_SCALE = 0.6;
-  const PREVIEW_INSET = 34; // its centre from the wall: fits the biggest drop size
+  // The one after it is in the NEXT pill in the header, a little bigger per
+  // size but always small (CSS px radius). On a drop it flies from the pill
+  // to the aim point, growing to full size, and the pill refills with a pop.
+  const nextR = (t) => 8.5 + t * 1.1;
+  const HANDOFF = 0.32; // seconds for that flight, inside the drop cooldown
   const VIEW = { x0: -WALL, x1: W + WALL, y0: -16, y1: FLOOR + WALL };
   const VIEW_W = VIEW.x1 - VIEW.x0;
   const VIEW_H = VIEW.y1 - VIEW.y0;
@@ -36,6 +37,7 @@
   const ctx = board.getContext('2d');
   const scoreEl = $('score');
   const bestEl = $('best');
+  const nextEl = $('next');
   const hud = $('hud');
   const toastEl = $('toast');
   const overlay = $('overlay');
@@ -55,9 +57,9 @@
 
   // ---------- game state ----------
   let world, score, cur, next, aimX, dropReadyAt, phase, clock, effects, biggest, danger, dropsMade;
-  // The preview's corner (1 right, -1 left), the corner it's drawn in while it
-  // fades across, its fade, and when the current one appeared (for its pop-in).
-  let previewSide = 1, previewShown = 1, previewFade = 1, nextBorn = 0;
+  // When the NEXT pill's bubble appears (for its pop-in), when the last drop
+  // was, and where the handoff flight starts ({ x, y, k } in world units).
+  let nextBorn = 0, dropAt = 0, handFrom = null;
 
   function randomTier() {
     const total = DROP_WEIGHTS.reduce((a, b) => a + b, 0);
@@ -83,7 +85,7 @@
       if (restore.next >= 0 && restore.next < 5) next = restore.next;
       dropsMade = restore.drops || 0;
     }
-    nextBorn = 0; previewSide = previewShown = 1; previewFade = 1;
+    nextBorn = 0; dropAt = 0; handFrom = null;
     updateHud();
   }
 
@@ -109,9 +111,11 @@
     const x = clampAim(aimX);
     const b = world.add(cur, x, HOLD_Y, PIECES[cur].r);
     b.vy = 60;
+    handFrom = nextInWorld();
     cur = next;
     next = randomTier();
-    nextBorn = clock;
+    dropAt = clock;
+    nextBorn = clock + HANDOFF;
     dropReadyAt = clock + DROP_COOLDOWN;
     dropsMade++;
     Sound.drop();
@@ -399,6 +403,7 @@
     view.w = r.width; view.h = r.height;
     board.width = Math.round(r.width * d);
     board.height = Math.round(r.height * d);
+    nextEl.width = nextEl.height = Math.round(28 * d);
     // The scene fills the screen and the HUD floats over it, so the box fits
     // in what the HUD leaves, centred in any spare height (tall phones).
     // Aiming reads only the finger's x anywhere on the screen, so the box
@@ -474,12 +479,17 @@
     }
 
     for (const b of world.bodies) drawBody(b, s, d);
-    if (phase === 'play' || phase === 'paused') drawPreview(scene, px, s, d);
 
-    // The held bubble, over the pile.
-    if ((phase === 'play' || phase === 'paused') && clock >= dropReadyAt) {
-      const bob = Math.sin(clock * 3) * 1.5;
-      drawPieceAt(cur, clampAim(aimX), HOLD_Y + bob, 1, s, d);
+    // The held bubble, over the pile. During the drop cooldown it's the one
+    // flying in from the NEXT pill.
+    if (phase === 'play' || phase === 'paused') {
+      const x = clampAim(aimX), y = HOLD_Y + Math.sin(clock * 3) * 1.5;
+      if (clock >= dropReadyAt) drawPieceAt(cur, x, y, 1, s, d);
+      else if (handFrom) {
+        const e = 1 - Math.pow(1 - Math.min(1, (clock - dropAt) / HANDOFF), 3);
+        const lerp = (a, b) => a + (b - a) * e;
+        drawPieceAt(cur, lerp(handFrom.x, x), lerp(handFrom.y, y), lerp(handFrom.k, 1), s, d);
+      }
     }
 
     // The box's walls, in front of the bubbles.
@@ -514,41 +524,25 @@
     }
   }
 
-  // The next bubble, small in a top corner with a NEXT label over it.
-  function drawPreview(scene, px, s, d) {
-    const x = previewShown > 0 ? W - PREVIEW_INSET : PREVIEW_INSET;
-    const t = Math.min(1, (clock - nextBorn) / 0.25);
-    const pop = t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2); // ease out, slight overshoot
-    ctx.save();
-    ctx.globalAlpha = previewFade;
-    ctx.font = `800 ${11 * px}px ui-rounded, "SF Pro Rounded", Nunito, system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = scene.label;
-    ctx.fillText('NEXT', x, HOLD_Y - PIECES[4].r * PREVIEW_SCALE - 8 * px);
-    ctx.restore();
-    ctx.save();
-    ctx.globalAlpha = previewFade * 0.9;
-    drawPieceAt(next, x, HOLD_Y, PREVIEW_SCALE * pop, s, d);
-    ctx.restore();
+  // The NEXT pill: empty while its bubble is flying to the aim point, then
+  // the new one pops in (ease out, slight overshoot). Repainted only while
+  // that's changing.
+  let nextPainted = '';
+  function paintNext() {
+    const t = (clock - nextBorn) / 0.25;
+    const key = t < 0 ? 'empty' : t >= 1 ? next + ':' + nextEl.width : '';
+    if (key && key === nextPainted) return;
+    nextPainted = key;
+    const pop = t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
+    if (t >= 0) paintIcon(nextEl, next, nextR(next) * pop, 14, 14);
+    else nextEl.getContext('2d').clearRect(0, 0, nextEl.width, nextEl.height);
   }
 
-  // Keeps the preview's corner clear of the held bubble, fading across when
-  // it swaps. The two tests can't both hold, since the box is 400 wide. It
-  // stays put during the drop cooldown, while no bubble is held.
-  function stepPreview(dt) {
-    if (clock >= dropReadyAt) {
-      const x = clampAim(aimX), r = PIECES[cur].r;
-      const clear = PREVIEW_INSET + PIECES[4].r * PREVIEW_SCALE + 10;
-      if (previewSide > 0 && x + r > W - clear) previewSide = -1;
-      else if (previewSide < 0 && x - r < clear) previewSide = 1;
-    }
-    if (previewShown !== previewSide) {
-      previewFade -= dt * 8;
-      if (previewFade <= 0) { previewFade = 0; previewShown = previewSide; }
-    } else {
-      previewFade = Math.min(1, previewFade + dt * 8);
-    }
+  // Where the pill's bubble is, in world units, for the handoff to start from.
+  function nextInWorld() {
+    const f = field.getBoundingClientRect(), r = nextEl.getBoundingClientRect();
+    const cx = r.left + r.width / 2 - f.left, cy = r.top + r.height / 2 - f.top;
+    return { x: (cx - view.ox) / view.s, y: (cy - view.oy) / view.s, k: nextR(next) / (PIECES[next].r * view.s) };
   }
 
   function drawBody(b, s, d) {
@@ -586,7 +580,6 @@
     world.step(STEP);
     if (phase === 'play') { processMerges(); checkOver(STEP); }
     stepEffects(STEP);
-    stepPreview(STEP);
   }
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -605,6 +598,7 @@
       acc = 0;
     }
     drawScene();
+    paintNext();
     requestAnimationFrame(frame);
   }
 

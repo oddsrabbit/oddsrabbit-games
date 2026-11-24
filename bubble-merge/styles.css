@@ -70,13 +70,22 @@ canvas, button { -webkit-touch-callout: none; -webkit-user-select: none; user-se
   box-shadow: 0 2px 8px rgba(40, 20, 60, 0.12);
   font-size: 16px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
 }
-/* Label then number on one line, as in 2048's chips. */
+/* Score and best share one pill, best small under score, so the header row
+   has room for NEXT on a 375px phone. Label then number, as in 2048's chips. */
+.pill.score-stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
+.score-container, .best-container { display: inline-flex; align-items: baseline; gap: 5px; }
+.score-container { font-size: 15px; }
+.best-container { font-size: 9.5px; letter-spacing: .05em; color: var(--pill-label); }
 .score-container::before, .best-container::before {
   font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--pill-label);
 }
+.best-container::before { font-size: inherit; letter-spacing: inherit; }
 .score-container::before { content: "SCORE"; }
 .best-container::before { content: "BEST"; }
-.score-container.bump { animation: bump 260ms ease-out; }
+.score-container.bump { animation: bump 260ms ease-out; transform-origin: left center; }
+.pill-label { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--pill-label); }
+.pill.next-pill { padding: 0 6px 0 12px; }
+.pill.next-pill canvas { width: 28px; height: 28px; display: block; }
 @keyframes bump { 40% { transform: scale(1.08); } }
 .pill.icon { width: 36px; padding: 0; justify-content: center; }
 /* 36px to look at, 44px to hit. */

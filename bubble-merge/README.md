@@ -42,8 +42,9 @@ boards of made-up players, so the leaderboard, submissions and Share can be trie
 
 - Drag across the box to aim and let go to drop (on desktop, the mouse aims and a click drops; the
   arrow keys aim and Space drops). There's a half-second wait between drops.
-- The next drop is always one of the five smallest sizes, weighted toward the small end. A small
-  preview in a top corner of the box shows what's coming next.
+- The next drop is always one of the five smallest sizes, weighted toward the small end. The NEXT
+  pill in the header shows what's coming; on a drop it flies down to the aim point and the pill
+  refills.
 - Two bubbles of the same colour that touch merge into the next size at their midpoint, growing
   into place. Making size *n* (1-based) scores the *n*th triangular number: 1, 3, 6, 10 … 66.
   Two of the biggest (pink) pop and leave the box for +100.
@@ -109,10 +110,12 @@ jar with a pile inside and the next bubble waiting above (idea 1 of 5 in round 8
 ## Layout
 
 Layout B from round 7 of the mocks: the scene fills the screen and the HUD floats over it as soft
-white pills. In the header row, beside the app's back button: SCORE, BEST, a trophy for the
-leaderboard (only where the host serves one) and pause. The next bubble isn't in the HUD: it waits
-small, with a NEXT label, in a top corner of the box beside the held bubble, and fades to the other
-corner when the held one comes near (`drawPreview()` and `stepPreview()` in `js/game.js`). The box
+white pills. In the header row, beside the app's back button: NEXT, SCORE with BEST under it in one
+pill, a trophy for the leaderboard (only where the host serves one) and pause. NEXT was direction B
+of `dev/style-mocks/next.html` (2026-11-24), replacing a preview in the box's top corner that hopped
+sides as you aimed. Its bubble is drawn small for every size, so it never looks bigger than the held
+one; on a drop it flies from the pill to the aim point, growing to full size, during the drop
+cooldown, and the pill refills with a pop (`paintNext()` and the held bubble in `drawScene()`). The box
 is scaled to fit what the HUD leaves and centred in any spare height (`resize()`). Pause, game
 over and share are white rounded cards with pill buttons. A first game starts with a "Drag to aim,
 let go to drop" pill that goes once you drop. `edge` mode per

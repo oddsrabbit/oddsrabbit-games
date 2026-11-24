@@ -30,7 +30,7 @@
   <body>
     <!-- Full screen: the scene fills it and everything else floats over it as
          soft pills (round 7, layout B). js/game.js fits the box under the HUD and
-         draws the next bubble in the box's top corner. -->
+         paints the next bubble into its pill. -->
     <div id="app">
       <main class="field" id="field">
         <canvas id="board" aria-label="The box. Drag to aim, let go to drop."></canvas>
@@ -38,10 +38,19 @@
         <div class="hud" id="hud">
           <!-- The header row, beside the app's back button. -->
           <div class="hud-row">
+            <!-- The next bubble, in a pill of its own (direction B of
+                 dev/style-mocks/next.html, 2026-11-24). js/game.js paints it. -->
+            <div class="pill next-pill" aria-hidden="true">
+              <span class="pill-label">NEXT</span>
+              <canvas id="next" width="28" height="28"></canvas>
+            </div>
             <!-- The score and best every arcade game shows (2048, snake, match3,
-                 flappy): the figure is the text, the label comes from CSS. -->
-            <div class="pill score-container" id="score" aria-label="Score 0">0</div>
-            <div class="pill best-container" id="best" aria-label="Best 0">0</div>
+                 flappy): the figure is the text, the label comes from CSS. They
+                 share one pill, best under score, to leave room for NEXT. -->
+            <div class="pill score-stack">
+              <span class="score-container" id="score" aria-label="Score 0">0</span>
+              <span class="best-container" id="best" aria-label="Best 0">0</span>
+            </div>
             <!-- Starts hidden; js/scores.js reveals it once the host says it can
                  serve a global board, like every other game's button. -->
             <button type="button" class="pill icon" id="lb-btn" aria-label="Leaderboard" hidden>

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Next bubble mocks</title>
+<style>
+  /* The four directions for the next-bubble preview (2026-11-24), side by
+     side as live phones: the real bubbles, scenes and physics from js/. Each
+     phone auto-plays in step with the others; drag in one to aim and let go
+     to drop (auto-play resumes there after a few seconds). */
+  :root {
+    --ink: #3F3550; --muted: #6E6385; --pill: rgba(255, 255, 255, 0.84); --pill-label: #7A6E92;
+    --accent: #6E55D6; --accent-soft: #EFEBFA;
+    --body: ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #2A2633; color: #EEE8F7; font: 14px/1.45 var(--body); padding: 16px 20px 40px; }
+  h1 { margin: 0 0 4px; font-size: 20px; font-weight: 900; }
+  .sub { margin: 0 0 14px; color: #B9AFCB; max-width: 900px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 18px; }
+  .seg { display: inline-flex; gap: 4px; padding: 4px; background: #3B3548; border-radius: 22px; }
+  .seg button, .tog { border: 0; border-radius: 18px; padding: 7px 12px; font: 800 13px var(--body); color: #CFC6E0; background: transparent; cursor: pointer; }
+  .seg button[aria-pressed="true"], .tog[aria-pressed="true"] { background: #FFFFFF; color: var(--ink); }
+  .tog { background: #3B3548; }
+  .grid { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .cell { display: flex; flex-direction: column; gap: 10px; }
+  .cell h2 { margin: 0; font-size: 15px; font-weight: 900; }
+  .cell h2 span { color: #B9AFCB; font-weight: 700; }
+  .scaler { position: relative; }
+  .blurb { margin: 0; color: #CFC6E0; font-size: 13px; }
+  .blurb b { color: #FFFFFF; }
+  .blurb .con { color: #F2A7B8; }
+
+  /* ---------- the phone: the game's own HUD styles ---------- */
+  .frame { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; border-radius: 40px;
+    box-shadow: 0 0 0 6px #121016, 0 18px 40px rgba(0,0,0,0.45); color: var(--ink); font-family: var(--body); }
+  .frame canvas.board { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; cursor: crosshair; }
+  .hud-row { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    padding: 0 12px 0 60px; pointer-events: none; z-index: 2; }
+  .pill { pointer-events: auto; position: relative; height: 36px; padding: 0 12px; border: 0; border-radius: 18px;
+    display: inline-flex; align-items: center; gap: 6px; background: var(--pill); color: var(--ink);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); box-shadow: 0 2px 8px rgba(40, 20, 60, 0.12);
+    font-size: 16px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pill .lbl { font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--pill-label); }
+  .pill.icon { width: 36px; padding: 0; justify-content: center; }
+  .fake-back { position: absolute; left: 14px; width: 36px; height: 36px; border-radius: 18px; background: rgba(255,255,255,0.84);
+    display: flex; align-items: center; justify-content: center; z-index: 2; box-shadow: 0 2px 8px rgba(40, 20, 60, 0.12); }
+  /* B: score and best stacked in one pill to make room for NEXT. */
+  .pill.stack { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 0 12px; }
+  .pill.stack .l1 { display: inline-flex; align-items: baseline; gap: 5px; font-size: 15px; }
+  .pill.stack .l2 { font-size: 9.5px; font-weight: 800; letter-spacing: .05em; color: var(--pill-label); }
+  .pill.next-pill { padding: 0 6px 0 12px; gap: 6px; }
+  .pill.next-pill canvas { width: 28px; height: 28px; display: block; }
+</style>
+</head>
+<body>
+<h1>Next bubble: four directions</h1>
+<p class="sub">Live, with the real bubbles, scenes and physics. All four phones auto-play the same bubble sequence and the same aim, so they stay comparable. Drag in a phone to aim and let go to drop. Slow-mo makes the handoff (D) easy to see.</p>
+<div class="bar">
+  <div class="seg" id="scene-seg"></div>
+  <div class="seg" id="phone-seg"></div>
+  <button class="tog" id="auto" aria-pressed="true">Auto-play</button>
+  <button class="tog" id="hand" aria-pressed="true">D · Handoff</button>
+  <button class="tog" id="slow" aria-pressed="false">Slow-mo</button>
+  <button class="tog" id="reset" aria-pressed="false">Reset</button>
+</div>
+<div class="grid" id="grid"></div>
+
+<script src="../../js/pieces.js"></script>
+<script src="../../js/scenes.js"></script>
+<script src="../../js/physics.js"></script>
+<script>
+(function () {
+  const { PIECES, POINTS, SCENES, SCENE_ORDER, World } = RM;
+  // The game's layout (js/game.js).
+  const W = 400, RIM = 84, FLOOR = 624, WALL = 16, HOLD_Y = RIM - 48;
+  const VIEW = { x0: -WALL, x1: W + WALL, y0: -16, y1: FLOOR + WALL };
+  const VIEW_W = VIEW.x1 - VIEW.x0, VIEW_H = VIEW.y1 - VIEW.y0;
+  const COOLDOWN = 0.5, HAND = 0.32, CHROME = 56;
+  const PHONES = {
+    tall: { name: 'Tall phone 393×852', w: 393, h: 852, top: 47, bottom: 34 },
+    short: { name: 'Short phone 375×667', w: 375, h: 667, top: 20, bottom: 0 },
+  };
+  const opts = { scene: 'jar', phone: 'tall', auto: true, hand: true, slow: false };
+  const DPR = Math.min(2, window.devicePixelRatio || 1);
+
+  // A and C draw the preview smaller than the smallest real bubble (r 17), so
+  // it never reads as bigger than the held one, but still grows with the tier.
+  const previewR = (t) => 8 + t * 2.25;  // world units, 8..17
+  const pillR = (t) => 8.5 + t * 1.1;     // css px in B's 28px slot
+  const SOCK = { x: 31, y: HOLD_Y - 4, r: 23 };
+
+  // One shared sequence of drops (the game's weights), so every phone gets
+  // the same bubbles.
+  let seed = 7;
+  const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const WEIGHTS = [32, 26, 20, 13, 9];
+  const seq = [];
+  const SEQ = (i) => {
+    while (seq.length <= i) {
+      let x = rnd() * 100, t = 0;
+      for (; t < WEIGHTS.length - 1; t++) { x -= WEIGHTS[t]; if (x < 0) break; }
+      seq.push(t);
+    }
+    return seq[i];
+  };
+  const PREFILL = [[0, 40, 560], [1, 90, 560], [2, 150, 550], [3, 230, 550], [4, 320, 540], [5, 80, 480], [6, 200, 460], [7, 310, 440], [8, 130, 360]];
+
+  const pop = (t) => (t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2));
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  const VARIANTS = [
+    { id: 'now', title: 'Now', tag: 'today', blurb: 'Top corner, in the hold row, at 60% size. <span class="con">Jumps corners as you aim, looks like a second held bubble, and sits on the bath\'s rubber rabbit.</span>' },
+    { id: 'a', title: 'A · Socket', tag: 'fixed corner', blurb: '<b>Always top-left</b>, in a frosted ring with a NEXT tab, drawn smaller than any real bubble. When the held bubble passes over, it goes in front and the socket fades back. <span class="con">Still shares the hold row with the bubble you\'re aiming.</span>' },
+    { id: 'b', title: 'B · HUD pill', tag: 'header', blurb: '<b>A NEXT pill in the header</b>, beside the other pills. Nothing in the box at all. SCORE and BEST share one pill to make room. <span class="con">Farthest from where you\'re aiming, and the BEST figure is smaller.</span>' },
+    { id: 'c', title: 'C · Rides along', tag: 'on the held bubble', blurb: '<b>Sits on top of the held bubble</b> and moves with it, so it\'s always where you\'re looking. <span class="con">Busier at the aim point; on short phones it reaches up under the header.</span>' },
+  ];
+
+  const ICON_LB = '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M4 2h8v3a4 4 0 0 1-8 0z" fill="currentColor"/><path d="M4 3H2v1.5A2.5 2.5 0 0 0 4.5 7M12 3h2v1.5A2.5 2.5 0 0 1 11.5 7" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="7" y="8.5" width="2" height="3" fill="currentColor"/><rect x="4.5" y="11.5" width="7" height="2.5" rx="0.6" fill="currentColor"/></svg>';
+  const ICON_PAUSE = '<svg viewBox="0 0 16 16" width="14" height="14"><rect x="3.5" y="3" width="3" height="10" rx="1" fill="currentColor"/><rect x="9.5" y="3" width="3" height="10" rx="1" fill="currentColor"/></svg>';
+  const ICON_BACK = '<svg viewBox="0 0 16 16" width="16" height="16"><path d="M10 3 5 8l5 5" fill="none" stroke="#3F3550" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  class Phone {
+    constructor(variant) {
+      this.variant = variant;
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.innerHTML = `<h2>${variant.title} <span>· ${variant.tag}</span></h2>`;
+      this.scaler = document.createElement('div'); this.scaler.className = 'scaler';
+      this.frame = document.createElement('div'); this.frame.className = 'frame';
+      this.board = document.createElement('canvas'); this.board.className = 'board';
+      this.ctx = this.board.getContext('2d');
+      this.back = document.createElement('div'); this.back.className = 'fake-back'; this.back.innerHTML = ICON_BACK;
+      this.hud = document.createElement('div'); this.hud.className = 'hud-row';
+      this.hud.innerHTML = (variant.id === 'b'
+        ? '<div class="pill next-pill"><span class="lbl">NEXT</span><canvas></canvas></div>' +
+          '<div class="pill stack"><span class="l1"><span class="lbl">SCORE</span><b class="sc">0</b></span><span class="l2">BEST 4,210</span></div>'
+        : '<div class="pill"><span class="lbl">SCORE</span><b class="sc">0</b></div><div class="pill"><span class="lbl">BEST</span><b>4,210</b></div>') +
+        `<div class="pill icon">${ICON_LB}</div><div class="pill icon">${ICON_PAUSE}</div>`;
+      this.scoreEl = this.hud.querySelector('.sc');
+      this.nextC = this.hud.querySelector('.next-pill canvas');
+      this.frame.append(this.board, this.back, this.hud);
+      this.scaler.append(this.frame);
+      const p = document.createElement('p'); p.className = 'blurb'; p.innerHTML = variant.blurb;
+      cell.append(this.scaler, p);
+      this.cell = cell;
+      this.backLayer = document.createElement('canvas');
+      this.frontLayer = document.createElement('canvas');
+      this.bindInput();
+    }
+
+    layout(z) {
+      const P = PHONES[opts.phone];
+      this.z = z;
+      Object.assign(this.frame.style, { width: P.w + 'px', height: P.h + 'px', transform: `scale(${z})` });
+      Object.assign(this.scaler.style, { width: P.w * z + 'px', height: P.h * z + 'px' });
+      this.cell.style.width = P.w * z + 'px';
+      this.hud.style.height = P.top + CHROME + 'px';
+      this.hud.style.paddingTop = P.top + 'px';
+      this.back.style.top = P.top + (CHROME - 36) / 2 + 'px';
+      this.board.width = P.w * DPR; this.board.height = P.h * DPR;
+      if (this.nextC) { this.nextC.width = this.nextC.height = 28 * DPR; }
+      // As js/game.js resize(): the box fits under the HUD, centred in spare height.
+      const top = P.top + CHROME + 4, bottom = P.bottom + 10;
+      const avail = P.h - top - bottom;
+      const s = Math.min(P.w / VIEW_W, avail / VIEW_H);
+      const spare = Math.max(0, avail - VIEW_H * s);
+      this.v = { w: P.w, h: P.h, s, d: DPR, ox: (P.w - VIEW_W * s) / 2 - VIEW.x0 * s, oy: top + spare / 2 - VIEW.y0 * s };
+      this.buildLayers();
+    }
+
+    buildLayers() {
+      const scene = SCENES[opts.scene];
+      const v = { ...this.v, W, RIM, FLOOR, WALL, x0: VIEW.x0, x1: VIEW.x1 };
+      for (const [layer, draw] of [[this.backLayer, scene.back], [this.frontLayer, scene.front]]) {
+        layer.width = this.board.width; layer.height = this.board.height;
+        const x = layer.getContext('2d');
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.clearRect(0, 0, layer.width, layer.height);
+        draw(x, v);
+      }
+      this.frame.style.background = scene.field;
+    }
+
+    reset() {
+      this.world = new World(W, FLOOR);
+      for (const [t, x, y] of PREFILL) this.world.add(t, x, y, PIECES[t].r).age = 2;
+      for (let i = 0; i < 240; i++) this.world.step(1 / 60);
+      this.idx = 0; this.cur = SEQ(0); this.next = SEQ(1);
+      this.clock = 0; this.dropReadyAt = 0; this.dropAt = -9; this.nextBorn = -9; this.aimX = 200;
+      this.previewSide = 1; this.previewShown = 1; this.previewFade = 1; this.sockAlpha = 1;
+      this.score = 0; this.from = null; this.manualUntil = -1; this.aiming = false;
+    }
+
+    clampAim(x) { const r = PIECES[this.cur].r; return Math.max(r, Math.min(W - r, x)); }
+    handOn() { return opts.hand && this.variant.id !== 'now'; }
+
+    // Where the next bubble is drawn now, for the handoff to start from.
+    origin() {
+      const t = this.next, R = PIECES[t].r, id = this.variant.id;
+      if (id === 'a') return { x: SOCK.x, y: SOCK.y, k: previewR(t) / R };
+      if (id === 'c') { const hx = this.clampAim(this.aimX); return { x: hx, y: HOLD_Y - PIECES[this.cur].r - previewR(t) + 5, k: previewR(t) / R }; }
+      if (id === 'b') {
+        const fr = this.frame.getBoundingClientRect(), r = this.nextC.getBoundingClientRect();
+        const cx = (r.left + r.width / 2 - fr.left) / this.z, cy = (r.top + r.height / 2 - fr.top) / this.z;
+        return { x: (cx - this.v.ox) / this.v.s, y: (cy - this.v.oy) / this.v.s, k: pillR(t) / (R * this.v.s) };
+      }
+      return null;
+    }
+
+    drop() {
+      if (this.clock < this.dropReadyAt) return;
+      const x = this.clampAim(this.aimX);
+      this.from = this.origin();
+      const b = this.world.add(this.cur, x, HOLD_Y, PIECES[this.cur].r); b.vy = 60;
+      this.idx++; this.cur = this.next; this.next = SEQ(this.idx + 1);
+      this.dropAt = this.clock; this.dropReadyAt = this.clock + COOLDOWN;
+      this.nextBorn = this.handOn() ? this.clock + HAND : this.variant.id === 'c' ? this.dropReadyAt : this.clock;
+    }
+
+    step(dt) {
+      this.clock += dt;
+      const w = this.world;
+      w.step(dt);
+      const used = new Set();
+      for (const [a, b] of w.touching) {
+        if (used.has(a) || used.has(b) || a.gone || b.gone || a.tier !== b.tier) continue;
+        used.add(a); used.add(b);
+        const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+        w.remove(a); w.remove(b);
+        if (a.tier === PIECES.length - 1) continue;
+        const t = a.tier + 1;
+        const nb = w.add(t, x, y, PIECES[t].r, { r0: PIECES[a.tier].r });
+        nb.vy = -40; nb.age = 0.4;
+        this.score += POINTS[t];
+      }
+      // Over the rim too long: start this phone over (no game-over card here).
+      let worst = 0;
+      for (const b of w.bodies) {
+        if (b.age > 1 && b.y - b.r < RIM) b.over = (b.over || 0) + dt; else b.over = 0;
+        worst = Math.max(worst, b.over);
+      }
+      if (worst > 2.2) this.reset();
+
+      const ready = this.clock >= this.dropReadyAt;
+      if (this.variant.id === 'now') {
+        // js/game.js stepPreview()
+        if (ready) {
+          const x = this.clampAim(this.aimX), r = PIECES[this.cur].r;
+          const clear = 34 + PIECES[4].r * 0.6 + 10;
+          if (this.previewSide > 0 && x + r > W - clear) this.previewSide = -1;
+          else if (this.previewSide < 0 && x - r < clear) this.previewSide = 1;
+        }
+        if (this.previewShown !== this.previewSide) {
+          this.previewFade -= dt * 8;
+          if (this.previewFade <= 0) { this.previewFade = 0; this.previewShown = this.previewSide; }
+        } else this.previewFade = Math.min(1, this.previewFade + dt * 8);
+      }
+      if (this.variant.id === 'a') {
+        const x = this.clampAim(this.aimX);
+        const over = ready && Math.abs(x - SOCK.x) < PIECES[this.cur].r + SOCK.r + 4;
+        this.sockAlpha += ((over ? 0.3 : 1) - this.sockAlpha) * Math.min(1, dt * 14);
+      }
+    }
+
+    piece(tier, x, y, scale) {
+      const { s, d } = this.v, ctx = this.ctx;
+      const img = RM.sprite(tier, PIECES[tier].r * s * d);
+      const size = (img.width / (s * d)) * scale;
+      ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
+    }
+
+    tab(text, x, y, light, scene) {
+      // A small pill-style label in world space.
+      const ctx = this.ctx, px = 1 / this.v.s;
+      ctx.font = `800 ${10 * px}px ${getComputedStyle(document.body).fontFamily}`;
+      const w = ctx.measureText(text).width + 12 * px, h = 15 * px;
+      ctx.fillStyle = light ? 'rgba(255,255,255,0.95)' : 'rgba(40,36,80,0.85)';
+      ctx.beginPath(); ctx.roundRect(x - w / 2, y - h / 2, w, h, h / 2); ctx.fill();
+      ctx.strokeStyle = light ? 'rgba(63,53,80,0.12)' : 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1 * px; ctx.stroke();
+      ctx.fillStyle = light ? '#7A6E92' : 'rgba(255, 230, 245, 0.85)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, x, y + 0.5 * px);
+    }
+
+    draw() {
+      const ctx = this.ctx, { s, ox, oy, d } = this.v, px = 1 / s;
+      const scene = SCENES[opts.scene], light = !scene.dark, id = this.variant.id;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, this.board.width, this.board.height);
+      ctx.drawImage(this.backLayer, 0, 0);
+      ctx.setTransform(d * s, 0, 0, d * s, d * ox, d * oy);
+
+      ctx.setLineDash([10, 8]); ctx.lineWidth = 3 * px; ctx.strokeStyle = scene.rim;
+      ctx.beginPath(); ctx.moveTo(0, RIM); ctx.lineTo(W, RIM); ctx.stroke(); ctx.setLineDash([]);
+
+      const ready = this.clock >= this.dropReadyAt;
+      const hx = this.clampAim(this.aimX), hy = HOLD_Y + Math.sin(this.clock * 3) * 1.5;
+      let held = null;
+      if (ready) held = { x: hx, y: hy, k: 1 };
+      else if (this.handOn() && this.from) {
+        const e = ease(Math.min(1, (this.clock - this.dropAt) / HAND));
+        held = { x: lerp(this.from.x, hx, e), y: lerp(this.from.y, hy, e), k: lerp(this.from.k, 1, e) };
+      }
+      if (ready) {
+        ctx.strokeStyle = scene.guide; ctx.lineWidth = 2 * px; ctx.setLineDash([4, 6]);
+        ctx.beginPath(); ctx.moveTo(hx, HOLD_Y + PIECES[this.cur].r); ctx.lineTo(hx, FLOOR); ctx.stroke(); ctx.setLineDash([]);
+      }
+      for (const b of this.world.bodies) this.piece(b.tier, b.x, b.y, b.r / b.rTarget);
+
+      const shown = this.clock >= this.nextBorn;
+      const pk = pop(Math.min(1, (this.clock - this.nextBorn) / 0.25));
+
+      if (id === 'now') {
+        const x = this.previewShown > 0 ? W - 34 : 34;
+        ctx.save(); ctx.globalAlpha = this.previewFade;
+        ctx.font = `800 ${11 * px}px ${getComputedStyle(document.body).fontFamily}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = { jar: '#6E6385', bath: '#3E6E7C', night: 'rgba(255, 230, 245, 0.85)' }[opts.scene];
+        ctx.fillText('NEXT', x, HOLD_Y - PIECES[4].r * 0.6 - 8 * px);
+        ctx.globalAlpha = this.previewFade * 0.9;
+        if (shown) this.piece(this.next, x, HOLD_Y, 0.6 * pk);
+        ctx.restore();
+      }
+
+      if (id === 'a') {
+        ctx.save(); ctx.globalAlpha = this.sockAlpha;
+        ctx.fillStyle = light ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.10)';
+        ctx.beginPath(); ctx.arc(SOCK.x, SOCK.y, SOCK.r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = light ? 'rgba(63,53,80,0.14)' : 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1 * px;
+        ctx.beginPath(); ctx.arc(SOCK.x, SOCK.y, SOCK.r + 1.5 * px, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = light ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2 * px;
+        ctx.beginPath(); ctx.arc(SOCK.x, SOCK.y, SOCK.r, 0, Math.PI * 2); ctx.stroke();
+        if (shown) this.piece(this.next, SOCK.x, SOCK.y + 1, (previewR(this.next) / PIECES[this.next].r) * pk);
+        this.tab('NEXT', SOCK.x, SOCK.y - SOCK.r, light, scene);
+        ctx.restore();
+      }
+
+      if (id === 'c' && held && shown) {
+        const cr = PIECES[this.cur].r * held.k, pr = previewR(this.next);
+        ctx.save(); ctx.globalAlpha = 0.92;
+        this.piece(this.next, held.x, held.y - cr - pr * pk + 5, (pr / PIECES[this.next].r) * pk);
+        ctx.restore();
+      }
+
+      if (held) this.piece(this.cur, held.x, held.y, held.k);
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(this.frontLayer, 0, 0);
+
+      if (this.nextC) {
+        const c = this.nextC.getContext('2d');
+        c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.nextC.width, this.nextC.height);
+        if (shown) {
+          const r = pillR(this.next) * DPR * pk;
+          const img = RM.sprite(this.next, pillR(this.next) * DPR);
+          const k = r / (img.width / 2 - 2);
+          const size = img.width * k;
+          c.drawImage(img, (this.nextC.width - size) / 2, (this.nextC.height - size) / 2, size, size);
+        }
+      }
+      this.scoreEl.textContent = this.score.toLocaleString('en-US');
+    }
+
+    toWorldX(clientX) {
+      const r = this.board.getBoundingClientRect();
+      return ((clientX - r.left) / this.z - this.v.ox) / this.v.s;
+    }
+    bindInput() {
+      const b = this.board;
+      b.addEventListener('pointerdown', (e) => {
+        this.aiming = true; this.manualUntil = Infinity;
+        try { b.setPointerCapture(e.pointerId); } catch (_) {}
+        this.aimX = this.clampAim(this.toWorldX(e.clientX));
+      });
+      b.addEventListener('pointermove', (e) => {
+        if (this.aiming || e.pointerType === 'mouse') {
+          this.aimX = this.clampAim(this.toWorldX(e.clientX));
+          if (!this.aiming) this.manualUntil = T + 3;
+        }
+      });
+      b.addEventListener('pointerup', (e) => {
+        if (!this.aiming) return;
+        this.aiming = false; this.aimX = this.clampAim(this.toWorldX(e.clientX));
+        this.drop(); this.manualUntil = T + 4;
+      });
+      b.addEventListener('pointercancel', () => { this.aiming = false; this.manualUntil = T + 4; });
+      b.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !this.aiming) this.manualUntil = T + 1; });
+    }
+  }
+
+  // ---------- page ----------
+  const grid = document.getElementById('grid');
+  const phones = VARIANTS.map((v) => new Phone(v));
+  phones.forEach((p) => grid.append(p.cell));
+
+  function fit() {
+    const P = PHONES[opts.phone];
+    const z = Math.max(0.55, Math.min(1, (window.innerWidth - 40 - 3 * 24 - 2) / (4 * P.w)));
+    phones.forEach((p) => p.layout(z));
+  }
+  function resetAll() { seq.length = 0; seed = 7; T = 0; autoT = 0; phones.forEach((p) => p.reset()); }
+
+  function seg(elId, items, key, after) {
+    const el = document.getElementById(elId);
+    for (const [val, label] of items) {
+      const btn = document.createElement('button');
+      btn.textContent = label;
+      btn.onclick = () => { opts[key] = val; [...el.children].forEach((c) => c.setAttribute('aria-pressed', c === btn)); after(); };
+      btn.setAttribute('aria-pressed', opts[key] === val);
+      el.append(btn);
+    }
+  }
+  seg('scene-seg', SCENE_ORDER.map((id) => [id, SCENES[id].name]), 'scene', () => { RM.clearSprites(); phones.forEach((p) => p.buildLayers()); });
+  seg('phone-seg', Object.entries(PHONES).map(([k, p]) => [k, p.name]), 'phone', fit);
+  for (const key of ['auto', 'hand', 'slow']) {
+    const b = document.getElementById(key);
+    b.onclick = () => { opts[key] = !opts[key]; b.setAttribute('aria-pressed', opts[key]); };
+  }
+  document.getElementById('reset').onclick = resetAll;
+  window.addEventListener('resize', fit);
+
+  let T = 0, autoT = 0, acc = 0, last = performance.now();
+  const STEP = 1 / 60;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000) * (opts.slow ? 0.3 : 1);
+    last = now;
+    acc += dt;
+    let n = 0;
+    while (acc >= STEP && n < 5) {
+      acc -= STEP; n++;
+      if (opts.auto) {
+        T += STEP; autoT += STEP;
+        const aim = 200 + 182 * Math.sin(T * 0.85);
+        for (const p of phones) if (T > p.manualUntil && !p.aiming) p.aimX = p.clampAim(aim);
+        if (autoT >= 1.5) { autoT = 0; for (const p of phones) if (T > p.manualUntil && !p.aiming) p.drop(); }
+      } else T += STEP;
+      for (const p of phones) p.step(STEP);
+    }
+    if (n === 5) acc = 0;
+    for (const p of phones) p.draw();
+    requestAnimationFrame(frame);
+  }
+
+  fit();
+  resetAll();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

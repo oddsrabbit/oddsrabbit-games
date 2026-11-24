@@ -19,7 +19,6 @@
       field: '#EDE3F6',
       rim: 'rgba(120, 100, 160, 0.4)',
       guide: 'rgba(120, 100, 160, 0.28)',
-      label: '#6E6385', // the NEXT label over the preview
       back(x, v) {
         const { W, RIM, FLOOR } = v;
         screen(x, v);
@@ -59,7 +58,6 @@
       field: '#DDF1EE',
       rim: 'rgba(70, 130, 150, 0.4)',
       guide: 'rgba(70, 130, 150, 0.28)',
-      label: '#3E6E7C',
       back(x, v) {
         const { W, RIM, FLOOR } = v, px = 1 / v.s;
         screen(x, v);
@@ -108,7 +106,6 @@
       field: '#1C2148',
       rim: 'rgba(255, 220, 240, 0.55)',
       guide: 'rgba(255, 255, 255, 0.28)',
-      label: 'rgba(255, 230, 245, 0.85)',
       dark: true,
       back(x, v) {
         const { W, RIM, FLOOR } = v;
