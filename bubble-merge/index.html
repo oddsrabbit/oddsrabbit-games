@@ -29,7 +29,8 @@
   </head>
   <body>
     <!-- Full screen: the scene fills it and everything else floats over it as
-         soft pills (round 7, layout B). js/game.js fits the box under the HUD. -->
+         soft pills (round 7, layout B). js/game.js fits the box under the HUD and
+         draws the next bubble in the box's top corner. -->
     <div id="app">
       <main class="field" id="field">
         <canvas id="board" aria-label="The box. Drag to aim, let go to drop."></canvas>
@@ -57,9 +58,6 @@
                 <rect x="9.5" y="3" width="3" height="10" rx="1" fill="currentColor" />
               </svg>
             </button>
-          </div>
-          <div class="pill next-container" aria-label="Next bubble">
-            <canvas id="next" width="26" height="26"></canvas>
           </div>
         </div>
 

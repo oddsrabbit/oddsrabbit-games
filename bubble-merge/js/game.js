@@ -13,6 +13,10 @@
                           // every screen so leaderboard scores stay comparable)
   const WALL = 16;        // wall and floor thickness, drawn outside the play area
   const HOLD_Y = RIM - 48; // where the next bubble waits before it drops
+  // The one after it waits small in a top corner of the box, on the side
+  // away from the held bubble (it swaps corners when the held one comes near).
+  const PREVIEW_SCALE = 0.6;
+  const PREVIEW_INSET = 34; // its centre from the wall: fits the biggest drop size
   const VIEW = { x0: -WALL, x1: W + WALL, y0: -16, y1: FLOOR + WALL };
   const VIEW_W = VIEW.x1 - VIEW.x0;
   const VIEW_H = VIEW.y1 - VIEW.y0;
@@ -32,7 +36,6 @@
   const ctx = board.getContext('2d');
   const scoreEl = $('score');
   const bestEl = $('best');
-  const nextCanvas = $('next');
   const hud = $('hud');
   const toastEl = $('toast');
   const overlay = $('overlay');
@@ -52,6 +55,9 @@
 
   // ---------- game state ----------
   let world, score, cur, next, aimX, dropReadyAt, phase, clock, effects, biggest, danger, dropsMade;
+  // The preview's corner (1 right, -1 left), the corner it's drawn in while it
+  // fades across, its fade, and when the current one appeared (for its pop-in).
+  let previewSide = 1, previewShown = 1, previewFade = 1, nextBorn = 0;
 
   function randomTier() {
     const total = DROP_WEIGHTS.reduce((a, b) => a + b, 0);
@@ -77,8 +83,8 @@
       if (restore.next >= 0 && restore.next < 5) next = restore.next;
       dropsMade = restore.drops || 0;
     }
+    nextBorn = 0; previewSide = previewShown = 1; previewFade = 1;
     updateHud();
-    drawNext();
   }
 
   function saveGame() {
@@ -105,10 +111,10 @@
     b.vy = 60;
     cur = next;
     next = randomTier();
+    nextBorn = clock;
     dropReadyAt = clock + DROP_COOLDOWN;
     dropsMade++;
     Sound.drop();
-    drawNext();
     if (dropsMade === 1) hideToast();
   }
 
@@ -234,12 +240,6 @@
     c.setTransform(d, 0, 0, d, 0, 0);
     c.translate(cx, cy);
     RM.drawPiece(c, tier, R);
-  }
-
-  function drawNext() {
-    const css = 26, d = dpr();
-    if (nextCanvas.width !== css * d) { nextCanvas.width = nextCanvas.height = css * d; }
-    paintIcon(nextCanvas, next, 12, css / 2, css / 2);
   }
 
   let toastTimer = 0;
@@ -400,8 +400,9 @@
     board.width = Math.round(r.width * d);
     board.height = Math.round(r.height * d);
     // The scene fills the screen and the HUD floats over it, so the box fits
-    // in what the HUD leaves. Any spare height (tall phones) is split around
-    // the box, a little more above so it still sits low, near the thumbs.
+    // in what the HUD leaves, centred in any spare height (tall phones).
+    // Aiming reads only the finger's x anywhere on the screen, so the box
+    // needn't sit low for the thumbs.
     const top = hud.getBoundingClientRect().bottom - r.top + 4;
     const bottom = cssPx('--oddsrabbit-safe-bottom') + 10;
     const avail = r.height - top - bottom;
@@ -409,10 +410,9 @@
     const spare = Math.max(0, avail - VIEW_H * s);
     view.s = s;
     view.ox = (r.width - VIEW_W * s) / 2 - VIEW.x0 * s;
-    view.oy = top + spare * 0.6 - VIEW.y0 * s;
+    view.oy = top + spare / 2 - VIEW.y0 * s;
     RM.clearSprites();
     buildSceneLayers();
-    drawNext();
   }
   new ResizeObserver(resize).observe(field);
   function cssPx(name) {
@@ -474,6 +474,7 @@
     }
 
     for (const b of world.bodies) drawBody(b, s, d);
+    if (phase === 'play' || phase === 'paused') drawPreview(scene, px, s, d);
 
     // The held bubble, over the pile.
     if ((phase === 'play' || phase === 'paused') && clock >= dropReadyAt) {
@@ -513,6 +514,43 @@
     }
   }
 
+  // The next bubble, small in a top corner with a NEXT label over it.
+  function drawPreview(scene, px, s, d) {
+    const x = previewShown > 0 ? W - PREVIEW_INSET : PREVIEW_INSET;
+    const t = Math.min(1, (clock - nextBorn) / 0.25);
+    const pop = t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2); // ease out, slight overshoot
+    ctx.save();
+    ctx.globalAlpha = previewFade;
+    ctx.font = `800 ${11 * px}px ui-rounded, "SF Pro Rounded", Nunito, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = scene.label;
+    ctx.fillText('NEXT', x, HOLD_Y - PIECES[4].r * PREVIEW_SCALE - 8 * px);
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = previewFade * 0.9;
+    drawPieceAt(next, x, HOLD_Y, PREVIEW_SCALE * pop, s, d);
+    ctx.restore();
+  }
+
+  // Keeps the preview's corner clear of the held bubble, fading across when
+  // it swaps. The two tests can't both hold, since the box is 400 wide. It
+  // stays put during the drop cooldown, while no bubble is held.
+  function stepPreview(dt) {
+    if (clock >= dropReadyAt) {
+      const x = clampAim(aimX), r = PIECES[cur].r;
+      const clear = PREVIEW_INSET + PIECES[4].r * PREVIEW_SCALE + 10;
+      if (previewSide > 0 && x + r > W - clear) previewSide = -1;
+      else if (previewSide < 0 && x - r < clear) previewSide = 1;
+    }
+    if (previewShown !== previewSide) {
+      previewFade -= dt * 8;
+      if (previewFade <= 0) { previewFade = 0; previewShown = previewSide; }
+    } else {
+      previewFade = Math.min(1, previewFade + dt * 8);
+    }
+  }
+
   function drawBody(b, s, d) {
     drawPieceAt(b.tier, b.x, b.y, b.r / b.rTarget, s, d, b);
   }
@@ -548,6 +586,7 @@
     world.step(STEP);
     if (phase === 'play') { processMerges(); checkOver(STEP); }
     stepEffects(STEP);
+    stepPreview(STEP);
   }
   function frame(now) {
     const dt = Math.min(0.1, (now - last) / 1000);

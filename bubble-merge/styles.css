@@ -71,22 +71,19 @@ canvas, button { -webkit-touch-callout: none; -webkit-user-select: none; user-se
   font-size: 16px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
 }
 /* Label then number on one line, as in 2048's chips. */
-.score-container::before, .best-container::before, .next-container::before {
+.score-container::before, .best-container::before {
   font-size: 11px; font-weight: 800; letter-spacing: .06em; color: var(--pill-label);
 }
 .score-container::before { content: "SCORE"; }
 .best-container::before { content: "BEST"; }
-.next-container::before { content: "NEXT"; }
 .score-container.bump { animation: bump 260ms ease-out; }
 @keyframes bump { 40% { transform: scale(1.08); } }
 .pill.icon { width: 36px; padding: 0; justify-content: center; }
 /* 36px to look at, 44px to hit. */
 .pill.icon::after { content: ""; position: absolute; inset: -4px; }
-.next-container { margin: 6px 0 0 calc(16px + var(--oddsrabbit-safe-left, 0px)); padding: 0 5px 0 12px; gap: 8px; }
-.next-container canvas { width: 26px; height: 26px; }
 
 .toast {
-  position: absolute; left: 50%; top: calc(var(--oddsrabbit-safe-top, 0px) + 112px); transform: translateX(-50%);
+  position: absolute; left: 50%; top: calc(var(--oddsrabbit-safe-top, 0px) + var(--oddsrabbit-chrome-height, 56px) + 56px); transform: translateX(-50%);
   max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 22px;
   background: var(--pill); color: var(--ink);
   -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);

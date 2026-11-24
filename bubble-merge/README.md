@@ -42,8 +42,8 @@ boards of made-up players, so the leaderboard, submissions and Share can be trie
 
 - Drag across the box to aim and let go to drop (on desktop, the mouse aims and a click drops; the
   arrow keys aim and Space drops). There's a half-second wait between drops.
-- The next drop is always one of the five smallest sizes, weighted toward the small end. The HUD
-  shows what's coming next.
+- The next drop is always one of the five smallest sizes, weighted toward the small end. A small
+  preview in a top corner of the box shows what's coming next.
 - Two bubbles of the same colour that touch merge into the next size at their midpoint, growing
   into place. Making size *n* (1-based) scores the *n*th triangular number: 1, 3, 6, 10 … 66.
   Two of the biggest (pink) pop and leave the box for +100.
@@ -110,10 +110,12 @@ jar with a pile inside and the next bubble waiting above (idea 1 of 5 in round 8
 
 Layout B from round 7 of the mocks: the scene fills the screen and the HUD floats over it as soft
 white pills. In the header row, beside the app's back button: SCORE, BEST, a trophy for the
-leaderboard (only where the host serves one) and pause. Under it on the left, NEXT. The box sits
-on the bottom above the home indicator, scaled to fit what the HUD leaves (`resize()` in
-`js/game.js`). Pause, game over and share are white rounded cards with pill buttons. A first game
-starts with a "Drag to aim, let go to drop" pill that goes once you drop. `edge` mode per
+leaderboard (only where the host serves one) and pause. The next bubble isn't in the HUD: it waits
+small, with a NEXT label, in a top corner of the box beside the held bubble, and fades to the other
+corner when the held one comes near (`drawPreview()` and `stepPreview()` in `js/game.js`). The box
+is scaled to fit what the HUD leaves and centred in any spare height (`resize()`). Pause, game
+over and share are white rounded cards with pill buttons. A first game starts with a "Drag to aim,
+let go to drop" pill that goes once you drop. `edge` mode per
 [`docs/game-header-guidelines.md`](../docs/game-header-guidelines.md), and the page's background
 follows the scene, for the status bar.
 
