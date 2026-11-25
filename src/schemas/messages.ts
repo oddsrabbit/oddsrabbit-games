@@ -670,6 +670,15 @@ export const BridgeRequestSchema = z.discriminatedUnion('type', [
     correlationId: CorrelationId,
     payload: z.object({ game: MatchGame }),
   }),
+  // Up for another game after a finished two-player match (`want`, default
+  // true), or take it back (`want: false`). Nobody is asked: the other
+  // player's view shows `rematch.theirs`, and when they say yes too the next
+  // match starts with both seated. Answers `{ match, next }`.
+  z.object({
+    type: z.literal('matches.rematch'),
+    correlationId: CorrelationId,
+    payload: z.object({ matchUuid: MatchUuid, want: z.boolean().optional() }),
+  }),
   // People the viewer may invite: connected on the follow graph in either
   // direction. Scoped to matches rather than a general social read, so it
   // exposes exactly the set `matches.create` will accept and nothing more.
@@ -1333,6 +1342,30 @@ export const MatchSummarySchema = z.object({
 export type MatchSummary = z.infer<typeof MatchSummarySchema>;
 
 
+// Head-to-head between the viewer and the other player in this game, counted
+// from the viewer's side: finished two-player matches, this one included.
+export const MatchSeriesSchema = z.object({
+  wins: z.number().int().nonnegative().default(0),
+  losses: z.number().int().nonnegative().default(0),
+  draws: z.number().int().nonnegative().default(0),
+});
+
+export type MatchSeries = z.infer<typeof MatchSeriesSchema>;
+
+// Where "up for another game" stands on a finished two-player match, for a
+// seated viewer (`matches.rematch`). `mine`: the viewer has said yes. `theirs`:
+// the other player has, and the ask still stands (it lapses after 7 days).
+// `nextMatchUuid`: both said yes and this is the game it started. There is
+// nothing to decline: leaving it is the pass, and the asker is never told.
+export const MatchRematchSchema = z.object({
+  mine: z.boolean().default(false),
+  theirs: z.boolean().default(false),
+  nextMatchUuid: z.string().uuid().nullable().default(null),
+  series: MatchSeriesSchema.default({}),
+});
+
+export type MatchRematch = z.infer<typeof MatchRematchSchema>;
+
 // The full per-viewer picture of one match. `view` has ALREADY been filtered
 // for the requesting seat by the server's rules class: it is the only game
 // state that ever crosses the bridge, and a client cannot ask for more.
@@ -1341,9 +1374,22 @@ export const MatchViewSchema = MatchSummarySchema.extend({
   // fourth). Cleared once the match starts.
   joinCode: JoinCode.nullable().default(null),
   view: z.record(z.unknown()),
+  // Null on anything but a finished two-player match, and from a server that
+  // predates rematches. Display data: a malformed one reads as null rather
+  // than failing the whole view.
+  rematch: MatchRematchSchema.nullable().catch(null).default(null),
 });
 
 export type MatchView = z.infer<typeof MatchViewSchema>;
+
+// Result of `matches.rematch`: the finished match's view, and the next
+// match's once both players have said yes (now or earlier).
+export const MatchRematchResultSchema = z.object({
+  match: MatchViewSchema,
+  next: MatchViewSchema.nullable().default(null),
+});
+
+export type MatchRematchResult = z.infer<typeof MatchRematchResultSchema>;
 
 // Result of `matches.nudge`: when the reminder went out. The sender's next
 // nudge for this match is accepted a day after it.

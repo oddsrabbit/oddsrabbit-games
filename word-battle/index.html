@@ -321,11 +321,35 @@
           <h2 class="game-over-title"></h2>
           <p class="game-over-text"></p>
           <ol class="over-scores"></ol>
+          <p class="over-series" hidden></p>
           <div class="over-highlights"></div>
           <div class="game-over-actions">
-            <button type="button" class="rematch-button primary" hidden>Rematch</button>
-            <button type="button" class="moves-button" hidden>Moves</button>
-            <button type="button" class="game-over-back">Back to games</button>
+            <!-- Plenty on already: this many games wait on the player. -->
+            <button type="button" class="busy-button primary is-go" hidden></button>
+            <!-- The rematch area, announced as it changes: an ask arriving
+                 from the other player, or the next game starting. -->
+            <div class="rematch-area" aria-live="polite">
+              <div class="rematch-asked" hidden>
+                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg>
+                <div>
+                  <p class="rematch-asked-title">You’re up for another game</p>
+                  <p class="rematch-asked-text"></p>
+                </div>
+              </div>
+              <button type="button" class="rematch-undo" hidden>Changed my mind</button>
+              <div class="rematch-theirs" hidden>
+                <p class="rematch-theirs-title"></p>
+                <button type="button" class="rematch-accept primary">Play again</button>
+                <p class="rematch-theirs-text"></p>
+              </div>
+              <button type="button" class="rematch-button primary" hidden>Rematch</button>
+              <p class="rematch-hint" hidden>They’ll see you’re up for another. If they pass, it just closes quietly.</p>
+            </div>
+            <button type="button" class="find-new-button over-outline" hidden>Find a new opponent</button>
+            <div class="over-quiet">
+              <button type="button" class="moves-button" hidden>Moves</button>
+              <button type="button" class="game-over-back">Back to games</button>
+            </div>
           </div>
           </div>
         </div>

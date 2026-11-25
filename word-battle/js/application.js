@@ -163,6 +163,18 @@
     waitShuffle: $(".wait-shuffle"),
     over: $(".game-over"),
     rematchButton: $(".rematch-button"),
+    rematchArea: $(".rematch-area"),
+    rematchHint: $(".rematch-hint"),
+    rematchAsked: $(".rematch-asked"),
+    rematchAskedText: $(".rematch-asked-text"),
+    rematchUndo: $(".rematch-undo"),
+    rematchTheirs: $(".rematch-theirs"),
+    rematchTheirsTitle: $(".rematch-theirs-title"),
+    rematchTheirsText: $(".rematch-theirs-text"),
+    rematchAccept: $(".rematch-accept"),
+    findNewButton: $(".find-new-button"),
+    busyButton: $(".busy-button"),
+    overSeries: $(".over-series"),
     movesButton: $(".moves-button"),
     overTitle: $(".game-over-title"),
     overText: $(".game-over-text"),
@@ -222,6 +234,10 @@
     open: false,
     seats: 2,
     creating: false,
+    // A matches.rematch call in flight.
+    rematching: false,
+    // The end card has asked for the list once (renderNext's busy count).
+    listFetched: false,
     sending: false,
     rows: [],
     listSignature: "",
@@ -308,6 +324,9 @@
   // as it stands (two players) or drop them and play on (three or four). The
   // server holds the same thresholds and has the last word.
   var NUDGE_AFTER_MS = 24 * 3600 * 1000;
+  // Games waiting on the player before the end card points at them instead of
+  // at another game ("6 games are waiting on you").
+  var BUSY_THRESHOLD = 5;
   var CLAIM_AFTER_MS = 14 * 24 * 3600 * 1000;
 
   function waitedMs(view) {
@@ -1556,6 +1575,7 @@
     if (state.creating) return;
     state.creating = true;
     els.quickButtons.forEach(function (b) { b.disabled = true; });
+    els.findNewButton.disabled = true;
     OR.matches.quick({ game: GAME }).then(function (view) {
       haptic("success");
       enterMatch(view);
@@ -1564,6 +1584,7 @@
     }).then(function () {
       state.creating = false;
       els.quickButtons.forEach(function (b) { b.disabled = false; });
+      els.findNewButton.disabled = false;
     });
   }
 
@@ -1609,6 +1630,7 @@
       if (!isCurrent(view) || view.version === state.match.version) return;
       var wasMyTurn = state.match && state.match.isMyTurn;
       var wasFinding = state.match && state.match.status === "lobby" && state.match.matchmaking;
+      var before = state.match && state.match.rematch;
       applyView(view, false);
       if (wasFinding && view.status === "active") {
         var them = opponentsOf(view)[0];
@@ -1617,7 +1639,8 @@
       }
       celebrateOpponent(view);
       if (!wasMyTurn && view.isMyTurn) haptic("light");
-    }, { onError: function () {} });
+      announceRematch(before, view);
+    }, { onError: function () {}, followRematch: true });
   }
 
   function stopWatching() {
@@ -2659,16 +2682,16 @@
     var done = view.status === "finished" || view.status === "abandoned";
     els.over.hidden = !done;
     if (!done) return;
-    els.rematchButton.hidden = !(view.status === "finished" && meIn(view) && OR.capabilities.has("matches.create"));
     var moves = movesOf(view);
     els.movesButton.hidden = !moves.length;
     var me = meIn(view);
     clear(els.overScores);
     clear(els.overHighlights);
+    renderNext(view);
     if (view.status === "abandoned") {
       els.overKicker.textContent = "Table closed";
       els.overTitle.textContent = "This game never got going";
-      els.overText.textContent = "Nobody took the empty seat in time.";
+      els.overText.textContent = "The table closed before everyone was in.";
       return;
     }
 
@@ -2738,10 +2761,169 @@
     setTimeout(function () { clear(els.overBurst); }, 2800);
   }
 
-  // Same table, same board type, new game. Opponents the viewer can still
-  // invite are seated straight away; anyone they cannot (a stranger who came
-  // in on a join code) gets a spare seat, so the new game opens as a lobby
-  // with a code to send them.
+  // ---------------------------------------------------- what comes next
+
+  // The rematch the card can offer: "up for another" (matches.rematch) on a
+  // finished two-player game when the host and server both know it, else null
+  // and the card keeps the old Rematch button.
+  function rematchOf(view) {
+    if (!view || view.status !== "finished" || !meIn(view) || !view.rematch) return null;
+    if (!OR.capabilities.has("matches.rematch") || typeof OR.matches.rematch !== "function") return null;
+    return view.rematch;
+  }
+
+  // Games waiting on the player, from the list the game already holds.
+  function waitingOnMe(view) {
+    return state.rows.filter(function (r) {
+      return r.matchUuid !== view.matchUuid && r.status === "active" && !isOut(r) && r.isMyTurn;
+    }).length;
+  }
+
+  // The rematch area is a live region and renderNext runs on every view:
+  // rewriting the same words would read them out again.
+  function setText(node, text) {
+    if (node.textContent !== text) node.textContent = text;
+  }
+
+  // The bottom half of the end card: what the player can do next. Each player
+  // answers on their own card; nobody is asked, so nobody is turned down.
+  //   - nothing said yet: Play @x again, and the line saying a pass is silent;
+  //   - they said yes (frame 3): the status box and Changed my mind;
+  //   - the other player did (frame 4): their banner and Play again, with no
+  //     decline — leaving it is the pass;
+  //   - the next game exists: Go to the new game.
+  // With BUSY_THRESHOLD games already waiting, the card points at those
+  // first, Play again drops to the outlined style, and Find a new opponent
+  // goes. Without matches.rematch, the old Rematch button.
+  function renderNext(view) {
+    var finished = view.status === "finished" && !!meIn(view);
+    // Opened straight from a push or link, the game holds no list yet, and the
+    // busy count reads it. Fetched once, quietly, then the card redraws.
+    if (finished && !state.listFetched && !state.rows.length) {
+      state.listFetched = true;
+      loadList(true).then(function () {
+        if (state.match && state.match.matchUuid === view.matchUuid) renderNext(state.match);
+      });
+    }
+    var rm = rematchOf(view);
+    var them = opponentsOf(view)[0];
+    var who = them ? "@" + them.username : "them";
+    var waiting = finished ? waitingOnMe(view) : 0;
+    var busy = waiting >= BUSY_THRESHOLD;
+    var asked = !!rm && !rm.nextMatchUuid && rm.mine;
+    var theirs = !!rm && !rm.nextMatchUuid && !rm.mine && rm.theirs;
+
+    els.busyButton.hidden = !busy;
+    els.busyButton.textContent = waiting + " games are waiting on you";
+
+    els.rematchAsked.hidden = !asked;
+    setText(els.rematchAskedText, "It starts when " + who + " says yes. Nothing for you to do until then.");
+    els.rematchUndo.hidden = !asked;
+
+    els.rematchTheirs.hidden = !theirs;
+    setText(els.rematchTheirsTitle, who + " is up for another game");
+    setText(els.rematchTheirsText, "Starts right away. Not today? Just leave it: " + who + " isn’t told either way.");
+    els.rematchAccept.classList.toggle("primary", !busy);
+    els.rematchAccept.classList.toggle("over-outline", busy);
+
+    var button = els.rematchButton;
+    if (rm && rm.nextMatchUuid) {
+      button.hidden = false;
+      setText(button, "Go to the new game");
+    } else if (rm) {
+      button.hidden = asked || theirs;
+      setText(button, "Play " + who + " again");
+    } else {
+      button.hidden = !(finished && OR.capabilities.has("matches.create"));
+      setText(button, "Rematch");
+    }
+    var outlined = busy && !(rm && rm.nextMatchUuid);
+    button.classList.toggle("primary", !outlined);
+    button.classList.toggle("over-outline", outlined);
+    button.disabled = state.rematching || state.creating;
+    els.rematchUndo.disabled = state.rematching;
+    els.rematchAccept.disabled = state.rematching;
+    els.rematchHint.hidden = !(rm && !rm.nextMatchUuid && !asked && !theirs && !busy);
+    els.rematchArea.hidden = button.hidden && !asked && !theirs;
+
+    els.findNewButton.hidden = busy || !state.canQuick;
+    els.findNewButton.textContent = asked ? "Play someone new meanwhile" : "Find a new opponent";
+
+    renderSeries(view, rm, them);
+  }
+
+  // "You and @x: you lead 2–1". Hidden after a first game.
+  function renderSeries(view, rm, them) {
+    var s = rm && rm.series;
+    var games = s ? s.wins + s.losses + s.draws : 0;
+    els.overSeries.hidden = !them || games <= 1;
+    if (els.overSeries.hidden) return;
+    clear(els.overSeries);
+    var line = s.wins > s.losses ? "you lead " + s.wins + "–" + s.losses
+      : s.losses > s.wins ? "they lead " + s.losses + "–" + s.wins
+      : "level at " + s.wins + "–" + s.losses;
+    if (s.draws) line += " · " + s.draws + (s.draws === 1 ? " draw" : " draws");
+    els.overSeries.className = "over-series" + (s.wins > s.losses ? " is-ahead" : s.losses > s.wins ? " is-behind" : "");
+    els.overSeries.appendChild(document.createTextNode("You and @" + them.username + ": "));
+    els.overSeries.appendChild(el("strong", "", line));
+  }
+
+  // The watcher saw the other player answer while this card was open.
+  function announceRematch(before, view) {
+    var now = view.rematch;
+    if (!now || !before || view.status !== "finished") return;
+    var them = opponentsOf(view)[0];
+    var who = them ? "@" + them.username : "They";
+    if (now.nextMatchUuid && !before.nextMatchUuid) {
+      haptic("success");
+      toast(who + " said yes — your new game has started.");
+    } else if (now.theirs && !before.theirs && !now.mine) {
+      haptic("light");
+    }
+  }
+
+  function onRematchButton() {
+    var rm = rematchOf(state.match);
+    if (rm && rm.nextMatchUuid) { openMatch(rm.nextMatchUuid); return; }
+    if (rm) { askRematch(true); return; }
+    rematch();
+  }
+
+  // Up for another (`want`), or Changed my mind. Records the answer; nothing
+  // starts until both have said yes, and then the server starts it.
+  function askRematch(want) {
+    var m = state.match;
+    if (!m || state.rematching) return;
+    state.rematching = true;
+    renderNext(m);
+    OR.matches.rematch({ matchUuid: m.matchUuid, want: want }).then(function (res) {
+      var here = state.screen === "match" && state.match && state.match.matchUuid === m.matchUuid;
+      if (want && res.next) {
+        haptic("success");
+        if (here) enterMatch(res.next);
+        else toast("Your new game has started. It’s in your games.");
+        return;
+      }
+      if (want) haptic("light");
+      if (!isCurrent(res.match)) return;
+      applyView(res.match, false);
+      // The watch lets go of an old finished game nobody had asked about, so
+      // start it again now there is an answer to wait for.
+      if (want) startWatching(m.matchUuid);
+    }).catch(function (err) {
+      toast(errorText(err, want ? "Couldn't say you're up for another." : "Couldn't take that back."), true);
+    }).then(function () {
+      state.rematching = false;
+      if (state.match && state.match.matchUuid === m.matchUuid) renderNext(state.match);
+    });
+  }
+
+  // The fallback Rematch: a challenge to the same players, same board type.
+  // Everyone is invited, strangers included (invites have been open to
+  // anyone since 2026-10-08). Only when the server refuses someone — they
+  // take challenges from people they follow, or the stranger-invite cap is
+  // full — does it fall back to inviting the people the viewer is connected
+  // to and opening a seat with a code for the rest.
   function rematch() {
     var m = state.match;
     if (!m || state.creating) return;
@@ -2754,30 +2936,37 @@
       els.rematchButton.disabled = false;
       els.rematchButton.textContent = "Rematch";
     }
-    fetchInvitable().then(function (res) {
-      var ok = {};
-      res.people.forEach(function (p) { ok[p.uuid] = true; });
-      var invitees = others.filter(function (p) { return ok[p.uuid]; });
-      var strangers = others.filter(function (p) { return !ok[p.uuid]; });
+    function create(invitees, open) {
       return OR.matches.create({
         game: m.game,
         maxPlayers: m.players.length,
         invitees: invitees.map(function (p) { return p.uuid; }),
-        open: strangers.length > 0
-      }).then(function (view) {
-        settle();
-        haptic("success");
-        // The player may have left the finished game while this was in flight.
-        if (state.screen !== "match" || !state.match || state.match.matchUuid !== m.matchUuid) {
-          toast("Your rematch is ready in your games.");
-          return;
-        }
-        enterMatch(view);
-        if (strangers.length) {
-          toast("Send the code to " + strangers.map(function (p) { return "@" + p.username; }).join(", ")
-            + " — you can only invite people you follow or who follow you.");
-        }
+        open: open
       });
+    }
+    var strangers = [];
+    create(others, false).catch(function (err) {
+      var code = errorCode(err);
+      if (code !== "match/not-connected" && code !== "match/invite-limit") throw err;
+      return fetchInvitable().then(function (res) {
+        var ok = {};
+        res.people.forEach(function (p) { ok[p.uuid] = true; });
+        strangers = others.filter(function (p) { return !ok[p.uuid]; });
+        return create(others.filter(function (p) { return ok[p.uuid]; }), true);
+      });
+    }).then(function (view) {
+      settle();
+      haptic("success");
+      // The player may have left the finished game while this was in flight.
+      if (state.screen !== "match" || !state.match || state.match.matchUuid !== m.matchUuid) {
+        toast("Your rematch is ready in your games.");
+        return;
+      }
+      enterMatch(view);
+      if (strangers.length) {
+        toast("Send the code to " + strangers.map(function (p) { return "@" + p.username; }).join(", ")
+          + " so they can sit down.");
+      }
     }).catch(function (err) {
       settle();
       toast(errorText(err, "Couldn't set up the rematch."), true);
@@ -4007,7 +4196,11 @@
     els.passButton.addEventListener("click", pass);
     els.shareCodeButton.addEventListener("click", shareCode);
     els.overBack.addEventListener("click", backToList);
-    els.rematchButton.addEventListener("click", rematch);
+    els.rematchButton.addEventListener("click", onRematchButton);
+    els.rematchAccept.addEventListener("click", function () { askRematch(true); });
+    els.rematchUndo.addEventListener("click", function () { askRematch(false); });
+    els.findNewButton.addEventListener("click", quickMatch);
+    els.busyButton.addEventListener("click", backToList);
     els.movesButton.addEventListener("click", showMoves);
     bindPlayerDrag();
     els.recentMoves.addEventListener("click", showMoves);

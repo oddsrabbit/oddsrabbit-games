@@ -895,9 +895,52 @@ button.chip-bag::after { content: " ›"; }
 }
 .screen-match.is-over .turn-strip,
 .screen-match.is-over .last-move { display: none; }
-.moves-button, .game-over-back {
-  border-radius: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--card);
+/* Moves and Back to games: the two quiet buttons on the bottom row. */
+.over-quiet { display: flex; gap: 8px; width: 100%; }
+.game-over-actions .over-quiet button {
+  flex: 1 1 0; width: auto; padding: 12px 8px; border-radius: 12px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 14px;
 }
+.game-over-actions .over-quiet button:hover { color: var(--ink); }
+.over-outline {
+  border-radius: 12px; cursor: pointer; border: 1px solid var(--line); background: var(--card); font-weight: 600;
+}
+.over-outline:disabled { opacity: 0.45; cursor: default; }
+/* "N games are waiting on you": the turn colour, since it opens your turns. */
+.primary.is-go { background: var(--turn); }
+
+/* You and @x: you lead 2–1. */
+.over-series {
+  margin: 2px 0 0; width: 100%; box-sizing: border-box; padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 60%, var(--card)); font-size: 14px;
+}
+.over-series strong { color: var(--ink); }
+.over-series.is-ahead strong { color: var(--up-ink); }
+.over-series.is-behind strong { color: var(--down-ink); }
+
+.rematch-area { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.rematch-hint { margin: 0 4px 4px; font-size: 13px; color: var(--muted); }
+/* After the player said yes: nothing more for them to do. */
+.rematch-asked {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 12px;
+  background: var(--up-bg); color: var(--up-ink); text-align: left;
+}
+.rematch-asked svg { flex: none; margin-top: 1px; }
+.rematch-asked p { margin: 0; }
+.rematch-asked-title { font-weight: 700; }
+.rematch-asked .rematch-asked-text { margin-top: 2px; font-size: 13px; color: var(--ink); }
+.game-over-actions .rematch-undo {
+  align-self: center; width: auto; padding: 12px 16px; border-radius: 12px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--muted); font-size: 14px; text-decoration: underline;
+}
+/* The other player is up for another: one button, no decline. */
+.rematch-theirs {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 12px 12px; border-radius: 14px;
+  border: 1px solid var(--warn-line); background: var(--warn-bg);
+}
+.rematch-theirs p { margin: 0; }
+.rematch-theirs-title { font-weight: 700; color: var(--ink); }
+.rematch-theirs-text { font-size: 13px; color: var(--warn-ink); }
 
 /* ---- tiles left + move log (dialogs) */
 .tile-count-grid {

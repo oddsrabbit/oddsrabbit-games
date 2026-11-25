@@ -33,6 +33,13 @@
 //   chat=0          host without matches.chat / matches.chatSend
 //   four=1          add a four-player game a few moves in, with three-digit
 //                   scores (the player row, the Moves log), opened first
+//   rematch=1       add a finished two-player game against @hopper, opened
+//                   first, for matches.rematch: Play @hopper again, and
+//                   @hopper says yes 5 s after you ask (not with opp=none).
+//                   rematch=theirs: @hopper has already asked.
+//                   rematch=mine: you have already asked (and wait).
+//                   rematch=0: a host without matches.rematch (old Rematch).
+//   waiting=n       add n games where it's your move (n>=5: the busy card)
 // Chat: the first game opens with a few messages from @pip_fan, one unread.
 // An opponent answers whatever you send 2.5 s later (not with opp=none), and
 // a message containing "spam" is refused the way the platform would.
@@ -116,6 +123,10 @@ function view(m) {
     chatUnread: m.chat.length - m.chatSeen,
     view: { board: m.board, layout: m.layout, myRack: me.rack.slice(), rackCounts, bagCount: m.bag.length, lastWords: m.lastWords, passes: m.passes, history: m.history },
     lastMove: m.lastMove,
+    // MatchService's rematch key: finished two-player games only.
+    rematch: m.status === 'finished' && m.players.length === 2
+      ? { mine: !m.next && !!m.askedMine, theirs: !m.next && !!m.askedTheirs, nextMatchUuid: m.next || null, series: m.series || { wins: 1, losses: 0, draws: 0 } }
+      : null,
   };
 }
 
@@ -254,6 +265,7 @@ if (q.get('matches') !== '0') caps.push('matches.create', 'matches.join', 'match
 if (q.get('matches') !== '0' && q.get('newverbs') !== '0') caps.push('matches.check', 'matches.quick');
 if (q.get('matches') !== '0' && q.get('chat') !== '0') caps.push('matches.chat', 'matches.chatSend');
 if (q.get('matches') !== '0' && q.get('search') !== '0') caps.push('matches.searchPlayers');
+if (q.get('matches') !== '0' && q.get('newverbs') !== '0' && q.get('rematch') !== '0') caps.push('matches.rematch');
 function send(msg) { frame.contentWindow.postMessage(msg, '*'); }
 function init() {
   send({ type: 'init', user: q.get('user') === '0' ? null : { ...ME, avatar: null, createdAt: null },
@@ -309,6 +321,21 @@ function handle(type, p) {
       return msg;
     }
     case 'matches.get': if (!m) throw { code: 'match/not-found', message: 'No such match.' }; return view(m);
+    // Up for another: both yes starts the next game, seated and active.
+    case 'matches.rematch': {
+      if (!m) throw { code: 'match/not-found', message: 'No such match.' };
+      if (m.status !== 'finished' || m.players.length !== 2) throw { code: 'match/invalid', message: 'Only a finished two-player game can be played again.' };
+      const want = p.want !== false;
+      if (!m.next) {
+        m.askedMine = want;
+        if (want && m.askedTheirs) startNext(m);
+        else if (want && q.get('opp') !== 'none') {
+          setTimeout(() => { if (m.askedMine && !m.next) { m.askedTheirs = true; startNext(m); } }, 5000);
+        }
+      }
+      m.version++;
+      return { match: view(m), next: m.next ? view(matches[m.next]) : null };
+    }
     case 'matches.invitable': return PEOPLE;
     case 'matches.searchPlayers': {
       const qy = String(p.query || '').trim().toLowerCase();
@@ -397,6 +424,32 @@ function handle(type, p) {
     }
   }
   return undefined;
+}
+
+function startNext(m) {
+  const other = m.players[1];
+  const next = newMatch([{ uuid: other.uuid, username: other.username }], m.game);
+  next.turn = Math.random() < 0.5 ? 0 : 1;
+  m.next = next.uuid; m.version++;
+  opponentsMove(next);
+}
+
+// waiting=n: games where it's your move, for the busy card.
+for (let i = 0; i < Number(q.get('waiting') || 0); i++) newMatch([PEOPLE[i % PEOPLE.length]], 'tiles', 0, i * 3600e3);
+// rematch=1 / theirs: a finished game against @hopper, shown first.
+if (q.has('rematch')) {
+  const r = newMatch([PEOPLE[1]], 'tiles', 0, 2 * 3600e3);
+  r.players[0].rack.splice(0, 4, 'Q', 'U', 'I', 'Z');
+  place(r, 0, [{ row: 7, col: 6, letter: 'Q' }, { row: 7, col: 7, letter: 'U' }, { row: 7, col: 8, letter: 'I' }, { row: 7, col: 9, letter: 'Z' }]);
+  pass(r, 1); pass(r, 0); pass(r, 1);
+  r.players[1].score = 300; r.players[0].score = 312;
+  r.status = 'finished'; r.winner = 0;
+  r.series = { wins: 2, losses: 1, draws: 0 };
+  r.askedTheirs = q.get('rematch') === 'theirs';
+  r.askedMine = q.get('rematch') === 'mine';
+  const rest = Object.values(matches).filter((x) => x !== r);
+  for (const k of Object.keys(matches)) delete matches[k];
+  [r, ...rest].forEach((x) => { matches[x.uuid] = x; });
 }
 
 window.addEventListener('message', (e) => {

@@ -509,3 +509,139 @@ test('a refused chat message does not retire the verb', async () => {
   );
   assert.equal(sdk.capabilities.has('matches.chatSend'), true);
 });
+
+const NEXT = '33333333-3333-4333-8333-333333333333';
+
+function finishedView(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return wireView({ status: 'finished', turnSeat: null, winnerSeat: 0, isMyTurn: false, ...over });
+}
+
+const ASKED = { mine: true, theirs: false, nextMatchUuid: null, series: { wins: 2, losses: 1, draws: 0 } };
+
+test('rematch sends the uuid and want, and resolves both views', async () => {
+  const t = fakeTransport((type) =>
+    type === 'matches.rematch'
+      ? Promise.resolve({
+          match: finishedView({ version: 9, rematch: { ...ASKED, mine: false, nextMatchUuid: NEXT } }),
+          next: wireView({ matchUuid: NEXT, version: 1 }),
+        })
+      : reject('bridge/unknown-type')
+  );
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init({ capabilities: ['matches.get', 'matches.rematch'] });
+  const result = await sdk.matches.rematch({ matchUuid: UUID, want: true });
+  assert.deepEqual(t.calls.at(-1), { type: 'matches.rematch', payload: { matchUuid: UUID, want: true } });
+  assert.equal(result.match.rematch?.nextMatchUuid, NEXT);
+  assert.deepEqual(result.match.rematch?.series, { wins: 2, losses: 1, draws: 0 });
+  assert.equal(result.next?.matchUuid, NEXT);
+});
+
+test('rematch: the first yes answers with no next match', async () => {
+  const t = fakeTransport(() => Promise.resolve({ match: finishedView({ rematch: ASKED }), next: null }));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init({ capabilities: ['matches.get', 'matches.rematch'] });
+  const result = await sdk.matches.rematch({ matchUuid: UUID });
+  assert.equal(result.next, null);
+  assert.equal(result.match.rematch?.mine, true);
+});
+
+test('rematch rejects on a malformed result', async () => {
+  const t = fakeTransport(() => Promise.resolve({ next: null }));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init({ capabilities: ['matches.get', 'matches.rematch'] });
+  await assert.rejects(sdk.matches.rematch({ matchUuid: UUID }), /malformed/);
+});
+
+test('a view keeps rematch, defaults it to null, and drops a malformed one to null', async () => {
+  const answers = [
+    finishedView({ rematch: ASKED }),
+    finishedView(),
+    finishedView({ rematch: { mine: 'yes' } }),
+  ];
+  const t = fakeTransport(() => Promise.resolve(answers.shift()));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  assert.deepEqual((await sdk.matches.get({ matchUuid: UUID })).rematch, ASKED);
+  assert.equal((await sdk.matches.get({ matchUuid: UUID })).rematch, null, 'older server');
+  assert.equal((await sdk.matches.get({ matchUuid: UUID })).rematch, null, 'malformed is display data, not a broken view');
+});
+
+test('watch with followRematch keeps polling a finished match until the rematch is decided', async () => {
+  const answers = [
+    finishedView({ version: 5, rematch: ASKED }),
+    finishedView({ version: 5, rematch: ASKED }),
+    finishedView({ version: 6, rematch: { ...ASKED, mine: false, nextMatchUuid: NEXT } }),
+  ];
+  const t = fakeTransport(() => Promise.resolve(answers.shift() ?? finishedView({ version: 7 })));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  const seen: MatchView[] = [];
+  const stop = sdk.matches.watch(UUID, (view) => seen.push(view), { followRematch: true });
+  await tick();
+  for (let i = 0; i < 3; i += 1) {
+    t.fire('pause');
+    t.fire('resume');
+    await tick();
+  }
+  assert.deepEqual(seen.map((v) => v.version), [5, 6], 'the answer arrives on the open card');
+  assert.equal(seen.at(-1)!.rematch?.nextMatchUuid, NEXT);
+  assert.equal(t.calls.length, 3, 'and the watch lets go once it is decided');
+  stop();
+});
+
+test('watch without followRematch still stops on the finished view', async () => {
+  const t = fakeTransport(() => Promise.resolve(finishedView({ rematch: ASKED })));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  const stop = sdk.matches.watch(UUID, () => undefined);
+  await tick();
+  t.fire('pause');
+  t.fire('resume');
+  await tick();
+  assert.equal(t.calls.length, 1);
+  stop();
+});
+
+test('watch with followRematch stops on a finished match with no rematch to follow', async () => {
+  const t = fakeTransport(() => Promise.resolve(finishedView()));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  const stop = sdk.matches.watch(UUID, () => undefined, { followRematch: true });
+  await tick();
+  t.fire('pause');
+  t.fire('resume');
+  await tick();
+  assert.equal(t.calls.length, 1);
+  stop();
+});
+
+const NOBODY = { mine: false, theirs: false, nextMatchUuid: null, series: { wins: 0, losses: 0, draws: 0 } };
+
+test('watch with followRematch lets go of an old finished match nobody has asked about', async () => {
+  // wireView's updatedAt is months back: a game opened from the list.
+  const t = fakeTransport(() => Promise.resolve(finishedView({ rematch: NOBODY })));
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  const stop = sdk.matches.watch(UUID, () => undefined, { followRematch: true });
+  await tick();
+  t.fire('pause');
+  t.fire('resume');
+  await tick();
+  assert.equal(t.calls.length, 1);
+  stop();
+});
+
+test('watch with followRematch keeps a match that just ended, though nobody has asked yet', async () => {
+  const t = fakeTransport(() =>
+    Promise.resolve(finishedView({ rematch: NOBODY, updatedAt: new Date().toISOString() }))
+  );
+  const sdk = new OddsRabbitSDK(t.transport);
+  t.init();
+  const stop = sdk.matches.watch(UUID, () => undefined, { followRematch: true });
+  await tick();
+  t.fire('pause');
+  t.fire('resume');
+  await tick();
+  assert.equal(t.calls.length, 2, 'the other player may still say yes');
+  stop();
+});

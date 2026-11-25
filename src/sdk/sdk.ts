@@ -21,6 +21,7 @@ import {
   MatchSummarySchema,
   MatchNudgeResultSchema,
   MatchCheckResultSchema,
+  MatchRematchResultSchema,
   MatchChatMessageSchema,
   MatchChatPageWireSchema,
   InvitablePlayerSchema,
@@ -54,6 +55,9 @@ import {
   type MatchSummary,
   type MatchNudgeResult,
   type MatchCheckResult,
+  type MatchRematch,
+  type MatchRematchResult,
+  type MatchSeries,
   type MatchChatMessage,
   type MatchChatPage,
   type MatchListFilter,
@@ -109,6 +113,9 @@ export type {
   MatchListFilter,
   MatchNudgeResult,
   MatchCheckResult,
+  MatchRematch,
+  MatchRematchResult,
+  MatchSeries,
   MatchChatMessage,
   MatchChatPage,
   InvitablePlayer,
@@ -264,6 +271,20 @@ export interface MatchWatchOptions {
    * verb unsupported, in which case the watch stops on its own.
    */
   onError?: (error: unknown) => void;
+  /**
+   * Keep polling a FINISHED two-player match while its rematch is undecided
+   * (`view.rematch` set and no `nextMatchUuid`), so an open end card learns
+   * the other player said yes. Only while the viewer has said yes
+   * (`rematch.mine`) or the match ended within `MATCH_REMATCH_WATCH_MAX_MS`:
+   * an old game opened from the list stops on its finished view, and a watch
+   * that stopped must be started again after `matches.rematch` to follow
+   * the ask. Polls every `MATCH_REMATCH_WATCH_INTERVAL_MS`
+   * or `intervalMs`, whichever is longer, for at most
+   * `MATCH_REMATCH_WATCH_MAX_MS` after the finished view arrives, and still
+   * pauses while the page is hidden. Off by default: without it the watch
+   * stops on the terminal view, as it always has.
+   */
+  followRematch?: boolean;
 }
 
 export interface RankPayload {
@@ -413,6 +434,11 @@ function parseRows<T>(
 // unknown message type — the transport has no global timeout), resolve null so
 // the app can fall back to bundled content instead of hanging.
 const CONTENT_DAILY_TIMEOUT_MS = 4000;
+
+/** `followRematch` poll interval on a finished match: an answer, not a move. */
+const MATCH_REMATCH_WATCH_INTERVAL_MS = 15000;
+/** How long `followRematch` keeps an idle end card polling. */
+const MATCH_REMATCH_WATCH_MAX_MS = 30 * 60 * 1000;
 
 /** Default `matches.watch` poll interval. Turn-based; nobody is waiting on a frame. */
 const MATCH_WATCH_INTERVAL_MS = 5000;
@@ -746,6 +772,24 @@ export interface OddsRabbitGlobal {
      * Gate the button on `capabilities.has('matches.quick')`.
      */
     quick(payload: { game: string }): Promise<MatchView>;
+    /**
+     * Say you are up for another game after a finished two-player match, or
+     * take it back with `want: false` (default true). Nobody is asked, so
+     * nobody is turned down: the other player's view carries
+     * `rematch.theirs`, and when they say yes too the next match starts with
+     * both seated and active. Resolves `{ match, next }`: the finished
+     * match's view (with `rematch` updated) and the next match's view once
+     * it exists — just now, or earlier (`next` is set on a late tap too).
+     * A block between the players never errors; the ask simply never
+     * matches. Rejects `match/invalid` for anything but a finished
+     * two-player match.
+     *
+     * Read the state from `view.rematch`. Watch with `followRematch: true`
+     * to see the other player's answer arrive on an open end card.
+     *
+     * Gate the button on `capabilities.has('matches.rematch')`.
+     */
+    rematch(payload: { matchUuid: string; want?: boolean }): Promise<MatchRematchResult>;
     /**
      * A page of the match's conversation, oldest message first. The
      * conversation is the platform's own chat — two seats share their DM,
@@ -1384,6 +1428,12 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       }),
     quick: (payload: { game: string }): Promise<MatchView> =>
       this.requestMatchView('matches.quick', payload),
+    rematch: (payload: { matchUuid: string; want?: boolean }): Promise<MatchRematchResult> =>
+      this.request<unknown>('matches.rematch', payload).then((result): MatchRematchResult => {
+        const parsed = MatchRematchResultSchema.safeParse(result);
+        if (!parsed.success) throw new Error('matches.rematch: malformed result');
+        return parsed.data;
+      }),
     // Rejects on failure like `check`: an empty page from a broken host would
     // read as "nobody has said anything", which is a lie a player acts on.
     chat: (payload: MatchChatPayload): Promise<MatchChatPage> =>
@@ -1425,6 +1475,8 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       let inFlight = false;
       let lastVersion: number | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null;
+      // When the first finished view arrived, for `followRematch`'s cap.
+      let finishedSeenAt: number | null = null;
 
       const clearTimer = (): void => {
         if (timer !== null) clearTimeout(timer);
@@ -1434,7 +1486,10 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
       const schedule = (): void => {
         clearTimer();
         if (stopped || paused) return;
-        timer = setTimeout(tick, intervalMs);
+        timer = setTimeout(
+          tick,
+          finishedSeenAt === null ? intervalMs : Math.max(intervalMs, MATCH_REMATCH_WATCH_INTERVAL_MS)
+        );
       };
 
       const tick = (): void => {
@@ -1450,9 +1505,23 @@ class OddsRabbitSDK implements OddsRabbitGlobal {
             }
             // Deliver the terminal view, then let go: nothing about a finished
             // match changes, and a poll that never ends is a battery drain the
-            // player cannot see.
-            if (view.status === 'finished' || view.status === 'abandoned') {
+            // player cannot see. The one exception, when asked for, is a
+            // rematch still undecided — and only for so long.
+            if (view.status === 'abandoned') {
               stop();
+            } else if (view.status === 'finished') {
+              const now = Date.now();
+              if (finishedSeenAt === null) finishedSeenAt = now;
+              // Worth waiting on only if the viewer has asked, or the game
+              // just ended and the other player may still. A finished match's
+              // `updatedAt` is when it ended: an ask doesn't move it.
+              const rm = view.rematch;
+              const endedAt = Date.parse(view.updatedAt);
+              const fresh = now - endedAt < MATCH_REMATCH_WATCH_MAX_MS;
+              const follow = !!rm && rm.nextMatchUuid === null && (rm.mine || fresh);
+              if (!options.followRematch || !follow || now - finishedSeenAt >= MATCH_REMATCH_WATCH_MAX_MS) {
+                stop();
+              }
             }
           })
           .catch((error: unknown) => {
