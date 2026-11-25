@@ -533,7 +533,9 @@
     const key = t < 0 ? 'empty' : t >= 1 ? next + ':' + nextEl.width : '';
     if (key && key === nextPainted) return;
     nextPainted = key;
-    const pop = t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2);
+    // At t = 0 the curve is 0 give or take rounding (-2e-15), and a negative
+    // radius makes arc() throw, so clamp it.
+    const pop = t >= 1 ? 1 : Math.max(0, 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2));
     if (t >= 0) paintIcon(nextEl, next, nextR(next) * pop, 14, 14);
     else nextEl.getContext('2d').clearRect(0, 0, nextEl.width, nextEl.height);
   }

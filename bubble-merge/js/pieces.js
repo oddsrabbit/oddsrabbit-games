@@ -41,6 +41,9 @@
    * The light is fixed to the screen, so bubbles are drawn upright.
    */
   function drawPiece(x, tier, R) {
+    // Nothing to draw, and arc() and the gradients throw on a negative radius,
+    // which would stop the game's frame loop.
+    if (!(R > 0)) return;
     const c = PIECES[tier].rgb;
     x.save();
     x.beginPath();
