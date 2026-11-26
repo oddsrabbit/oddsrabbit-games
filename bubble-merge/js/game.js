@@ -537,7 +537,13 @@
     // radius makes arc() throw, so clamp it.
     const pop = t >= 1 ? 1 : Math.max(0, 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2));
     if (t >= 0) paintIcon(nextEl, next, nextR(next) * pop, 14, 14);
-    else nextEl.getContext('2d').clearRect(0, 0, nextEl.width, nextEl.height);
+    else {
+      // paintIcon leaves the context scaled and translated to the centre, so
+      // reset it or the clear misses the top-left quarter of the old bubble.
+      const c = nextEl.getContext('2d');
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clearRect(0, 0, nextEl.width, nextEl.height);
+    }
   }
 
   // Where the pill's bubble is, in world units, for the handoff to start from.
