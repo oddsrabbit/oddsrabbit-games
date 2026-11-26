@@ -17,6 +17,8 @@ npm run build                        # → dist/rabbit-pets/
 
 The deploy workflow ships `dist/rabbit-pets/` to `apps.oddsrabbit.com/rabbit-pets/` (see the root README's *Deploying*), without its source map. `dist/sdk-v1.js` is a copy for `dev/harness.html` only.
 
+The build also writes `dist/rabbit-pets/portraits.json`: the hash of the portrait for every look (coat, ears, head and neck outfit). OddsRabbit checks a published portrait against it before showing her on a public profile, so a hand-drawn one never leaves the owner's home screen (`src/portraitList.ts`). It ships with `main.js`, so new art and its list go live together.
+
 New bridge verbs go in the root `src/` (schema, SDK) and the hosts. This game picks them up from source straight away.
 
 ## How it works
@@ -84,6 +86,7 @@ src/
   collectibles.ts what she finds, and the shelf's sets
   journal.ts     the journal
   social.ts      the friends snapshot (and widget contract), gifts
+  portraitList.ts every portrait she can be drawn in, for portraits.json
   tuning.ts      every number
   localtime.ts   wall-clock helpers in an explicit time zone
   rng.ts         seeded randomness

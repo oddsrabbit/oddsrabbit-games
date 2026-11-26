@@ -12,6 +12,7 @@
 import * as esbuild from 'esbuild';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 const watch = process.argv.includes('--watch');
 const BUILD_ID = process.env.BUILD_ID || String(Date.now());
@@ -54,6 +55,24 @@ const devOpts = {
   logLevel: 'warning',
 };
 
+// portraits.json: every portrait the game can draw, by look, so OddsRabbit can tell
+// her real portrait from a drawing someone published by hand (src/portraitList.ts).
+// Bundled for Node into dist/tools/, which is never uploaded, then imported to run.
+async function writePortraitList() {
+  await esbuild.build({
+    entryPoints: ['src/portraitList.ts'],
+    outfile: 'dist/tools/portraitList.mjs',
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node18',
+    logLevel: 'warning',
+  });
+  const { portraitList } = await import(pathToFileURL('dist/tools/portraitList.mjs').href);
+  const list = portraitList((input) => createHash('sha1').update(input).digest('hex'));
+  await writeFile('dist/rabbit-pets/portraits.json', JSON.stringify(list));
+}
+
 async function copyAssets() {
   const html = await readFile('index.html', 'utf8');
   await Promise.all([
@@ -75,10 +94,14 @@ if (watch) {
   await ctx.watch();
   await (await esbuild.context(devOpts)).watch();
   await copyAssets();
+  // Written once at start, not on each rebuild: it takes a few seconds, and only the
+  // uploaded build needs it current.
+  await writePortraitList();
   console.log('Watching for changes (Ctrl+C to stop)...');
 } else {
   await esbuild.build(buildOpts);
   await esbuild.build(devOpts);
   await copyAssets();
+  await writePortraitList();
   console.log('Build complete.');
 }
